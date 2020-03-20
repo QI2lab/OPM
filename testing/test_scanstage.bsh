@@ -1,0 +1,139 @@
+import java.awt.geom.Point2D;
+import org.micromanager.display.DisplayWindow;
+import org.micromanager.MultiStagePosition;
+import org.micromanager.SequenceSettings;
+import org.micromanager.api.AcquisitionOptions;
+import org.micromanager.data.Coords;
+import org.micromanager.data.Datastore;
+import org.micromanager.data.Image;
+import org.micromanager.data.Metadata;
+import org.micromanager.data.Metadata.MetadataBuilder;
+import org.micromanager.data.SummaryMetadata;
+import org.micromanager.data.SummaryMetadataBuilder;
+
+import mmcorej.*;
+
+import java.awt.geom.Point2D;
+import java.lang.System;
+import java.lang.Math;
+import java.text.SimpleDateFormat;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import ij.gui.GenericDialog;
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.process.ImageProcessor;
+import ij.process.FloatProcessor;
+
+boolean display_acq=false;
+
+// assign the core to mmc variable
+mmc = mm.getCore();
+
+// clean up any existing acquisitions
+mmc.stopSequenceAcquisition();
+mmc.clearCircularBuffer();
+
+// get focus device
+z_stage = mmc.getFocusDevice();
+
+//Pull acquisition settings from MDA window
+acqSettings = mm.acquisitions().getAcquisitionSettings();
+rootDir = acqSettings.root;
+rootDirUnique = mm.data().getUniqueSaveDirectory(rootDir);
+
+//Create multipagetiff datatstore
+Datastore store = mm.data().createMultipageTIFFDatastore(rootDirUnique,true,true);
+
+//Create a display for the datastore
+if (display_acq) {
+	DisplayWindow display = mm.displays().createDisplay(store);
+	mm.displays().manage(store);
+}
+//Setup scan
+
+port = "COM14";
+// First give it the correct MOVREL by going down and then back up
+command = "1SCAN X? Y=1 Z=9 F=0";
+mmc.setSerialPortCommand(port, command, "\r");
+answer = mmc.getSerialPortAnswer(port, "\r\n");
+print("Setting up scan axis: "+answer);
+
+command = "SPEED X=0.002";
+mmc.setSerialPortCommand(port, command, "\r");
+answer = mmc.getSerialPortAnswer(port, "\r\n");
+print("Setting up X speed: "+answer);
+
+command = "SPEED Y=0.002";
+mmc.setSerialPortCommand(port, command, "\r");
+answer = mmc.getSerialPortAnswer(port, "\r\n");
+print("Setting up Y speed: "+answer);
+
+float exposure=50.0;
+mmc.setExposure(exposure);
+int num_images = (int)(0.2 / (.002 * exposure*.001));
+
+command = "1SCANR X=-2.8 Y=-3.0 R=50";
+mmc.setSerialPortCommand(port, command, "\r");
+answer = mmc.getSerialPortAnswer(port, "\r\n");
+print("Setting up scan: "+answer);
+
+int stage_pos=0;
+
+//Create Coordinates builder object
+Coords.CoordsBuilder builder = mm.data().getCoordsBuilder();
+
+command = "1SCAN";
+mmc.setSerialPortCommand(port, command, "\r");
+answer = mmc.getSerialPortAnswer(port, "\r\n");
+print("Starting scan: "+answer);
+
+// start acquisition sequence with camera in internal mode for fastest acquisition
+mmc.startSequenceAcquisition(num_images, 0, true);
+
+// execute acquisition until no more images are left in the buffer
+while (mmc.getRemainingImageCount() > 0 || mmc.isSequenceRunning(mmc.getCameraDevice())) {
+	// if there are images in the buffer, grab and process
+	if (mmc.getRemainingImageCount() > 0) {
+		// convert top image in buffer to imageProcessor
+		TaggedImage tagged = mmc.popNextTaggedImage();
+		Image image = mm.data().convertTaggedImage(tagged);
+
+		Point2D.Double point = mmc.getXYStagePosition();
+		xNow = point.getX();
+		yNow = point.getY();
+		zNow = mmc.getPosition(z_stage);
+		
+		//Create metadata object for image
+		MetadataBuilder mdb = image.getMetadata().copy();
+		md = mdb.positionName("Pos-"+stage_pos).xPositionUm(xNow).yPositionUm(yNow).zPositionUm(zNow).build();
+			
+		//Build datastore coordinates for image
+		//SIM patterns are currently stored in the time channel
+		builder.stagePosition(stage_pos);
+		Coords coords = builder.build();
+
+		//Create second image with metadata and datastore coordinates
+		image_toDataStore = image.copyWith(coords, md);
+		
+		//Place images into dataStore
+		store.putImage(image_toDataStore);
+		stage_pos++;
+	}
+	// Wait for another image to arrive.
+	else {
+		mmc.sleep(Math.min(.5 * exposure, 10));
+	}
+}
+
+// clean up acquistion
+mmc.stopSequenceAcquisition();
+mmc.clearCircularBuffer();
+
+//Finish writing data to disk
+store.freeze();
+
+//Close dataStore object
+store.close();	
+
