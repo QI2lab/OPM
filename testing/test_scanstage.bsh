@@ -27,17 +27,24 @@ import ij.ImageStack;
 import ij.process.ImageProcessor;
 import ij.process.FloatProcessor;
 
-String setTigerCommand(String port,String command,boolean checkbusy) {
+// function to send/receive commands from Tiger controller
+// checks if commands were received / response sent correctly
+// checkbusy flag checks if stage is still executing move
 
+String setTigerCommand(String port,String command,boolean checkbusy) {
+	
 	String answer="";
 	send_success=false;
+	
+	// make sure command and response were received
 	while (!send_success) {
+
+		// send command
 		exception_occured=false;
 		try {
 			mmc.setSerialPortCommand(port, command, "\r");
 		}
 		catch (Exception ex) {
-			print("1st send error. Wait, then try again.");
 			mmc.sleep(100);
 			send_success=false;
 			exception_occured=true;
@@ -46,13 +53,13 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 			send_success=true;
 		}
 
+		// get response
 		send_success=false;
 		exception_occured=false;
 		try {
 			answer = mmc.getSerialPortAnswer(port, "\r\n");
 		}
 		catch (Exception ex) {
-			print("1st receive error. Wait, then try again.");
 			mmc.sleep(100);
 			send_success=false;
 			exception_occured=true;
@@ -62,17 +69,19 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 		}
 	}
 
+	// checkbusy flag active, check if stage is moving
 	if (checkbusy) {
 		answer="";
 		send_success=false;
-		
+
+		// make sure command and response were received
 		while (!send_success) {
+			//send command
 			exception_occured=false;
 			try {
 				mmc.setSerialPortCommand(port, "STATUS", "\r");
 			}
 			catch (Exception ex) {
-				print("1st check send. Wait, then try again.");
 				mmc.sleep(100);
 				send_success=false;
 				exception_occured=true;
@@ -82,6 +91,7 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 			}
 		}
 
+		// get response
 		send_success=false;
 		exception_occured=false;
 		
@@ -89,7 +99,6 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 			answer = mmc.getSerialPortAnswer(port, "\r\n");
 		}
 		catch (Exception ex) {
-			print("1st check receive. Wait, then try again.");
 			mmc.sleep(100);
 			send_success=false;
 			exception_occured=true;
@@ -97,18 +106,20 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 		if (!exception_occured) {
 			send_success=true;
 		}
-		
+
+		// stage responded busy. check again.
 		while (!answer.matches("N")) {
 			answer="";
 			send_success=false;
-			
+
+			// make sure command and response were received
 			while (!send_success) {
+				// send command
 				exception_occured=false;
 				try {
 					mmc.setSerialPortCommand(port, "STATUS", "\r");
 				}
 				catch (Exception ex) {
-					print("Repeat check send. Wait, then try again.");
 					mmc.sleep(100);
 					send_success=false;
 					exception_occured=true;
@@ -118,6 +129,7 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 				}
 			}
 
+			// get response
 			send_success=false;
 			exception_occured=false;
 
@@ -125,7 +137,6 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 				answer = mmc.getSerialPortAnswer(port, "\r\n");
 			}
 			catch (Exception ex) {
-				print("Repeat check receive. Wait, then try again.");
 				mmc.sleep(100);
 				send_success=false;
 				exception_occured=true;
@@ -136,10 +147,32 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 		}
 	}
 
+	// return final answer from Tiger
 	return answer;
 }
 
+// user settings
+
+// --------------------------------
+
+// exposure time
+float exposure_ms = 50.;	// (ms)
+
+// scan settings
+float overlap = 0.1;			// (%)
+float start_y = -3.0;		// (mm)
+float end_y = +5.0;			// (mm)
+float start_x = 8.5;			// (mm)
+float end_x = 13.5;			// (mm)
+
+// tiger controller port
+port = "COM15";
+
+// display aquisition flag
+// should be false unless running a small scan
 boolean display_acq=false;
+
+// --------------------------------
 
 // assign the core to mmc variable
 mmc = mm.getCore();
@@ -151,105 +184,114 @@ mmc.clearCircularBuffer();
 // get focus device
 z_stage = mmc.getFocusDevice();
 
-//Pull acquisition settings from MDA window
-acqSettings = mm.acquisitions().getAcquisitionSettings();
-rootDir = acqSettings.root;
-rootDirUnique = mm.data().getUniqueSaveDirectory(rootDir);
+// pull acquisition settings from MDA window
+acq_settings = mm.acquisitions().getAcquisitionSettings();
+root_dir = acq_settings.root;
+root_dir_unique = mm.data().getUniqueSaveDirectory(root_dir);
 
-//Create multipagetiff datatstore
-Datastore store = mm.data().createMultipageTIFFDatastore(rootDirUnique,false,true);
+// Create multipagetiff datatstore
+Datastore store = mm.data().createMultipageTIFFDatastore(root_dir_unique,false,true);
 
-//Create a display for the datastore
+// Create a display for the datastore
 if (display_acq) {
 	DisplayWindow display = mm.displays().createDisplay(store);
 	mm.displays().manage(store);
 }
-//Setup scan
 
-port = "COM15";
+// Setup scan
 
-float pixel_size = 0.116; 															// (um)
-float overlap = 0.1;																	// (%)
-float exposure_ms = 50.;															// (ms)
-float exposure_s = exposure_ms / 1000.; 										// (s)
-float scan_rate = 0.008;															// (mm/s)
-float z_nyquist = 0.4 / 1000.;													// (mm)
-int images_to_ignore = Math.round(z_nyquist/(exposure_s*scan_rate));	// (# images)
-		
-mmc.setExposure(exposure_ms);
+// calculate scan properties
 
-float start_y = -3.0;														// (mm)
-float end_y = +5.0;															// (mm)
-float start_x = 8.5;															// (mm)
-float end_x = 13.5;															// (mm)
+float pixel_size_um = 0.116; 						// (um)
+float scan_step_mm = pixel_size_um / 1000.;	// (mm)
+float exposure_s = exposure_ms / 1000.; 		// (s)
+float scan_rate = scan_step / exposure_s;		// (mm/s)
+
 float scan_distance = Math.abs(start_y-end_y);						// (mm)
 float tile_step_um = (2020.*pixel_size) * (1-overlap); 		 	// (um)
 float tile_step_mm = (2020.*pixel_size) * (1-overlap) * .001; 	// (mm)
 float tile_step_asi = (2020.*pixel_size) * (1-overlap) * 10.0; // (.1 um)
 
-int num_cam_fires = Math.round(scan_distance / (scan_rate * exposure_s));
-int num_images = Math.round(num_cam_fires/images_to_ignore);
+int num_images = Math.round(scan_distance / (scan_rate * exposure_s));
 int num_tiles = Math.round((Math.abs(Math.abs(start_x)-Math.abs(end_x))/tile_step_mm));
 
-print("Number of camera acquisitions per scan strip: "+num_cam_fires);
-print("Number of stored images per scan strip: "+num_images);
+print("Scan rate: "+scan_rate+" mm/s");
+print("Number of camera acquisitions per scan strip: "+num_images);
 print("Number of strips: "+num_tiles);
 print("Total images: "+(num_images*num_tiles));
 
+//--------------------------------
+
+// setup camera
+
+// set to fast readout
+
+// set trigger to START
+
+// turn off error correction
+
+// set ROI
+
+// set exposure
+mmc.setExposure(exposure_ms);
+
+// setup Tiger controller and move to initial position
+
+// set tiling stage to a fast speed
 command = "SPEED X=.5";
 answer = setTigerCommand(port,command,false);
-print("Changing X speed to fast for initial move.");
-mmc.sleep(50);
+print("Set tiling stage speed to fast.");
 
+// move tiling stage to initial position
 command = "MOVE X="+start_x*10000;
 answer = setTigerCommand(port,command,true);
-print("Moved X axis to start position of: "+start_x);
-mmc.sleep(50);
+print("Moved tiling stage to start position of: "+start_x);
 
+// set slow scan stage to a fast speed
 command = "SPEED Y=.5";
 answer = setTigerCommand(port,command,false);
-print(answer);
-print("Changing Y speed to fast for initial move.");
-mmc.sleep(50);
+print("Set scan stage speed to fast for initial move.");
 
+// move slow scan stage to initial position
 command = "MOVE Y="+start_y*10000;
 answer = setTigerCommand(port,command,true);
-print(answer);
-print("Moved Y axis to: "+start_y);
-mmc.sleep(50);
+print("Moved scan stage to: "+start_y);
 
+// set slow scan stage to constant rate slow scan speed
 command = "SPEED Y="+scan_rate;
 answer = setTigerCommand(port,command,false);
-print(answer);
-print("Setting Y speed to slow scan speed.");
-mmc.sleep(50);
+print("Set scan stage speed to slow.");
 
+// set slow scan stage to true 1D scan with no backlash
 command = "1SCAN X? Y=1 Z=9 F=0";
 answer = setTigerCommand(port,command,false);
-print("Setting up scan axes");
-mmc.sleep(50);
+print("Set to true 1D slow scan");
 
+// set range for slow scan stage
 command = "1SCANR X="+start_y+" Y="+end_y+" R=50";
 answer = setTigerCommand(port,command,false);
-print(answer);
-print("Setting up slow scan range.");
-mmc.sleep(50);
+print("Set slow scan range.");
 
-//Create Coordinates builder object
+// create Coordinates builder object
 Coords.CoordsBuilder builder = mm.data().getCoordsBuilder();
 
+// initialize tiling counters
 int x_counter=0;
 int stage_pos=0;
 
 while (x_counter < num_tiles) {
 
+	// initialize slow scan counters
 	int y_counter=0;
-	int image_counter=0;
-	int total_counter=0;
-	
+
+	// grab X and Z position
+	Point2D.Double point = mmc.getXYStagePosition();
+	x_now = point.getX();
+	z_now = mmc.getPosition(z_stage);
+
+	// start scan
 	command = "1SCAN";
 	answer = setTigerCommand(port,command,false);
-	print(answer);
 	print("Running slow scan... ");
 
 	// start acquisition sequence with camera in internal mode for fastest acquisition
@@ -263,88 +305,82 @@ while (x_counter < num_tiles) {
 			TaggedImage tagged = mmc.popNextTaggedImage();
 			Image image = mm.data().convertTaggedImage(tagged);
 
-			//if (image_counter==0) {
-	
-				Point2D.Double point = mmc.getXYStagePosition();
-				xNow = point.getX();
-				yNow = point.getY();
-				zNow = mmc.getPosition(z_stage);
-				
-				//Create metadata object for image
-				MetadataBuilder mdb = image.getMetadata().copy();
-				md = mdb.positionName("Pos_"+x_counter+"_"+y_counter).xPositionUm(xNow).yPositionUm(yNow).zPositionUm(zNow).build();
+			// grab current y stage position	
+			Point2D.Double point = mmc.getXYStagePosition();
+			y_now = point.getY();
+			
+			//Create metadata object for image
+			MetadataBuilder mdb = image.getMetadata().copy();
+			md = mdb.positionName("Pos_x"+x_counter+"_y"+y_counter).xPositionUm(xNow).yPositionUm(yNow).zPositionUm(zNow).build();
 					
-				//Build datastore coordinates for image
-				builder.stagePosition(stage_pos);
-				Coords coords = builder.build();
+			//Build datastore coordinates for image
+			builder.stagePosition(stage_pos);
+			Coords coords = builder.build();
 		
-				//Create second image with metadata and datastore coordinates
-				image_toDataStore = image.copyWith(coords, md);
+			//Create second image with metadata and datastore coordinates
+			image_toDataStore = image.copyWith(coords, md);
 				
-				//Place images into dataStore
-				store.putImage(image_toDataStore);
-				y_counter++;
-				
-				stage_pos++;
-	
-				int test_counter = y_counter%1000;
-				if (test_counter==0) {
-					//print("Total camera fires:" +total_counter);
-					print("At strip "+x_counter+" of "+num_tiles+" total strips. Acquired "+y_counter+" images out of "+num_images+" for this strip so far...");
-				}
-				//image_counter++;
-			//}
-			//else {
-			//	if (image_counter<(images_to_ignore)) {
-			//		image_counter++;
-			//	}
-			//	else {image_counter=0;}
-			//}
-			total_counter++;
+			//Place image into dataStore
+			store.putImage(image_toDataStore);
+
+			// increment slow scan counters
+			y_counter++;
+			stage_pos++;
+
+			// output progress report
+			int test_counter = y_counter%1000;
+			if (test_counter==0) {
+				//print("Total camera fires:" +total_counter);
+				print("At strip "+(x_counter+1)+" of "+num_tiles+" total strips. Acquired "+y_counter+" images out of "+num_images+" for this strip so far...");
+			}
 		}
-		// Wait for another image to arrive.
+		// no images in buffer, wait for another image to arrive.
 		else {
 			mmc.sleep(Math.min(.5 * exposure_ms, 10));
 		}
 	}
 
-	// clean up acquistion
+	// clean up slow scan acquistion
 	mmc.stopSequenceAcquisition();
 	mmc.clearCircularBuffer();
+	
+	// wait to give fly back a chance to finish and controller to return to visible
+	mmc.sleep(2000);
 
-	print("Acquried images when loop exited: "+y_counter+" out of total camera fires: "+total_counter);
-
+	// make sure the correct number of images were acquired
 	if (y_counter == num_images) {
-		
+
+		// check if fly back has finished and that controller is available
 		command = "STATUS";
 		answer = setTigerCommand(port,command,true);
-		print(answer);
-		print("Y axis has reset.");
-		mmc.sleep(5000);
-		
+		print("Scan stage has reset to initial position.");
+
+		// increment tiling counter
 		x_counter++;
-	
+
+		// move tiling stage (overlap)*(large image size)
 		command = "MOVREL X="+tile_step_asi;
 		answer = setTigerCommand(port,command,true);
-		print(answer);
-		print("Moved X axis to: "+(start_x+(x_counter*tile_step_mm)));
-		mmc.sleep(50);
-	
+		print("Moved tiling stage to: "+(start_x+(x_counter*tile_step_mm)));
 	}
+	// something went wrong
 	else {
 		print("An error occurred during image scanning...");
 
+		// set slow scan stage to fast speed
 		command = "SPEED Y=.5";
 		answer = setTigerCommand(port,command,false);
-		print(answer);
-		print("Changing Y speed to fast.");
-		mmc.sleep(50);
-		
+		print("Set scan stage speed to fast.");
+
+		// fly back to initial slow scan position
 		command = "MOVE Y="+start_y*10000;
 		answer = setTigerCommand(port,command,true);
-		print(answer);
-		print("Moved Y axis to: "+start_y);
-		mmc.sleep(50);
+		print("Moved scan stage to: "+start_y);
+
+		// fly back to initial tiling position
+		command = "MOVE X="+start_x*10000;
+		answer = setTigerCommand(port,command,true);
+		print("Moved tiling stage to: "+start_x);
 		
 		exit;
 		break;
