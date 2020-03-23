@@ -1,4 +1,4 @@
-import java.awt.geom.Point2D;
+// imports
 import org.micromanager.display.DisplayWindow;
 import org.micromanager.MultiStagePosition;
 import org.micromanager.SequenceSettings;
@@ -24,8 +24,6 @@ import java.util.regex.Pattern;
 import ij.gui.GenericDialog;
 import ij.ImagePlus;
 import ij.ImageStack;
-import ij.process.ImageProcessor;
-import ij.process.FloatProcessor;
 
 // function to send/receive commands from Tiger controller
 // checks if commands were received / response sent correctly
