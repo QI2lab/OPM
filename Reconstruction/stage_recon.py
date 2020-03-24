@@ -16,23 +16,16 @@ import npy2bdv
 import gc
 import sys
 import getopt
-
-# this is just a wrapper because the stage_recon function
-# expects ndims==3 but our blocks will have ndim==4
-def last3dims(f):
-
-    def func(array):
-        return f(array[0])[None, ...]
-    return func
+import warnings
 
 # perform stage scanning reconstruction
-def stage_recon(data,params):
+def stage_recon(data,parameters):
 
     # unwrap parameters 
-    theta = params[0]                   # (degrees)
-    distance = params[1]                # (nm)
-    pixel_size = params[2]              # (nm)
-    [num_images,ny,nx]=data.shape()     # (pixels)
+    theta = parameters[0]             # (degrees)
+    distance = parameters[1]          # (nm)
+    pixel_size = parameters[2]        # (nm)
+    [num_images,ny,nx]=data.shape     # (pixels)
 
     # change step size from physical space (nm) to camera space (pixels)
     pixel_step = distance/pixel_size    # (pixels)
@@ -41,17 +34,17 @@ def stage_recon(data,params):
     scan_end = num_images * pixel_step  # (pixels)
 
     # calculate properties for final image
-    final_ny = np.ceil(scan_end+ny*np.cos(theta*np.pi/180)).astype(int) # (pixels)
-    final_nz = np.ceil(ny*np.sin(theta*np.pi/180)).astype(int)          # (pixels)
-    final_nx = int(nx)                                                  # (pixels)
+    final_ny = int(np.ceil(scan_end+ny*np.cos(theta*np.pi/180))) # (pixels)
+    final_nz = int(np.ceil(ny*np.sin(theta*np.pi/180)))         # (pixels)
+    final_nx = int(nx)                                          # (pixels)
 
     # create final image
-    output = np.zeros([final_nz, final_ny, final_nx])   # (pixels,pixels,pixels)
+    output = np.zeros([final_nz, final_ny, final_nx],dtype=np.float32)  # (pixels,pixels,pixels)
 
     # precalculate trig functions for scan angle
-    tantheta = np.tan(theta * np.pi/180) # (float)
-    sintheta = np.sin(theta * np.pi/180) # (float)
-    costheta = np.cos(theta * np.pi/180) # (float)
+    tantheta = np.tan(theta * np.pi/180).astype('f') # (float)
+    sintheta = np.sin(theta * np.pi/180).astype('f') # (float)
+    costheta = np.cos(theta * np.pi/180).astype('f') # (float)
 
     # perform orthogonal interpolation
 
@@ -68,8 +61,8 @@ def stage_recon(data,params):
             virtual_plane = y - z/tantheta
 
             # find raw data planes that surround the virtual plane
-            plane_before = np.floor(virtual_plane/pixel_step)
-            plane_after = plane_before+1
+            plane_before = int(np.floor(virtual_plane/pixel_step))
+            plane_after = int(plane_before+1)
 
             # continue if raw data planes are within the data range
             if ((plane_before>=0) and (plane_after<num_images)):
@@ -84,8 +77,8 @@ def stage_recon(data,params):
                 virtual_pos_after = za - l_after*costheta
 
                 # determine nearest data points to interpoloated point in raw data
-                pos_before = np.floor(virtual_pos_before)
-                pos_after = np.floor(virtual_pos_after)
+                pos_before = int(np.floor(virtual_pos_before))
+                pos_after = int(np.floor(virtual_pos_after))
 
                 # continue if within data bounds
                 if ((pos_before>=0) and (pos_after >= 0) and (pos_before<ny-1) and (pos_after<ny-1)):
@@ -95,13 +88,11 @@ def stage_recon(data,params):
                     dz_after = virtual_pos_after - pos_after
 
                     # compute final image plane using orthogonal interpolation
-                    output[z,y,:] = l_before * dz_after * data[plane_after,pos_after+1,:] + \
+                    output[z,y,:] = (l_before * dz_after * data[plane_after,pos_after+1,:] + \
                                     l_before * (1-dz_after) * data[plane_after,pos_after,:] + \
                                     l_after * dz_before * data[plane_before,pos_before+1,:] + \
-                                    l_after * (1-dz_before) * data[plane_before,pos_before,:] 
+                                    l_after * (1-dz_before) * data[plane_before,pos_before,:]) /pixel_step
 
-    # scale output image by pixel size
-    output = output/pixel_step
 
     # return array
     return output
@@ -111,11 +102,11 @@ def main(argv):
     # parse directory name from command line argument
     input_dir_string = ''
     output_dir_string = ''
-
+    '''
     try:
         opts, args = getopt.getopt(argv,"hi:o:",["ifile=","ofile=","nimgs="])
     except getopt.GetoptError:
-        print('stage_recon.py -i <inputdirectory> -o <outputdirectory> -n <numberimages>')
+        print('Error. stage_recon.py -i <inputdirectory> -o <outputdirectory> -n <numberimages>')
         sys.exit(2)
     for opt, arg in opts:
         if opt == '-h':
@@ -127,34 +118,47 @@ def main(argv):
             output_dir_string = arg
         elif opt in ("-n", "--nimgs"):
             num_img_per_strip = arg
+    '''
+
+    input_dir_string='D:\whole_brain_trial4\dapi_7'
+    output_dir_string = 'D:\whole_brain_trial4' 
+    num_imgs_per_strip = 2155
 
     # https://docs.python.org/3/library/pathlib.html
     # open create glob-like path to directory with data
-    input_dir_path = Path(input_dir_string)
-    input_path = input_dir_path / "*.tif"
+    #input_dir_path = Path(input_dir_string)
+    #input_path = input_dir_path / "*.tif"
+    
+    input_dir_path=Path(input_dir_string)
+    all_files = list(input_dir_path.glob('*.tif'))
+    files = [imread(str(all_files[i]),nframes=100) for i in range(len(all_files))]
+    stack_raw = da.concatenate(files)
 
     # http://image.dask.org/en/latest/dask_image.imread.html
     # read data in using dask-image
-    stack_raw = imread(str(input_path),nframes=20000))
+    #stack_raw = imread(str(input_path),nframes=num_imgs_per_strip)
     
     # get number of strips from raw data
     num_strips = int(stack_raw.shape[0]/num_imgs_per_strip)
 
     # get number of processings strips
     # this number should be adjusted to fit images into memory
-    split_strip_factor = 4
+    split_strip_factor = 5
     overlap = 0.1
-    num_strips_splits = split_strip_factor*num_strips
     num_images_per_split = num_imgs_per_strip/split_strip_factor
+
+    # rechunk dask array to number of images per split strip for faster loading
+    # have to do this because data stored in max 4 gig TIFF files created by MM 2.0 gamma 
+    # stack_raw = stack_raw.rechunk((10, stack_raw.shape[1],stack_raw.shape[2]))
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
-    params=[30,400,116]
+    params=[30,116,116]
 
     # https://docs.python.org/3.8/library/functools.html#functools.partial
     # use this to define function that map_blocks will call to figure out how to map data
-    function_deskew = partial(stage_recon, params=params)
+    #function_deskew = partial(stage_recon, parameters=params)
 
     # check if user provided output path
     if (output_dir_string==''):
@@ -165,42 +169,45 @@ def main(argv):
     # https://github.com/nvladimus/npy2bdv
     # create BDV file with sub-sampling for BigStitcher
     output_path = output_dir_path / 'deskewed.h5'
-    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=1, ntiles=number_of_strips, \
-    subsamp=((1, 1, 1), (2, 2, 2), (4, 4, 4), (8, 8, 8)), blockdim=((4, 256, 256),))
+    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=1, ntiles=num_strips*split_strip_factor, \
+    subsamp=((1, 1, 1), (4, 2, 4), (16, 4, 16)), blockdim=((256, 32, 256),))
 
     # loop over each strip in acquistion
     for strip in range (0,num_strips):
         for i in range(0,split_strip_factor):
             if i==0:
-                first_image=i*num_images_per_split
-                last_image=(i+1)*num_images_per_split
+                first_image=(strip*num_imgs_per_strip)+i*num_images_per_split
+                last_image=(strip*num_imgs_per_strip)+(i+1)*num_images_per_split
             else:
-                first_image=i*num_images_per_split-int(num_images_per_split * overlap)
-                last_image=(i+1)*num_images_per_split
+                first_image=((strip*num_imgs_per_strip))+i*num_images_per_split-int(num_images_per_split * overlap)
+                last_image=((strip*num_imgs_per_strip))+(i+1)*num_images_per_split
 
-            # https://docs.dask.org/en/latest/array-api.html#dask.array.map_blocks
-            # use map_blocks to have dask manage what pieces of the array to pull from disk into memory
-            # TO DO: write file splitting code to make sure that machine does not run out of memory
-            images_to_load = range(first_image,last_image)
-            strip_deskew = stack_raw[images_to_load,:].map_blocks(function_deskew,dtype="uint16")
+            tile_id=(split_strip_factor)*strip+i
+            print('Computing tile ' +str(tile_id+1)+' out of '+str(num_strips*split_strip_factor))
 
             # https://docs.dask.org/en/latest/api.html#dask.compute
             # evaluate into numpy array held in local memory
             # need to have enough RAM on computer to use this strategy!
-            # e.g. 20,000 image strip * [2020,990] * uint16 gives a final image of 
-            # ~330 gb for float32 and ~165 gb for uint16.
             # TO DO: write file splitting code to make sure that machine does not run out of memory
-            # TO DO: is it possible to use npy2bdv with Dask? Or rewrite the library so that it works?
-            strip_deskew.compute()
+            # TO DO: is it possible to use Dask map_blocks with deskew function?
+            stack_to_process = stack_raw[first_image:last_image,:].compute()
+            strip_deskew = stage_recon(stack_to_process,params)
+           
+            # look into https://github.com/dask/dask-image/issues/110
+            # this might give a way to write the TIFFs out and then read into HDF5
 
             # https://github.com/nvladimus/npy2bdv
             # write strip into BDV H5 file
             # TO DO: is it possible to use npy2bdv with Dask? Or rewrite the library so that it works?
-            tile_id=(split_strip_factor)*strip+i
+            print('Writing tile '+str(tile_id+1))
             bdv_writer.append_view(strip_deskew, time=0, channel=0, tile=tile_id)
+
+            # keep track of location
+            pos[tile_id,:]=[strip*]
 
             # make sure we free up memory
             del strip_deskew
+            del stack_to_process
             gc.collect()
 
     # https://github.com/nvladimus/npy2bdv
@@ -209,6 +216,8 @@ def main(argv):
     bdv_writer.close()
 
     # TO DO: create text file with stage positions for BigStitcher
+
+
 
     # clean up memory
     del stack_raw

@@ -139,22 +139,10 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 	return answer;
 }
 
-float start_y = -3.0;														// (mm)
-float start_x = 9.0;															// (mm)
+float start_y = -.5;														// (mm)
+float start_x =11.0;															// (mm)
 
 port = "COM15";
-command = "SPEED Y=.5";
-answer = setTigerCommand(port,command,false);
-print(answer);
-print("Changing Y speed to fast.");
-mmc.sleep(50);
-
-command = "MOVE Y="+start_y*10000;
-answer = setTigerCommand(port,command,true);
-print(answer);
-print("Moved Y axis to: "+start_y);
-mmc.sleep(50);
-
 command = "SPEED X=.5";
 answer = setTigerCommand(port,command,false);
 print(answer);
@@ -165,4 +153,16 @@ command = "MOVE X="+start_x*10000;
 answer = setTigerCommand(port,command,true);
 print(answer);
 print("Moved X axis to: "+start_x);
+mmc.sleep(50);
+
+command = "SPEED Y=.5";
+answer = setTigerCommand(port,command,false);
+print(answer);
+print("Changing Y speed to fast.");
+mmc.sleep(50);
+
+command = "MOVE Y="+start_y*10000;
+answer = setTigerCommand(port,command,true);
+print(answer);
+print("Moved X axis to: "+start_y);
 mmc.sleep(50);

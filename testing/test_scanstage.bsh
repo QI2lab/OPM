@@ -158,10 +158,10 @@ float exposure_ms = 50.;	// (ms)
 
 // scan settings
 float overlap = 0.1;			// (%)
-float start_y = -3.0;		// (mm)
-float end_y = +5.0;			// (mm)
-float start_x = 8.5;			// (mm)
-float end_x = 13.5;			// (mm)
+float start_x = 11.25;		// (mm)
+float end_x = 11.5;			// (mm)
+float start_y = 4.0;			// (mm)
+float end_y = 0.5;			// (mm)
 
 // tiger controller port
 port = "COM15";
@@ -188,7 +188,7 @@ root_dir = acq_settings.root;
 root_dir_unique = mm.data().getUniqueSaveDirectory(root_dir);
 
 // Create multipagetiff datatstore
-Datastore store = mm.data().createMultipageTIFFDatastore(root_dir_unique,false,true);
+Datastore store = mm.data().createMultipageTIFFDatastore(root_dir_unique,true,false);
 
 // Create a display for the datastore
 if (display_acq) {
@@ -198,20 +198,32 @@ if (display_acq) {
 
 // Setup scan
 
+// Setup PLC card to give start trigger
+
+String plcName = "PLogic:E:36";
+String propPosition = "PointerPosition";
+String propCellConfig = "EditCellConfig";
+int addrOutputBNC3 = 35;
+int addrStageSync = 46;  // TTL5 on Tiger backplane = stage sync signal
+ 
+// connect to BNC output
+mmc.setProperty(plcName, propPosition, addrOutputBNC3);
+mmc.setProperty(plcName, propCellConfig, addrStageSync);
+
 // calculate scan properties
 
-float pixel_size_um = 0.116; 						// (um)
-float scan_step_mm = pixel_size_um / 1000.;	// (mm)
-float exposure_s = exposure_ms / 1000.; 		// (s)
-float scan_rate = scan_step / exposure_s;		// (mm/s)
+float pixel_size_um = 0.116; 							// (um)
+float scan_step_mm = pixel_size_um / 1000.;		// (mm)
+float exposure_s = exposure_ms / 1000.; 			// (s)
+float scan_rate = scan_step_mm / exposure_s;	// (mm/s)
 
-float scan_distance = Math.abs(start_y-end_y);						// (mm)
-float tile_step_um = (2020.*pixel_size) * (1-overlap); 		 	// (um)
-float tile_step_mm = (2020.*pixel_size) * (1-overlap) * .001; 	// (mm)
-float tile_step_asi = (2020.*pixel_size) * (1-overlap) * 10.0; // (.1 um)
+float scan_distance = Math.abs(start_x-end_x);						// (mm)
+float tile_step_um = (2048.*pixel_size_um) * (1-overlap); 		 	// (um)
+float tile_step_mm = (2048.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
+float tile_step_asi = (2048.*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
 
 int num_images = Math.round(scan_distance / (scan_rate * exposure_s));
-int num_tiles = Math.round((Math.abs(Math.abs(start_x)-Math.abs(end_x))/tile_step_mm));
+int num_tiles = Math.round((Math.abs(Math.abs(start_y)-Math.abs(end_y))/tile_step_mm));
 
 print("Scan rate: "+scan_rate+" mm/s");
 print("Number of camera acquisitions per scan strip: "+num_images);
@@ -236,37 +248,37 @@ mmc.setExposure(exposure_ms);
 // setup Tiger controller and move to initial position
 
 // set tiling stage to a fast speed
-command = "SPEED X=.5";
+command = "SPEED Y=.5";
 answer = setTigerCommand(port,command,false);
 print("Set tiling stage speed to fast.");
 
 // move tiling stage to initial position
-command = "MOVE X="+start_x*10000;
+command = "MOVE Y="+start_y*10000;
 answer = setTigerCommand(port,command,true);
-print("Moved tiling stage to start position of: "+start_x);
+print("Moved tiling stage to start position of: "+start_y);
 
 // set slow scan stage to a fast speed
-command = "SPEED Y=.5";
+command = "SPEED X=.5";
 answer = setTigerCommand(port,command,false);
 print("Set scan stage speed to fast for initial move.");
 
 // move slow scan stage to initial position
-command = "MOVE Y="+start_y*10000;
+command = "MOVE X="+start_x*10000;
 answer = setTigerCommand(port,command,true);
-print("Moved scan stage to: "+start_y);
+print("Moved scan stage to: "+start_x);
 
 // set slow scan stage to constant rate slow scan speed
-command = "SPEED Y="+scan_rate;
+command = "SPEED X="+scan_rate;
 answer = setTigerCommand(port,command,false);
 print("Set scan stage speed to slow.");
 
 // set slow scan stage to true 1D scan with no backlash
-command = "1SCAN X? Y=1 Z=9 F=0";
+command = "1SCAN X? Y=0 Z=9 F=0";
 answer = setTigerCommand(port,command,false);
 print("Set to true 1D slow scan");
 
 // set range for slow scan stage
-command = "1SCANR X="+start_y+" Y="+end_y+" R=50";
+command = "1SCANR X="+start_x+" Y="+end_x+" R=50";
 answer = setTigerCommand(port,command,false);
 print("Set slow scan range.");
 
@@ -274,27 +286,28 @@ print("Set slow scan range.");
 Coords.CoordsBuilder builder = mm.data().getCoordsBuilder();
 
 // initialize tiling counters
-int x_counter=0;
+int y_counter=0;
 int stage_pos=0;
 
-while (x_counter < num_tiles) {
+while (y_counter < num_tiles) {
 
 	// initialize slow scan counters
-	int y_counter=0;
+	int x_counter=0;
 
 	// grab X and Z position
 	Point2D.Double point = mmc.getXYStagePosition();
-	x_now = point.getX();
+	y_now = point.getY();
 	z_now = mmc.getPosition(z_stage);
 
+	// start acquisition sequence with camera in internal mode for fastest acquisition
+	mmc.startSequenceAcquisition(num_images, 0, true);
+	mmc.sleep(100);
+	
 	// start scan
 	command = "1SCAN";
 	answer = setTigerCommand(port,command,false);
 	print("Running slow scan... ");
 
-	// start acquisition sequence with camera in internal mode for fastest acquisition
-	mmc.startSequenceAcquisition(num_cam_fires, 0, true);
-	
 	// execute acquisition until no more images are left in the buffer
 	while (mmc.getRemainingImageCount() > 0 || mmc.isSequenceRunning(mmc.getCameraDevice())) {
 		// if there are images in the buffer, grab and process
@@ -305,11 +318,11 @@ while (x_counter < num_tiles) {
 
 			// grab current y stage position	
 			Point2D.Double point = mmc.getXYStagePosition();
-			y_now = point.getY();
+			x_now = point.getX();
 			
 			//Create metadata object for image
 			MetadataBuilder mdb = image.getMetadata().copy();
-			md = mdb.positionName("Pos_x"+x_counter+"_y"+y_counter).xPositionUm(xNow).yPositionUm(yNow).zPositionUm(zNow).build();
+			md = mdb.positionName("ch0_x"+x_counter+"_y"+y_counter).xPositionUm(x_now).yPositionUm(y_now).zPositionUm(z_now).build();
 					
 			//Build datastore coordinates for image
 			builder.stagePosition(stage_pos);
@@ -322,14 +335,14 @@ while (x_counter < num_tiles) {
 			store.putImage(image_toDataStore);
 
 			// increment slow scan counters
-			y_counter++;
+			x_counter++;
 			stage_pos++;
 
 			// output progress report
-			int test_counter = y_counter%1000;
+			int test_counter = x_counter%1000;
 			if (test_counter==0) {
 				//print("Total camera fires:" +total_counter);
-				print("At strip "+(x_counter+1)+" of "+num_tiles+" total strips. Acquired "+y_counter+" images out of "+num_images+" for this strip so far...");
+				print("At strip "+(y_counter+1)+" of "+num_tiles+" total strips. Acquired "+x_counter+" images out of "+num_images+" for this strip so far...");
 			}
 		}
 		// no images in buffer, wait for another image to arrive.
@@ -346,7 +359,7 @@ while (x_counter < num_tiles) {
 	mmc.sleep(2000);
 
 	// make sure the correct number of images were acquired
-	if (y_counter == num_images) {
+	if (x_counter == num_images) {
 
 		// check if fly back has finished and that controller is available
 		command = "STATUS";
@@ -354,29 +367,29 @@ while (x_counter < num_tiles) {
 		print("Scan stage has reset to initial position.");
 
 		// increment tiling counter
-		x_counter++;
+		y_counter++;
 
 		// move tiling stage (overlap)*(large image size)
-		command = "MOVREL X="+tile_step_asi;
+		command = "MOVREL Y="+tile_step_asi;
 		answer = setTigerCommand(port,command,true);
-		print("Moved tiling stage to: "+(start_x+(x_counter*tile_step_mm)));
+		print("Moved tiling stage to: "+(start_y+(y_counter*tile_step_mm)));
 	}
 	// something went wrong
 	else {
 		print("An error occurred during image scanning...");
 
 		// set slow scan stage to fast speed
-		command = "SPEED Y=.5";
+		command = "SPEED X=.5";
 		answer = setTigerCommand(port,command,false);
 		print("Set scan stage speed to fast.");
 
 		// fly back to initial slow scan position
-		command = "MOVE Y="+start_y*10000;
+		command = "MOVE X="+start_x*10000;
 		answer = setTigerCommand(port,command,true);
 		print("Moved scan stage to: "+start_y);
 
 		// fly back to initial tiling position
-		command = "MOVE X="+start_x*10000;
+		command = "MOVE Y="+start_y*10000;
 		answer = setTigerCommand(port,command,true);
 		print("Moved tiling stage to: "+start_x);
 		
