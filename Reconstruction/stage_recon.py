@@ -7,6 +7,7 @@ Orthgonal interpolation method as described by Vincent Maioli (http://doi.org/10
 Shepherd 03/20
 '''
 
+# imports
 import numpy as np
 from dask_image.imread import imread
 import dask.array as da
@@ -16,7 +17,6 @@ import npy2bdv
 import gc
 import sys
 import getopt
-import warnings
 
 # perform stage scanning reconstruction
 def stage_recon(data,parameters):
@@ -94,7 +94,7 @@ def stage_recon(data,parameters):
                                     l_after * (1-dz_before) * data[plane_before,pos_before,:]) /pixel_step
 
 
-    # return array
+    # return interpolated output
     return output
 
 def main(argv):
@@ -102,6 +102,8 @@ def main(argv):
     # parse directory name from command line argument
     input_dir_string = ''
     output_dir_string = ''
+    num_imgs_per_strip = -1
+
     '''
     try:
         opts, args = getopt.getopt(argv,"hi:o:",["ifile=","ofile=","nimgs="])
@@ -120,45 +122,66 @@ def main(argv):
             num_img_per_strip = arg
     '''
 
-    input_dir_string='D:\whole_brain_trial4\dapi_7'
+    input_dir_string = 'D:\whole_brain_trial4\dapi_7'
     output_dir_string = 'D:\whole_brain_trial4' 
     num_imgs_per_strip = 2155
 
     # https://docs.python.org/3/library/pathlib.html
-    # open create glob-like path to directory with data
-    #input_dir_path = Path(input_dir_string)
-    #input_path = input_dir_path / "*.tif"
-    
+    # Create Path object to directory, load all tifs, and parse in 100 image chunks
+    # Right now - this is only for one channel. 
+    # Can fix, but will need to know the shape of data beforehand.
     input_dir_path=Path(input_dir_string)
-    all_files = list(input_dir_path.glob('*.tif'))
-    files = [imread(str(all_files[i]),nframes=100) for i in range(len(all_files))]
-    stack_raw = da.concatenate(files)
-
+    
+    #### CURRENTLY NOT USED ####
+    ### USE FOR INDIVIDUAL TIFFS THAT ARE NOT OME-TIFF ###
     # http://image.dask.org/en/latest/dask_image.imread.html
     # read data in using dask-image
+    # this should be preferred, but Micromanager writes TIFF files
+    # that throw errors when loaded by dask_image.imread()
     #stack_raw = imread(str(input_path),nframes=num_imgs_per_strip)
-    
+    #### ------------------ ####
+
+    ### USE FOR ONE BIG TIFF FILE ###
+    # https://docs.python.org/3/library/pathlib.html
+    # create list of all tiff files within directory
+    all_files = list(input_dir_path.glob('*.tif'))
+
+    # http://image.dask.org/en/latest/dask_image.imread.html
+    # read each tiff file in as it's own Dask Array
+    files = [imread(str(all_files[i]),nframes=100) for i in range(len(all_files))]
+
+    # concatenate all the Dask arrays together to form one Dask array with all images
+    stack_raw = da.concatenate(files)
+
+    # rechunk dask array for faster loading because data stored 
+    # in max 4 gig TIFF files created by MM 2.0 gamma 
+    stack_raw = stack_raw.rechunk((100, stack_raw.shape[1],stack_raw.shape[2]))
+
     # get number of strips from raw data
     num_strips = int(stack_raw.shape[0]/num_imgs_per_strip)
 
-    # get number of processings strips
-    # this number should be adjusted to fit images into memory
-    split_strip_factor = 5
-    overlap = 0.1
+    # set number of processing chunks for each strip
+    # this number should be adjusted to fit each chunk into memory
+    # need to take account loading data and holding deskew result in memory 
+    split_strip_factor = 6
+
+    # number of images per chunk without overlap
     num_images_per_split = num_imgs_per_strip/split_strip_factor
 
-    # rechunk dask array to number of images per split strip for faster loading
-    # have to do this because data stored in max 4 gig TIFF files created by MM 2.0 gamma 
-    # stack_raw = stack_raw.rechunk((10, stack_raw.shape[1],stack_raw.shape[2]))
+    # percentage of overlapped images to use between chunks
+    overlap = 0.1
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
     params=[30,116,116]
 
+    #### CURRENTLY NOT USED ####
     # https://docs.python.org/3.8/library/functools.html#functools.partial
     # use this to define function that map_blocks will call to figure out how to map data
+    # TO DO: fix, giving memory errors at the moment when used with map_blocks
     #function_deskew = partial(stage_recon, parameters=params)
+    #### ------------------ ####
 
     # check if user provided output path
     if (output_dir_string==''):
@@ -167,57 +190,63 @@ def main(argv):
         output_dir_path = Path(output_dir_string)
 
     # https://github.com/nvladimus/npy2bdv
-    # create BDV file with sub-sampling for BigStitcher
+    # create BDV H5 file with sub-sampling for BigStitcher
     output_path = output_dir_path / 'deskewed.h5'
     bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=1, ntiles=num_strips*split_strip_factor, \
-    subsamp=((1, 1, 1), (4, 2, 4), (16, 4, 16)), blockdim=((256, 32, 256),))
+    subsamp=((1, 1, 1), (4, 2, 4), (8, 4, 8), (16,8,16)), blockdim=((256, 32, 256),))
+
+    # create empty pixel position list for location of each image
+    pos_list=np.empty([num_strips*split_strip_factor,1,1])
 
     # loop over each strip in acquistion
     for strip in range (0,num_strips):
         for i in range(0,split_strip_factor):
+
+            # determine indices of images to create a new Dask array for computing in memory
             if i==0:
                 first_image=(strip*num_imgs_per_strip)+i*num_images_per_split
                 last_image=(strip*num_imgs_per_strip)+(i+1)*num_images_per_split
             else:
-                first_image=((strip*num_imgs_per_strip))+i*num_images_per_split-int(num_images_per_split * overlap)
+                first_image=((strip*num_imgs_per_strip))+i*num_images_per_split - \
+                            int(num_images_per_split * overlap)
                 last_image=((strip*num_imgs_per_strip))+(i+1)*num_images_per_split
 
+            # determine tile id and output to user
             tile_id=(split_strip_factor)*strip+i
             print('Computing tile ' +str(tile_id+1)+' out of '+str(num_strips*split_strip_factor))
 
             # https://docs.dask.org/en/latest/api.html#dask.compute
             # evaluate into numpy array held in local memory
             # need to have enough RAM on computer to use this strategy!
-            # TO DO: write file splitting code to make sure that machine does not run out of memory
             # TO DO: is it possible to use Dask map_blocks with deskew function?
             stack_to_process = stack_raw[first_image:last_image,:].compute()
             strip_deskew = stage_recon(stack_to_process,params)
            
             # look into https://github.com/dask/dask-image/issues/110
-            # this might give a way to write the TIFFs out and then read into HDF5
+            # this might give a way to write the TIFFs back out in addition to BDV H5
 
             # https://github.com/nvladimus/npy2bdv
             # write strip into BDV H5 file
             # TO DO: is it possible to use npy2bdv with Dask? Or rewrite the library so that it works?
+            # TO DO: fix to keep track of multiple channels
             print('Writing tile '+str(tile_id+1))
             bdv_writer.append_view(strip_deskew, time=0, channel=0, tile=tile_id)
 
             # keep track of location
-            pos[tile_id,:]=[strip*]
+            # append location of tile to list
+            pos_list[tile_id,:]=[first_image*stack_raw.shape[1],strip*stack_raw.shape[2]]
 
-            # make sure we free up memory
-            del strip_deskew
+            # free up memory
             del stack_to_process
+            del strip_deskew
             gc.collect()
 
     # https://github.com/nvladimus/npy2bdv
-    # write xml file
+    # write BDV xml file
     bdv_writer.write_xml_file(ntimes=1)
     bdv_writer.close()
 
-    # TO DO: create text file with stage positions for BigStitcher
-
-
+    # TO DO: create text file with tile -> stage positions for BigStitcher
 
     # clean up memory
     del stack_raw
