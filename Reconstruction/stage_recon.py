@@ -97,6 +97,7 @@ def stage_recon(data,parameters):
     # return interpolated output
     return output
 
+# open data, parse, chunk, perform OPM processing, and save as BDV H5 file
 def main(argv):
 
     # parse directory name from command line argument
@@ -104,27 +105,26 @@ def main(argv):
     output_dir_string = ''
     num_imgs_per_strip = -1
 
-    '''
     try:
-        opts, args = getopt.getopt(argv,"hi:o:",["ifile=","ofile=","nimgs="])
+        arguments, values = getopt.getopt(argv,"hi:o:n:",["help","ipath=","opath=","nimgs="])
     except getopt.GetoptError:
         print('Error. stage_recon.py -i <inputdirectory> -o <outputdirectory> -n <numberimages>')
         sys.exit(2)
-    for opt, arg in opts:
-        if opt == '-h':
-            print('stage_recon.py -i <inputdirectory> -o <outputdirectory> -n <numberimages>')
+    for current_argument, current_value in arguments:
+        if current_argument == '-h':
+            print('Usage. stage_recon.py -i <inputdirectory> -o <outputdirectory> -n <numberimages>')
             sys.exit()
-        elif opt in ("-i", "--ifile"):
-            input_dir_string = arg
-        elif opt in ("-o", "--ofile"):
-            output_dir_string = arg
-        elif opt in ("-n", "--nimgs"):
-            num_img_per_strip = arg
-    '''
+        elif current_argument in ("-i", "--ipath"):
+            input_dir_string = current_value
+        elif current_argument in ("-o", "--opath"):
+            output_dir_string = current_value
+        elif current_argument in ("-n", "--nimgs"):
+            num_imgs_per_strip = current_value
 
-    input_dir_string = 'D:\whole_brain_trial4\dapi_7'
-    output_dir_string = 'D:\whole_brain_trial4' 
-    num_imgs_per_strip = 2155
+
+    if (input_dir_string == '' or num_imgs_per_strip==-1):
+        print('Input parse error. Please check input directory (-i) and number of images per strip (-n)')
+        sys.exit(2)
 
     # https://docs.python.org/3/library/pathlib.html
     # Create Path object to directory, load all tifs, and parse in 100 image chunks
@@ -153,9 +153,11 @@ def main(argv):
     # concatenate all the Dask arrays together to form one Dask array with all images
     stack_raw = da.concatenate(files)
 
+    # https://docs.dask.org/en/latest/array-api.html#dask.array.rechunk
     # rechunk dask array for faster loading because data stored 
     # in max 4 gig TIFF files created by MM 2.0 gamma 
     stack_raw = stack_raw.rechunk((100, stack_raw.shape[1],stack_raw.shape[2]))
+    #### ------------------ ####
 
     # get number of strips from raw data
     num_strips = int(stack_raw.shape[0]/num_imgs_per_strip)
@@ -163,10 +165,10 @@ def main(argv):
     # set number of processing chunks for each strip
     # this number should be adjusted to fit each chunk into memory
     # need to take account loading data and holding deskew result in memory 
-    split_strip_factor = 6
+    split_strip_factor = 8
 
     # number of images per chunk without overlap
-    num_images_per_split = num_imgs_per_strip/split_strip_factor
+    num_images_per_split = int(np.floor(num_imgs_per_strip/split_strip_factor))
 
     # percentage of overlapped images to use between chunks
     overlap = 0.1
@@ -200,6 +202,7 @@ def main(argv):
 
     # loop over each strip in acquistion
     for strip in range (0,num_strips):
+        # loop over each chunk in current strip
         for i in range(0,split_strip_factor):
 
             # determine indices of images to create a new Dask array for computing in memory
@@ -220,20 +223,20 @@ def main(argv):
             # need to have enough RAM on computer to use this strategy!
             # TO DO: is it possible to use Dask map_blocks with deskew function?
             stack_to_process = stack_raw[first_image:last_image,:].compute()
+
+            # run orthogonal interpolation on data held in memory
             strip_deskew = stage_recon(stack_to_process,params)
            
-            # look into https://github.com/dask/dask-image/issues/110
-            # this might give a way to write the TIFFs back out in addition to BDV H5
+            # TO DO: write TIFF files out for downstream analysis in addition to BDV H5
+            # https://github.com/dask/dask-image/issues/110
 
             # https://github.com/nvladimus/npy2bdv
             # write strip into BDV H5 file
             # TO DO: is it possible to use npy2bdv with Dask? Or rewrite the library so that it works?
-            # TO DO: fix to keep track of multiple channels
             print('Writing tile '+str(tile_id+1))
             bdv_writer.append_view(strip_deskew, time=0, channel=0, tile=tile_id)
 
-            # keep track of location
-            # append location of tile to list
+            # keep track of tile location in pixel space 
             pos_list[tile_id,:]=[first_image*stack_raw.shape[1],strip*stack_raw.shape[2]]
 
             # free up memory
@@ -252,5 +255,29 @@ def main(argv):
     del stack_raw
     gc.collect()
 
+# run
 if __name__ == "__main__":
     main(sys.argv[1:])
+
+
+# The MIT License
+#
+# Copyright (c) 2020 Douglas Shepherd, Arizona State University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
