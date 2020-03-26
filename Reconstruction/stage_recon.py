@@ -119,7 +119,7 @@ def main(argv):
         elif current_argument in ("-o", "--opath"):
             output_dir_string = current_value
         elif current_argument in ("-n", "--nimgs"):
-            num_imgs_per_strip = current_value
+            num_imgs_per_strip = int(current_value)
 
 
     if (input_dir_string == '' or num_imgs_per_strip==-1):
@@ -130,6 +130,7 @@ def main(argv):
     # Create Path object to directory, load all tifs, and parse in 100 image chunks
     # Right now - this is only for one channel. 
     # Can fix, but will need to know the shape of data beforehand.
+    print(input_dir_string)
     input_dir_path=Path(input_dir_string)
     
     #### CURRENTLY NOT USED ####
@@ -165,7 +166,7 @@ def main(argv):
     # set number of processing chunks for each strip
     # this number should be adjusted to fit each chunk into memory
     # need to take account loading data and holding deskew result in memory 
-    split_strip_factor = 8
+    split_strip_factor = 10
 
     # number of images per chunk without overlap
     num_images_per_split = int(np.floor(num_imgs_per_strip/split_strip_factor))
@@ -176,7 +177,7 @@ def main(argv):
     # create parameter array
     # [theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
-    params=[30,116,116]
+    params=[60,116,116]
 
     #### CURRENTLY NOT USED ####
     # https://docs.python.org/3.8/library/functools.html#functools.partial
@@ -195,10 +196,11 @@ def main(argv):
     # create BDV H5 file with sub-sampling for BigStitcher
     output_path = output_dir_path / 'deskewed.h5'
     bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=1, ntiles=num_strips*split_strip_factor, \
-    subsamp=((1, 1, 1), (4, 2, 4), (8, 4, 8), (16,8,16)), blockdim=((256, 32, 256),))
+    subsamp=((1, 1, 1), (4, 2, 4), (8, 4, 8), (16,8,16)), blockdim=((256, 32, 256),),compression='gzip')
 
     # create empty pixel position list for location of each image
     pos_list=np.empty([num_strips*split_strip_factor,1,1])
+    print(pos_list.shape)
 
     # loop over each strip in acquistion
     for strip in range (0,num_strips):
@@ -237,7 +239,7 @@ def main(argv):
             bdv_writer.append_view(strip_deskew, time=0, channel=0, tile=tile_id)
 
             # keep track of tile location in pixel space 
-            pos_list[tile_id,:]=[first_image*stack_raw.shape[1],strip*stack_raw.shape[2]]
+            #pos_list[tile_id,0,0]=[first_image*stack_raw.shape[1],strip*stack_raw.shape[2]]
 
             # free up memory
             del stack_to_process
