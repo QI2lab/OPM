@@ -154,14 +154,14 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 // --------------------------------
 
 // exposure time
-float exposure_ms = 50.;	// (ms)
+float exposure_ms = 200.;	// (ms)
 
 // scan settings
-float overlap = 0.1;			// (%)
-float start_x = 11.25;		// (mm)
-float end_x = 11.5;			// (mm)
-float start_y = 4.0;			// (mm)
-float end_y = 0.5;			// (mm)
+float overlap = 0.3;			// (%)
+float start_x = .75;		// (mm)
+float end_x = 1.5;			// (mm)
+float start_y = 4.825;			// (mm)
+float end_y = 4.925;			// (mm)
 
 // tiger controller port
 port = "COM15";
@@ -213,17 +213,19 @@ mmc.setProperty(plcName, propCellConfig, addrStageSync);
 // calculate scan properties
 
 float pixel_size_um = 0.116; 							// (um)
-float scan_step_mm = pixel_size_um / 1000.;		// (mm)
+float step_size_um = 0.100;							// (um)
+float scan_step_mm = step_size_um / 1000.;		// (mm)
 float exposure_s = exposure_ms / 1000.; 			// (s)
-float scan_rate = scan_step_mm / exposure_s;	// (mm/s)
+float scan_rate = scan_step_mm / exposure_s;		// (mm/s)
 
-float scan_distance = Math.abs(start_x-end_x);						// (mm)
+float scan_distance = Math.abs(start_x-end_x);							// (mm)
 float tile_step_um = (2048.*pixel_size_um) * (1-overlap); 		 	// (um)
 float tile_step_mm = (2048.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
 float tile_step_asi = (2048.*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
 
 int num_images = Math.round(scan_distance / (scan_rate * exposure_s));
-int num_tiles = Math.round((Math.abs(Math.abs(start_y)-Math.abs(end_y))/tile_step_mm));
+int num_tiles = Math.round((Math.abs(Math.abs(start_y)-Math.abs(end_y))/tile_step_mm)); 
+if (num_tiles==0) {num_tiles=1;}
 
 print("Scan rate: "+scan_rate+" mm/s");
 print("Number of camera acquisitions per scan strip: "+num_images);
@@ -301,7 +303,7 @@ while (y_counter < num_tiles) {
 
 	// start acquisition sequence with camera in internal mode for fastest acquisition
 	mmc.startSequenceAcquisition(num_images, 0, true);
-	mmc.sleep(100);
+	mmc.sleep(1000);
 	
 	// start scan
 	command = "1SCAN";
