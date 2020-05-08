@@ -222,8 +222,8 @@ def main(argv):
                     last_image=(i+1)*num_images_per_split
 
                 # determine tile id and output to user
-                tile_id=(channel*split_strip_factor)+(split_strip_factor)*strip+i
-                print('Computing tile ' +str(tile_id+1)+' out of '+str(num_channels*num_strips*split_strip_factor))
+                tile_id=(split_strip_factor)*strip+i
+                print('Channel '+str(channel)+', computing tile ' +str(tile_id+1)+' out of '+str(num_strips*split_strip_factor))
 
                 # https://docs.dask.org/en/latest/api.html#dask.compute
                 # evaluate into numpy array held in local memory
