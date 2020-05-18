@@ -27,6 +27,7 @@ def stage_recon(data,parameters):
     distance = parameters[1]          # (nm)
     pixel_size = parameters[2]        # (nm)
     [num_images,ny,nx]=data.shape     # (pixels)
+    
 
     # change step size from physical space (nm) to camera space (pixels)
     pixel_step = distance/pixel_size    # (pixels)
@@ -136,6 +137,11 @@ def main(argv):
     # this allows for smooth stage scanning at a fast camera rate without having to synchronize
     # laser changing during stage scan
 
+    # set number of processing chunks for each strip
+    # this number should be adjusted to fit each chunk and result into memory
+    # TO DO: automatically take account loading data and holding deskew result in local memory 
+    split_strip_factor = 2
+
     # https://docs.python.org/3/library/pathlib.html
     # Create Path object to directory
     input_dir_path=Path(input_dir_string)
@@ -151,7 +157,7 @@ def main(argv):
     if (len(all_files)>1):
         # http://image.dask.org/en/latest/dask_image.imread.html
         # read each tiff file n as it's own Dask Array
-        files = [imread(str(all_files[i]),nframes=100) for i in range(len(all_files))]
+        files = [imread(str(all_files[i]),nframes=(num_imgs_per_strip//split_strip_factor)) for i in range(len(all_files))]
 
         # https://docs.dask.org/en/latest/array-api.html#dask.array.concatenate
         # put images all the Dask arrays together to form one Dask array with all images
@@ -161,31 +167,25 @@ def main(argv):
     else:
         # http://image.dask.org/en/latest/dask_image.imread.html
         # read the tiff file in as it's own Dask Array
-        stack_raw = imread(str(all_files[0]),nframes=100)
+        stack_raw = imread(str(all_files[0]),nframes=(num_imgs_per_strip//split_strip_factor))
 
     # get number of strips from raw data
     num_strips = int(stack_raw.shape[0]/num_imgs_per_strip/num_channels)
 
     # https://docs.dask.org/en/latest/array-api.html#dask.array.reshape
     # reshape array to match data as collected
-    stack_raw = stack_raw.reshape(num_channels, num_strips, num_imgs_per_strip, \
-                                  stack_raw.shape[1], stack_raw.shape[2])
+    stack_raw = stack_raw.reshape(num_channels* num_strips * num_imgs_per_strip, stack_raw.shape[1], stack_raw.shape[2])
     
     # https://docs.dask.org/en/latest/array-api.html#dask.array.rechunk
     # rechunk dask array for faster loading because data stored in max 4 gig TIFF files created by MM 2.0 gamma 
-    stack_raw = stack_raw.rechunk((num_channels,num_strips,100,stack_raw.shape[3], stack_raw.shape[4]))
-    
-    # set number of processing chunks for each strip
-    # this number should be adjusted to fit each chunk and result into memory
-    # TO DO: automatically take account loading data and holding deskew result in local memory 
-    split_strip_factor = 6
+    stack_raw = stack_raw.rechunk((100,stack_raw.shape[1], stack_raw.shape[2]))
 
     # number of images per chunk without overlap
     num_images_per_split = int(np.floor(num_imgs_per_strip/split_strip_factor))
 
     # percentage of overlapped images to use between chunks
     # should be small number relative to number of scan axis positions 
-    overlap = 0.02
+    overlap = 0.2
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
@@ -204,26 +204,27 @@ def main(argv):
     #        this may involve change the underlying hdf5 install that h5py is using
     output_path = output_dir_path / 'deskewed.h5'
     bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_strips*split_strip_factor, \
-    subsamp=((1, 1, 1), (4, 2, 4), (8, 4, 8), (16,8,16)), blockdim=((256, 32, 256),))
+    subsamp=((1, 1, 1), (4, 2, 4), (8, 4, 8), (16,8,16)), blockdim=((256, 32, 256),),compression='gzip')
+    
+    last_image_channel=0
 
-    # loop over each channel in acquistion
-    for channel in range(0,num_channels):
-        # loop over each strip in acquistion
-        for strip in range (0,num_strips):
+    # loop over each strip in acquistion
+    for strip in range (0,num_strips):
+        # loop over each channel in acquistion
+        for channel in range(0,num_channels):
             # loop over each chunk in current strip
             for i in range(0,split_strip_factor):
 
                 # determine indices of images to create a new Dask array for computing in memory
                 if i==0:
-                    first_image=i*num_images_per_split
-                    last_image=(i+1)*num_images_per_split
+                    first_image=i*num_images_per_split+last_image_channel
+                    last_image=(i+1)*num_images_per_split + int(num_images_per_split * overlap)+last_image_channel
                 else:
-                    first_image=num_images_per_split - int(num_images_per_split * overlap)
-                    last_image=(i+1)*num_images_per_split
+                    first_image=i*num_images_per_split - int(num_images_per_split * overlap)+last_image_channel
+                    last_image=(i+1)*num_images_per_split+last_image_channel
 
                 # determine tile id and output to user
-                tile_id=(channel*split_strip_factor)+(split_strip_factor)*strip+i
-                print('Computing tile ' +str(tile_id+1)+' out of '+str(num_channels*num_strips*split_strip_factor))
+                tile_id=(split_strip_factor)*strip+i
 
                 # https://docs.dask.org/en/latest/api.html#dask.compute
                 # evaluate into numpy array held in local memory
@@ -232,7 +233,7 @@ def main(argv):
                 #        should be, but need to figure out how to have a function return a 
                 #        different size output Dask array from the input Dask array 
                 #        this is necessary since image is reshaped during the deskew operation.
-                stack_to_process = stack_raw[channel,strip,first_image:last_image,:].compute()
+                stack_to_process = stack_raw[first_image:last_image,:].compute()
 
                 # run orthogonal interpolation on data held in memory
                 strip_deskew = stage_recon(stack_to_process,params)
@@ -243,13 +244,15 @@ def main(argv):
                 #        if so, one could use map_overlap and map_blocks to chain together
                 #        the routines so that it memory management can be handled by Dask
                 #        instead of brute force loading images and calculating.
-                print('Writing tile '+str(tile_id+1))
+                print('Writing channel ' + str(channel) + ', Writing tile '+str(tile_id+1))
                 bdv_writer.append_view(strip_deskew, time=0, channel=channel, tile=tile_id)
 
                 # free up memory
                 del stack_to_process
                 del strip_deskew
                 gc.collect()
+
+            last_image_channel = last_image
 
     # https://github.com/nvladimus/npy2bdv
     # write BDV xml file
@@ -259,6 +262,7 @@ def main(argv):
     # clean up memory
     del stack_raw
     gc.collect()
+
 
 # run
 if __name__ == "__main__":
