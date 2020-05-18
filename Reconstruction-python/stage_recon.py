@@ -110,25 +110,21 @@ def main(argv):
     num_channels = -1
 
     try:
-        arguments, values = getopt.getopt(argv,"hi:o:n:c:",["help","ipath=","opath=","nimgs=","nchan="])
+        arguments, values = getopt.getopt(argv,"hi:o:n:c:",["help","ipath=","opath="])
     except getopt.GetoptError:
-        print('Error. stage_recon.py -i <inputdirectory> -o <outputdirectory> -n <numberimages> -c <numberchannels')
+        print('Error. stage_recon.py -i <inputdirectory> -o <outputdirectory>')
         sys.exit(2)
     for current_argument, current_value in arguments:
         if current_argument == '-h':
-            print('Usage. stage_recon.py -i <inputdirectory> -o <outputdirectory> -n <numberimages> -c <numberchannels')
+            print('Usage. stage_recon.py -i <inputdirectory> -o <outputdirectory>')
             sys.exit()
         elif current_argument in ("-i", "--ipath"):
             input_dir_string = current_value
         elif current_argument in ("-o", "--opath"):
             output_dir_string = current_value
-        elif current_argument in ("-n", "--nimgs"):
-            num_imgs_per_strip = int(current_value)
-        elif current_argument in ("-c", "--nchan"):
-            num_channels = int(current_value)
         
-    if (input_dir_string == '' or num_imgs_per_strip==-1 or num_channels==-1):
-        print('Input parse error. Please check input directory (-i) and number of images per strip (-c)')
+    if (input_dir_string == ''):
+        print('Input parse error.')
         sys.exit(2)
 
     # Load data
@@ -140,11 +136,13 @@ def main(argv):
     # set number of processing chunks for each strip
     # this number should be adjusted to fit each chunk and result into memory
     # TO DO: automatically take account loading data and holding deskew result in local memory 
-    split_strip_factor = 2
+    split_strip_factor = 1
 
     # https://docs.python.org/3/library/pathlib.html
     # Create Path object to directory
     input_dir_path=Path(input_dir_string)
+
+    # 
     
     # https://docs.python.org/3/library/pathlib.html
     # create list of all tiff files within directory
