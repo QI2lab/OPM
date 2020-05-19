@@ -18,6 +18,7 @@ import npy2bdv
 import gc
 import sys
 import getopt
+import re
 
 # perform stage scanning reconstruction using orthogonal interpolation
 def stage_recon(data,parameters):
@@ -106,8 +107,6 @@ def main(argv):
     # TO DO: parse number of images in strip, number of strips, and number of channels from MM metadata 
     input_dir_string = ''
     output_dir_string = ''
-    num_imgs_per_strip = -1
-    num_channels = -1
 
     try:
         arguments, values = getopt.getopt(argv,"hi:o:n:c:",["help","ipath=","opath="])
@@ -133,57 +132,15 @@ def main(argv):
     # this allows for smooth stage scanning at a fast camera rate without having to synchronize
     # laser changing during stage scan
 
-    # set number of processing chunks for each strip
-    # this number should be adjusted to fit each chunk and result into memory
-    # TO DO: automatically take account loading data and holding deskew result in local memory 
-    split_strip_factor = 1
-
     # https://docs.python.org/3/library/pathlib.html
     # Create Path object to directory
     input_dir_path=Path(input_dir_string)
 
-    # 
-    
-    # https://docs.python.org/3/library/pathlib.html
-    # create list of all tiff files within directory
-    # https://natsort.readthedocs.io/en/master/examples.html#sort-os-generated-paths
-    # sort files using natural sort to make sure they are loaded in the correct order 
-    all_files = natsorted(list(input_dir_path.glob('*.tif')),alg=ns.PATH)
+    # Parse directory for number of channels and strip positions
+    sub_dirs = [x for x in input_dir_path.iterdir() if x.is_dir()]
 
-    # check if there is more than one TIFF file in folder
-    # if yes, concatenate files together
-    if (len(all_files)>1):
-        # http://image.dask.org/en/latest/dask_image.imread.html
-        # read each tiff file n as it's own Dask Array
-        files = [imread(str(all_files[i]),nframes=(num_imgs_per_strip//split_strip_factor)) for i in range(len(all_files))]
-
-        # https://docs.dask.org/en/latest/array-api.html#dask.array.concatenate
-        # put images all the Dask arrays together to form one Dask array with all images
-        stack_raw = da.concatenate(files)
-
-    # if no, load the one tiff in the folder
-    else:
-        # http://image.dask.org/en/latest/dask_image.imread.html
-        # read the tiff file in as it's own Dask Array
-        stack_raw = imread(str(all_files[0]),nframes=(num_imgs_per_strip//split_strip_factor))
-
-    # get number of strips from raw data
-    num_strips = int(stack_raw.shape[0]/num_imgs_per_strip/num_channels)
-
-    # https://docs.dask.org/en/latest/array-api.html#dask.array.reshape
-    # reshape array to match data as collected
-    stack_raw = stack_raw.reshape(num_channels* num_strips * num_imgs_per_strip, stack_raw.shape[1], stack_raw.shape[2])
-    
-    # https://docs.dask.org/en/latest/array-api.html#dask.array.rechunk
-    # rechunk dask array for faster loading because data stored in max 4 gig TIFF files created by MM 2.0 gamma 
-    stack_raw = stack_raw.rechunk((100,stack_raw.shape[1], stack_raw.shape[2]))
-
-    # number of images per chunk without overlap
-    num_images_per_split = int(np.floor(num_imgs_per_strip/split_strip_factor))
-
-    # percentage of overlapped images to use between chunks
-    # should be small number relative to number of scan axis positions 
-    overlap = 0.2
+    num_channels=4
+    num_tiles=30
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
@@ -201,56 +158,35 @@ def main(argv):
     # TO DO: modify npy2bdv to support B3D compression, https://git.embl.de/balazs/B3D
     #        this may involve change the underlying hdf5 install that h5py is using
     output_path = output_dir_path / 'deskewed.h5'
-    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_strips*split_strip_factor, \
-    subsamp=((1, 1, 1), (4, 2, 4), (8, 4, 8), (16,8,16)), blockdim=((256, 32, 256),),compression='gzip')
-    
-    last_image_channel=0
+    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_tiles, \
+    subsamp=((1, 1, 1), (4, 4, 4), (8, 8, 8), (16,16,16)), blockdim=((256, 256, 32),))
 
-    # loop over each strip in acquistion
-    for strip in range (0,num_strips):
-        # loop over each channel in acquistion
-        for channel in range(0,num_channels):
-            # loop over each chunk in current strip
-            for i in range(0,split_strip_factor):
+    # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
+    for sub_dir in sub_dirs:
 
-                # determine indices of images to create a new Dask array for computing in memory
-                if i==0:
-                    first_image=i*num_images_per_split+last_image_channel
-                    last_image=(i+1)*num_images_per_split + int(num_images_per_split * overlap)+last_image_channel
-                else:
-                    first_image=i*num_images_per_split - int(num_images_per_split * overlap)+last_image_channel
-                    last_image=(i+1)*num_images_per_split+last_image_channel
+        # determine the channel this directory corresponds to
+        m = re.search('ch(\d+)', str(sub_dir), re.IGNORECASE)
+        channel_id = m.group(1)
 
-                # determine tile id and output to user
-                tile_id=(split_strip_factor)*strip+i
+        # determine the tile this directory corresponds to
+        m = re.search('y(\d+)', str(sub_dir), re.IGNORECASE)
+        tile_id = m.group(1)
 
-                # https://docs.dask.org/en/latest/api.html#dask.compute
-                # evaluate into numpy array held in local memory
-                # need to have enough RAM on computer to use this strategy!
-                # TO DO: is it possible to use Dask map_blocks with deskew function?
-                #        should be, but need to figure out how to have a function return a 
-                #        different size output Dask array from the input Dask array 
-                #        this is necessary since image is reshaped during the deskew operation.
-                stack_to_process = stack_raw[first_image:last_image,:].compute()
+        # read all strips for each channel. Then place into larger array
+        file_pattern = 'input_dir_path/sub_dir/*.tif'
+        stack = imread(file_pattern)
 
-                # run orthogonal interpolation on data held in memory
-                strip_deskew = stage_recon(stack_to_process,params)
+        # setup processing
+        deskewed = stack.map_blocks(stage_recon, parameters=params)
 
-                # https://github.com/nvladimus/npy2bdv
-                # write strip into BDV H5 file
-                # TO DO: is it possible to use npy2bdv with Dask?
-                #        if so, one could use map_overlap and map_blocks to chain together
-                #        the routines so that it memory management can be handled by Dask
-                #        instead of brute force loading images and calculating.
-                print('Writing channel ' + str(channel) + ', Writing tile '+str(tile_id+1))
-                bdv_writer.append_view(strip_deskew, time=0, channel=channel, tile=tile_id)
+        # write BDV tile
+        bdv_writer.append_view(deskewed, time=0, channel=channel_id, tile=tile_id)
 
-                # free up memory
-                del stack_to_process
-                del strip_deskew
-                gc.collect()
 
-            last_image_channel = last_image
+        # free up memory
+        del deskewed
+        del stack
+        gc.collect()
 
     # https://github.com/nvladimus/npy2bdv
     # write BDV xml file
@@ -258,7 +194,6 @@ def main(argv):
     bdv_writer.close()
 
     # clean up memory
-    del stack_raw
     gc.collect()
 
 
