@@ -20,8 +20,11 @@ import re
 import skimage.io as io
 from skimage.measure import block_reduce
 import time
+from numba import njit, prange
 
 # perform stage scanning reconstruction using orthogonal interpolation
+# http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
+@njit(parallel=True)
 def stage_deskew(data,parameters):
 
     # unwrap parameters 
@@ -54,13 +57,17 @@ def stage_deskew(data,parameters):
     # perform orthogonal interpolation
 
     # loop through output z planes
-    for z in range (0,final_nz):
+    # defined as parallel loop in numba
+    # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
+    for z in prange(0,final_nz):
         # calculate range of output y pixels to populate
         y_range_min=np.min([0,int(np.floor(float(z)/tantheta))])
         y_range_max=np.max([final_ny,int(np.ceil(scan_end+float(z)/tantheta+1))])
 
         # loop through final y pixels
-        for y in range(y_range_min,y_range_max):
+        # defined as parallel loop in numba
+        # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
+        for y in prange(y_range_min,y_range_max):
 
             # find the virtual tilted plane that intersects the interpolated plane 
             virtual_plane = y - z/tantheta
@@ -149,7 +156,7 @@ def main(argv):
     # create parameter array
     # [theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
-    params=[60,100,116]
+    params=[30,100,116]
 
     # check if user provided output path
     if (output_dir_string==''):
@@ -202,7 +209,8 @@ def main(argv):
 
         print('Writing deskewed block 1.')
         # write BDV tile
-        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id)
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id, \
+            voxel_size_xyz=(.116,.100,.116), voxel_units='um')
 
         # free up memory
         del deskewed_downsample
@@ -223,7 +231,8 @@ def main(argv):
 
         print('Writing deskewed block 2.')
         # write BDV tile
-        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id+1)
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id+1, \
+            voxel_size_xyz=(.116,.100,.116), voxel_units='um')
 
         # free up memory
         del deskewed_downsample
