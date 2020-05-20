@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-Stage scanning OPM post-processing using numpy, skimage, and npy2bdv.
+Stage scanning OPM post-processing using numpy, numba, skimage, and npy2bdv.
 New version to handle altered acquisition code for multi-color large area stage scans. 
 Orthgonal interpolation method as described by Vincent Maioli (http://doi.org/10.25560/68022)
 
@@ -31,8 +31,7 @@ def stage_deskew(data,parameters):
     theta = parameters[0]             # (degrees)
     distance = parameters[1]          # (nm)
     pixel_size = parameters[2]        # (nm)
-    num_images=len(data)              # (number of images)
-    [ny,nx]=data[0].shape             # (pixels)
+    [num_images,ny,nx]=data.shape  # (pixels)
 
 
     # change step size from physical space (nm) to camera space (pixels)
@@ -42,17 +41,17 @@ def stage_deskew(data,parameters):
     scan_end = num_images * pixel_step  # (pixels)
 
     # calculate properties for final image
-    final_ny = int(np.ceil(scan_end+ny*np.cos(theta*np.pi/180))) # (pixels)
-    final_nz = int(np.ceil(ny*np.sin(theta*np.pi/180)))          # (pixels)
-    final_nx = int(nx)                                           # (pixels)
+    final_ny = np.int64(np.ceil(scan_end+ny*np.cos(theta*np.pi/180))) # (pixels)
+    final_nz = np.int64(np.ceil(ny*np.sin(theta*np.pi/180)))          # (pixels)
+    final_nx = np.int64(nx)                                           # (pixels)
 
     # create final image
-    output = np.zeros([final_nz, final_ny, final_nx],dtype=np.float32)  # (pixels,pixels,pixels)
+    output = np.zeros((final_nz, final_ny, final_nx),dtype=np.float32)  # (pixels,pixels,pixels - data is float32)
 
     # precalculate trig functions for scan angle
-    tantheta = np.tan(theta * np.pi/180).astype('f') # (float)
-    sintheta = np.sin(theta * np.pi/180).astype('f') # (float)
-    costheta = np.cos(theta * np.pi/180).astype('f') # (float)
+    tantheta = np.float32(np.tan(theta * np.pi/180)) # (float32)
+    sintheta = np.float32(np.sin(theta * np.pi/180)) # (float32)
+    costheta = np.float32(np.cos(theta * np.pi/180)) # (float32)
 
     # perform orthogonal interpolation
 
@@ -61,8 +60,8 @@ def stage_deskew(data,parameters):
     # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
     for z in prange(0,final_nz):
         # calculate range of output y pixels to populate
-        y_range_min=np.min([0,int(np.floor(float(z)/tantheta))])
-        y_range_max=np.max([final_ny,int(np.ceil(scan_end+float(z)/tantheta+1))])
+        y_range_min=np.minimum(0,np.int64(np.floor(np.float32(z)/tantheta)))
+        y_range_max=np.maximum(final_ny,np.int64(np.ceil(scan_end+np.float32(z)/tantheta+1)))
 
         # loop through final y pixels
         # defined as parallel loop in numba
@@ -73,8 +72,8 @@ def stage_deskew(data,parameters):
             virtual_plane = y - z/tantheta
 
             # find raw data planes that surround the virtual plane
-            plane_before = int(np.floor(virtual_plane/pixel_step))
-            plane_after = int(plane_before+1)
+            plane_before = np.int64(np.floor(virtual_plane/pixel_step))
+            plane_after = np.int64(plane_before+1)
 
             # continue if raw data planes are within the data range
             if ((plane_before>=0) and (plane_after<num_images)):
@@ -89,8 +88,8 @@ def stage_deskew(data,parameters):
                 virtual_pos_after = za - l_after*costheta
 
                 # determine nearest data points to interpoloated point in raw data
-                pos_before = int(np.floor(virtual_pos_before))
-                pos_after = int(np.floor(virtual_pos_after))
+                pos_before = np.int64(np.floor(virtual_pos_before))
+                pos_after = np.int64(np.floor(virtual_pos_after))
 
                 # continue if within data bounds
                 if ((pos_before>=0) and (pos_after >= 0) and (pos_before<ny-1) and (pos_after<ny-1)):
@@ -100,10 +99,10 @@ def stage_deskew(data,parameters):
                     dz_after = virtual_pos_after - pos_after
 
                     # compute final image plane using orthogonal interpolation
-                    output[z,y,:] = (l_before * dz_after * data[plane_after][pos_after+1,:] + \
-                                    l_before * (1-dz_after) * data[plane_after][pos_after,:] + \
-                                    l_after * dz_before * data[plane_before][pos_before+1,:] + \
-                                    l_after * (1-dz_before) * data[plane_before][pos_before,:]) /pixel_step
+                    output[z,y,:] = (l_before * dz_after * data[plane_after,pos_after+1,:] + \
+                                    l_before * (1-dz_after) * data[plane_after,pos_after,:] + \
+                                    l_after * dz_before * data[plane_before,pos_before+1,:] + \
+                                    l_after * (1-dz_before) * data[plane_before,pos_before,:]) /pixel_step
 
 
     # return output
@@ -151,12 +150,12 @@ def main(argv):
 
     # TO DO: automatically determine number of channels and tile positions
     num_channels=4
-    num_tiles=30
+    num_tiles=28
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
-    params=[30,100,116]
+    params=np.array([30,100,116],dtype=np.float32)
 
     # check if user provided output path
     if (output_dir_string==''):
@@ -196,7 +195,7 @@ def main(argv):
 
         print('Deskew block 1.')
         # read in first block of data with a small overlap for alignment in BigStitcher
-        sub_stack = [io.imread(file) for file in files[0:split+100]]
+        sub_stack = np.asarray([io.imread(file) for file in files[0:split+100]],dtype=np.float32)
 
         # run deskew for the first block of data
         deskewed = stage_deskew(data=sub_stack,parameters=params)
@@ -218,7 +217,7 @@ def main(argv):
 
         print('Deskew block 2.')
         # read in second block of data with a small overlap for alignment in BigStitcher
-        sub_stack = [io.imread(file) for file in files[split-100:]]
+        sub_stack = np.asarray([io.imread(file) for file in files[split-100:]],dtype=np.float32)
 
         # run deskew for the second block of data
         deskewed = stage_deskew(data=sub_stack,parameters=params)
