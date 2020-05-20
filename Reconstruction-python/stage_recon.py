@@ -19,6 +19,7 @@ import getopt
 import re
 import skimage.io as io
 from skimage.measure import block_reduce
+import time
 
 # perform stage scanning reconstruction using orthogonal interpolation
 def stage_deskew(data,parameters):
@@ -141,6 +142,7 @@ def main(argv):
     sub_dirs = [x for x in input_dir_path.iterdir() if x.is_dir()]
     sub_dirs = natsorted(sub_dirs, alg=ns.PATH)
 
+    # TO DO: automatically determine number of channels and tile positions
     num_channels=4
     num_tiles=30
 
@@ -161,16 +163,17 @@ def main(argv):
     #        this may involve change the underlying hdf5 install that h5py is using
     output_path = output_dir_path / 'deskewed.h5'
     bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_tiles, \
-        subsamp=((1,1,1),(4,8,4),(8,16,8),),blockdim=((32, 128, 64),))
+        subsamp=((1,1,1),(4,8,4),(8,16,8),),blockdim=((32, 128, 64),(32/4,128/8,64/4),(32/8,128/16,64/8),))
 
     # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
+    # TO DO: implement directory polling to do this in the background while data is being acquired.
     for sub_dir in sub_dirs:
 
         # determine the channel this directory corresponds to
         m = re.search('ch(\d+)', str(sub_dir), re.IGNORECASE)
         channel_id = int(m.group(1))
 
-        # determine the tile this directory corresponds to
+        # determine the experimental tile this directory corresponds to
         m = re.search('y(\d+)', str(sub_dir), re.IGNORECASE)
         tile_id = int(m.group(1))
         print('Channel ID: '+str(channel_id)+'; Experimental tile ID: '+str(tile_id)+ \
