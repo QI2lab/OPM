@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
 '''
-Stage scanning OPM post-processing using Numpy, Dask, and npy2bdv
+Stage scanning OPM post-processing using numpy, skimage, and npy2bdv.
+New version to handle altered acquisition code for multi-color large area stage scans. 
 Orthgonal interpolation method as described by Vincent Maioli (http://doi.org/10.25560/68022)
 
 Shepherd 03/20
@@ -9,9 +10,6 @@ Shepherd 03/20
 
 # imports
 import numpy as np
-from dask_image.imread import imread
-import dask.array as da
-from functools import partial
 from pathlib import Path
 from natsort import natsorted, ns
 import npy2bdv
@@ -19,16 +17,19 @@ import gc
 import sys
 import getopt
 import re
+import skimage.io as io
+from skimage.measure import block_reduce
 
 # perform stage scanning reconstruction using orthogonal interpolation
-def stage_recon(data,parameters):
+def stage_deskew(data,parameters):
 
     # unwrap parameters 
     theta = parameters[0]             # (degrees)
     distance = parameters[1]          # (nm)
     pixel_size = parameters[2]        # (nm)
-    [num_images,ny,nx]=data.shape     # (pixels)
-    
+    num_images=len(data)              # (number of images)
+    [ny,nx]=data[0].shape             # (pixels)
+
 
     # change step size from physical space (nm) to camera space (pixels)
     pixel_step = distance/pixel_size    # (pixels)
@@ -91,13 +92,13 @@ def stage_recon(data,parameters):
                     dz_after = virtual_pos_after - pos_after
 
                     # compute final image plane using orthogonal interpolation
-                    output[z,y,:] = (l_before * dz_after * data[plane_after,pos_after+1,:] + \
-                                    l_before * (1-dz_after) * data[plane_after,pos_after,:] + \
-                                    l_after * dz_before * data[plane_before,pos_before+1,:] + \
-                                    l_after * (1-dz_before) * data[plane_before,pos_before,:]) /pixel_step
+                    output[z,y,:] = (l_before * dz_after * data[plane_after][pos_after+1,:] + \
+                                    l_before * (1-dz_after) * data[plane_after][pos_after,:] + \
+                                    l_after * dz_before * data[plane_before][pos_before+1,:] + \
+                                    l_after * (1-dz_before) * data[plane_before][pos_before,:]) /pixel_step
 
 
-    # return interpolated output
+    # return interpolated output with a rolling average of 2 axial planes
     return output
 
 # open data, parse, chunk, perform OPM processing, and save as BDV H5 file
@@ -138,6 +139,7 @@ def main(argv):
 
     # Parse directory for number of channels and strip positions
     sub_dirs = [x for x in input_dir_path.iterdir() if x.is_dir()]
+    sub_dirs = natsorted(sub_dirs, alg=ns.PATH)
 
     num_channels=4
     num_tiles=30
@@ -159,33 +161,59 @@ def main(argv):
     #        this may involve change the underlying hdf5 install that h5py is using
     output_path = output_dir_path / 'deskewed.h5'
     bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_tiles, \
-    subsamp=((1, 1, 1), (4, 4, 4), (8, 8, 8), (16,16,16)), blockdim=((256, 256, 32),))
+        subsamp=((1,1,1),(4,8,4),(8,16,8),),blockdim=((32, 128, 64),))
 
     # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
     for sub_dir in sub_dirs:
 
         # determine the channel this directory corresponds to
         m = re.search('ch(\d+)', str(sub_dir), re.IGNORECASE)
-        channel_id = m.group(1)
+        channel_id = int(m.group(1))
 
         # determine the tile this directory corresponds to
         m = re.search('y(\d+)', str(sub_dir), re.IGNORECASE)
-        tile_id = m.group(1)
-
+        tile_id = int(m.group(1))
+        print('Channel ID: '+str(channel_id)+'; Experimental tile ID: '+str(tile_id)+ \
+            '; BDV tile IDs: '+str(2*tile_id)+' & '+str(2*tile_id+1))
+        
         # read all strips for each channel. Then place into larger array
-        file_pattern = 'input_dir_path/sub_dir/*.tif'
-        stack = imread(file_pattern)
+        files = natsorted(sub_dir.glob('*.tif'), alg=ns.PATH)
+        split = len(files)//2
 
         # setup processing
-        deskewed = stack.map_blocks(stage_recon, parameters=params)
+        print('starting deskew block 1.')
+        sub_stack = [io.imread(file) for file in files[0:split+100]]
+        deskewed = stage_deskew(data=sub_stack,parameters=params)
+        del sub_stack
+        deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
+        del deskewed
+        gc.collect()
+        print('finished deskew block 1.')
 
+        print('Writing block 1.')
         # write BDV tile
-        bdv_writer.append_view(deskewed, time=0, channel=channel_id, tile=tile_id)
-
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id)
 
         # free up memory
+        del deskewed_downsample
+        gc.collect()
+
+        # setup processing
+        print('starting deskew block 2.')
+        sub_stack = [io.imread(file) for file in files[split-100:]]
+        deskewed = stage_deskew(data=sub_stack,parameters=params)
+        del sub_stack
+        deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
         del deskewed
-        del stack
+        gc.collect()
+        print('finished deskew block 2.')
+
+        print('Writing block 2.')
+        # write BDV tile
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id+1)
+
+        # free up memory
+        del deskewed_downsample
         gc.collect()
 
     # https://github.com/nvladimus/npy2bdv
