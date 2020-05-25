@@ -139,11 +139,13 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 	return answer;
 }
 // scan settings
+// scan settings
 float overlap = 0.2;			// (%)
-float start_x = 28.0;		// (mm)
-float end_x = 30.0;			// (mm)
-float start_y = 2.5;			// (mm)
+float start_x = 16.4;		// (mm)
+float end_x = 27.4;			// (mm)
+float start_y = 3.75;			// (mm)
 float end_y = 5.5;			// (mm)
+
 port = "COM13";
 command = "SPEED X=.5";
 answer = setTigerCommand(port,command,false);

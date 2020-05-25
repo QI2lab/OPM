@@ -111,8 +111,7 @@ def stage_deskew(data,parameters):
 # parse experimental directory, load data, perform orthogonal deskew, and save as BDV H5 file
 def main(argv):
 
-    # parse directory name from command line argument
-    # TO DO: parse number of images in strip, number of strips, and number of channels from MM metadata 
+    # parse directory name from command line argument 
     input_dir_string = ''
     output_dir_string = ''
 
@@ -149,8 +148,8 @@ def main(argv):
     sub_dirs = natsorted(sub_dirs, alg=ns.PATH)
 
     # TO DO: automatically determine number of channels and tile positions
-    num_channels=4
-    num_tiles=28
+    num_channels=1
+    num_tiles=1
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
@@ -168,8 +167,8 @@ def main(argv):
     # TO DO: modify npy2bdv to support B3D compression, https://git.embl.de/balazs/B3D
     #        this may involve change the underlying hdf5 install that h5py is using
     output_path = output_dir_path / 'deskewed.h5'
-    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_tiles, \
-        subsamp=((1,1,1),(4,8,4),(8,16,8),),blockdim=((32, 128, 64),(32/4,128/8,64/4),(32/8,128/16,64/8),))
+    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=2*num_tiles+1, \
+        subsamp=((1,1,1),(4,8,4),(8,16,8),),blockdim=((16, 32, 16),))
 
     # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
     # TO DO: implement directory polling to do this in the background while data is being acquired.
@@ -189,13 +188,17 @@ def main(argv):
         
         # find all individual tif files in the current channel + tile sub directory and sort 
         files = natsorted(sub_dir.glob('*.tif'), alg=ns.PATH)
-        
+
+        # reverse file list so that tilt angle is along reconstruction direction 
+        files.reverse()
+
         # find middle of tilted plane acquisition
         split = len(files)//2
+        overlap = np.int64(np.floor(2*split*.05))
 
         print('Deskew block 1.')
         # read in first block of data with a small overlap for alignment in BigStitcher
-        sub_stack = np.asarray([io.imread(file) for file in files[0:split+100]],dtype=np.float32)
+        sub_stack = np.asarray([io.imread(file) for file in files[0:split+overlap]],dtype=np.float32)
 
         # run deskew for the first block of data
         deskewed = stage_deskew(data=sub_stack,parameters=params)
@@ -208,7 +211,8 @@ def main(argv):
 
         print('Writing deskewed block 1.')
         # write BDV tile
-        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id, \
+        # https://github.com/nvladimus/npy2bdv 
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=0, tile=2*tile_id, \
             voxel_size_xyz=(.116,.100,.116), voxel_units='um')
 
         # free up memory
@@ -217,7 +221,7 @@ def main(argv):
 
         print('Deskew block 2.')
         # read in second block of data with a small overlap for alignment in BigStitcher
-        sub_stack = np.asarray([io.imread(file) for file in files[split-100:]],dtype=np.float32)
+        sub_stack = np.asarray([io.imread(file) for file in files[split-overlap:]],dtype=np.float32)
 
         # run deskew for the second block of data
         deskewed = stage_deskew(data=sub_stack,parameters=params)
@@ -230,15 +234,16 @@ def main(argv):
 
         print('Writing deskewed block 2.')
         # write BDV tile
-        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id+1, \
+        # https://github.com/nvladimus/npy2bdv 
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=0, tile=2*tile_id+1, \
             voxel_size_xyz=(.116,.100,.116), voxel_units='um')
 
         # free up memory
         del deskewed_downsample
         gc.collect()
 
-    # https://github.com/nvladimus/npy2bdv
     # write BDV xml file
+    # https://github.com/nvladimus/npy2bdv
     bdv_writer.write_xml_file(ntimes=1)
     bdv_writer.close()
 

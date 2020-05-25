@@ -154,7 +154,7 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 // --------------------------------
 
 // laser settings
-float[] laser_power = new float [] {5.0,10.0,10.0,20.0,0.0};		// (%)
+float[] laser_power = new float [] {10.0,20.0,10.0,40.0,0.0};		// (%)
 int[] laser_state = new int [] {1,1,1,1,0};								// (binary)
 
 // exposure time
@@ -162,10 +162,10 @@ float exposure_ms = 10.;	// (ms)
 
 // scan settings
 float overlap = 0.2;			// (%)
-float start_x = 26.0;		// (mm)
-float end_x = 36.0;			// (mm)
-float start_y = 2.0;			// (mm)
-float end_y = 7.0;			// (mm)
+float start_x = 16.4;		// (mm)
+float end_x = 27.4;			// (mm)
+float start_y = 2.5;			// (mm)
+float end_y = 5.5;			// (mm)
 
 // tiger controller port
 port = "COM13";
@@ -224,9 +224,9 @@ float exposure_s = exposure_ms / 1000.; 			// (s)
 float scan_rate = scan_step_mm / exposure_s;		// (mm/s)
 
 float scan_distance = Math.abs(start_x-end_x);							// (mm)
-float tile_step_um = (976.*pixel_size_um) * (1-overlap); 		 	// (um)
-float tile_step_mm = (976.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
-float tile_step_asi = (976*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
+float tile_step_um = (712.*pixel_size_um) * (1-overlap); 		 	// (um)
+float tile_step_mm = (712.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
+float tile_step_asi = (712*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
 
 int num_images = Math.round(scan_distance / (scan_rate * exposure_s));
 int num_tiles = Math.round((Math.abs(Math.abs(start_y)-Math.abs(end_y))/tile_step_mm)); 
