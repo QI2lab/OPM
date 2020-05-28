@@ -1,4 +1,4 @@
-# High NA orthogonal plane microscope
+# High NA oblique plane microscopy
 Control and analysis code for our OPM using a solid immersion tertiary objective (aka [Mr. Snouty](https://andrewgyork.github.io/high_na_single_objective_lightsheet/)). Preprint [here](https://www.biorxiv.org/content/10.1101/2020.04.07.030569v2).
 
 * /Control-MM
