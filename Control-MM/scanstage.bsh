@@ -1,0 +1,474 @@
+// imports
+import org.micromanager.display.DisplayWindow;
+import org.micromanager.MultiStagePosition;
+import org.micromanager.SequenceSettings;
+import org.micromanager.api.AcquisitionOptions;
+import org.micromanager.data.Coords;
+import org.micromanager.data.Datastore;
+import org.micromanager.data.Image;
+import org.micromanager.data.Metadata;
+import org.micromanager.data.Metadata.MetadataBuilder;
+import org.micromanager.data.SummaryMetadata;
+import org.micromanager.data.SummaryMetadataBuilder;
+
+import mmcorej.*;
+
+import java.awt.geom.Point2D;
+import java.lang.System;
+import java.lang.Math;
+import java.lang.String;
+import java.text.SimpleDateFormat;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import ij.gui.GenericDialog;
+import ij.ImagePlus;
+import ij.ImageStack;
+
+// function to send/receive commands from Tiger controller
+// checks if commands were received / response sent correctly
+// checkbusy flag checks if stage is still executing move
+
+String setTigerCommand(String port,String command,boolean checkbusy) {
+	
+	String answer="";
+	send_success=false;
+	
+	// make sure command and response were received
+	while (!send_success) {
+
+		// send command
+		exception_occured=false;
+		try {
+			mmc.setSerialPortCommand(port, command, "\r");
+		}
+		catch (Exception ex) {
+			mmc.sleep(100);
+			send_success=false;
+			exception_occured=true;
+		}
+		if (!exception_occured) {
+			send_success=true;
+		}
+
+		// get response
+		send_success=false;
+		exception_occured=false;
+		try {
+			answer = mmc.getSerialPortAnswer(port, "\r\n");
+		}
+		catch (Exception ex) {
+			mmc.sleep(100);
+			send_success=false;
+			exception_occured=true;
+		}
+		if (!exception_occured) {
+			send_success=true;
+		}
+	}
+
+	// checkbusy flag active, check if stage is moving
+	if (checkbusy) {
+		answer="";
+		send_success=false;
+
+		// make sure command and response were received
+		while (!send_success) {
+			//send command
+			exception_occured=false;
+			try {
+				mmc.setSerialPortCommand(port, "STATUS", "\r");
+			}
+			catch (Exception ex) {
+				mmc.sleep(100);
+				send_success=false;
+				exception_occured=true;
+			}
+			if (!exception_occured) {
+				send_success=true;
+			}
+		}
+
+		// get response
+		send_success=false;
+		exception_occured=false;
+		
+		try {
+			answer = mmc.getSerialPortAnswer(port, "\r\n");
+		}
+		catch (Exception ex) {
+			mmc.sleep(100);
+			send_success=false;
+			exception_occured=true;
+		}
+		if (!exception_occured) {
+			send_success=true;
+		}
+
+		// stage responded busy. check again.
+		while (!answer.matches("N")) {
+			answer="";
+			send_success=false;
+
+			// make sure command and response were received
+			while (!send_success) {
+				// send command
+				exception_occured=false;
+				try {
+					mmc.setSerialPortCommand(port, "STATUS", "\r");
+				}
+				catch (Exception ex) {
+					mmc.sleep(100);
+					send_success=false;
+					exception_occured=true;
+				}
+				if (!exception_occured) {
+					send_success=true;
+				}
+			}
+
+			// get response
+			send_success=false;
+			exception_occured=false;
+
+			try {
+				answer = mmc.getSerialPortAnswer(port, "\r\n");
+			}
+			catch (Exception ex) {
+				mmc.sleep(100);
+				send_success=false;
+				exception_occured=true;
+			}
+			if (!exception_occured) {
+				send_success=true;
+			}
+		}
+	}
+
+	// return final answer from Tiger
+	return answer;
+}
+
+// user settings
+
+// --------------------------------
+
+// laser settings
+float[] laser_power = new float [] {10.0,20.0,10.0,40.0,0.0};		// (%)
+int[] laser_state = new int [] {1,1,1,1,0};								// (binary)
+
+// exposure time
+float exposure_ms = 10.;	// (ms)
+
+// scan settings
+float overlap = 0.2;			// (%)
+float start_x = 16.4;		// (mm)
+float end_x = 27.4;			// (mm)
+float start_y = 2.5;			// (mm)
+float end_y = 5.5;			// (mm)
+
+// tiger controller port
+port = "COM13";
+
+// display aquisition flag
+// should be false unless running a small scan
+boolean display_acq=false;
+
+// --------------------------------
+
+// assign the core to mmc variable
+mmc = mm.getCore();
+
+// clean up any existing acquisitions
+mmc.stopSequenceAcquisition();
+mmc.clearCircularBuffer();
+
+// get focus device
+z_stage = mmc.getFocusDevice();
+
+// pull acquisition settings from MDA window
+acq_settings = mm.acquisitions().getAcquisitionSettings();
+root_dir = acq_settings.root;
+root_dir_unique = mm.data().getUniqueSaveDirectory(root_dir);
+
+// Create multipagetiff datatstore
+//Datastore store = mm.data().createMultipageTIFFDatastore(root_dir_unique,true,false);
+Datastore store = mm.data().createSinglePlaneTIFFSeriesDatastore(root_dir_unique);
+
+// Create a display for the datastore
+if (display_acq) {
+	DisplayWindow display = mm.displays().createDisplay(store);
+	mm.displays().manage(store);
+}
+
+// Setup scan
+
+// Setup PLC card to give start trigger
+
+String plcName = "PLogic:E:36";
+String propPosition = "PointerPosition";
+String propCellConfig = "EditCellConfig";
+int addrOutputBNC3 = 35;
+int addrStageSync = 46;  // TTL5 on Tiger backplane = stage sync signal
+ 
+// connect to BNC output
+mmc.setProperty(plcName, propPosition, addrOutputBNC3);
+mmc.setProperty(plcName, propCellConfig, addrStageSync);
+
+// calculate scan properties
+
+float pixel_size_um = 0.116; 							// (um)
+float step_size_um = 0.100;							// (um)
+float scan_step_mm = step_size_um / 1000.;		// (mm)
+float exposure_s = exposure_ms / 1000.; 			// (s)
+float scan_rate = scan_step_mm / exposure_s;		// (mm/s)
+
+float scan_distance = Math.abs(start_x-end_x);							// (mm)
+float tile_step_um = (712.*pixel_size_um) * (1-overlap); 		 	// (um)
+float tile_step_mm = (712.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
+float tile_step_asi = (712*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
+
+int num_images = Math.round(scan_distance / (scan_rate * exposure_s));
+int num_tiles = Math.round((Math.abs(Math.abs(start_y)-Math.abs(end_y))/tile_step_mm)); 
+if (num_tiles==0) {num_tiles=1;}
+
+print("Scan rate: "+scan_rate+" mm/s");
+print("Number of camera acquisitions per scan strip: "+num_images);
+print("Number of strips: "+num_tiles);
+print("Total images: "+(num_images*num_tiles));
+
+//--------------------------------
+
+// setup camera
+mmc.setConfig("CameraReadout","2-CMS");
+mmc.setConfig("CameraTemp","Cold");
+mmc.setConfig("CameraTrigger","Trigger first");
+
+// set exposure
+mmc.setExposure(exposure_ms);
+
+// setup Tiger controller and move to initial position
+
+// set tiling stage to a fast speed
+command = "SPEED Y=.5";
+answer = setTigerCommand(port,command,false);
+print("Set tiling stage speed to fast.");
+
+// move tiling stage to initial position
+command = "MOVE Y="+start_y*10000;
+answer = setTigerCommand(port,command,true);
+print("Moved tiling stage to start position of: "+start_y);
+
+// set slow scan stage to a fast speed
+command = "SPEED X=.5";
+answer = setTigerCommand(port,command,false);
+print("Set scan stage speed to fast for initial move.");
+
+// move slow scan stage to initial position
+command = "MOVE X="+start_x*10000;
+answer = setTigerCommand(port,command,true);
+print("Moved scan stage to: "+start_x);
+
+// set slow scan stage to constant rate slow scan speed
+command = "SPEED X="+scan_rate;
+answer = setTigerCommand(port,command,false);
+print("Set scan stage speed to slow.");
+
+// set slow scan stage to true 1D scan with no backlash
+command = "1SCAN X? Y=0 Z=9 F=0";
+answer = setTigerCommand(port,command,false);
+print("Set to true 1D slow scan");
+
+// set range for slow scan stage
+command = "1SCANR X="+start_x+" Y="+end_x+" R=50";
+answer = setTigerCommand(port,command,false);
+print("Set slow scan range.");
+
+// create Coordinates builder object
+Coords.CoordsBuilder builder = mm.data().getCoordsBuilder();
+
+// initialize tiling counters
+int y_counter=0;
+boolean laser_OK=false;
+
+while (y_counter < num_tiles) {
+
+	for (int channel_tracker=0;channel_tracker<5;channel_tracker++) {
+
+		mmc.setConfig("Obis-State-405","Off");
+		mmc.waitForConfig("Obis-State-405","Off");
+		
+		mmc.setConfig("Obis-State-488","Off");
+		mmc.waitForConfig("Obis-State-488","Off");
+		
+		mmc.setConfig("Obis-State-561","Off");
+		mmc.waitForConfig("Obis-State-561","Off");
+		
+		mmc.setConfig("Obis-State-637","Off");
+		mmc.waitForConfig("Obis-State-637","Off");
+		
+		mmc.setConfig("Obis-State-730","Off");
+		mmc.waitForConfig("Obis-State-730","Off");
+		
+		if (laser_state[channel_tracker]==1) {
+
+			//set laser
+			if (channel_tracker==0) {
+				mmc.setConfig("Obis-State-405","On");
+				mmc.waitForConfig("Obis-State-405","On");
+				mmc.setProperty("Coherent-Scientific Remote","Laser 405-100C - PowerSetpoint (%)",laser_power[channel_tracker]);
+			}
+			else if (channel_tracker==1) {
+				mmc.setConfig("Obis-State-488","On");
+				mmc.waitForConfig("Obis-State-488","On");
+				mmc.setProperty("Coherent-Scientific Remote","Laser 488-150C - PowerSetpoint (%)",laser_power[channel_tracker]);
+			}
+			else if (channel_tracker==2) {
+				mmc.setConfig("Obis-State-561","On");
+				mmc.waitForConfig("Obis-State-561","On");
+				mmc.setProperty("Coherent-Scientific Remote","Laser OBIS LS 561-150 - PowerSetpoint (%)",laser_power[channel_tracker]);
+			}
+			else if (channel_tracker==3) {
+				mmc.setConfig("Obis-State-637","On");
+				mmc.waitForConfig("Obis-State-637","On");
+				mmc.setProperty("Coherent-Scientific Remote","Laser 637-140C - PowerSetpoint (%)",laser_power[channel_tracker]);
+			}
+			else if (channel_tracker==4) {
+				mmc.setConfig("Obis-State-730","On");
+				mmc.waitForConfig("Obis-State-730","On");
+				mmc.setProperty("Coherent-Scientific Remote","Laser 730-30C - PowerSetpoint (%)",laser_power[channel_tracker]);
+			}
+			
+			// initialize slow scan counters
+			int x_counter=0;
+		
+			// grab X and Z position
+			Point2D.Double point = mmc.getXYStagePosition();
+			y_now = point.getY();
+			z_now = mmc.getPosition(z_stage);
+
+			// set exposure
+			mmc.setExposure(exposure_ms);
+		
+			// start acquisition sequence with camera in internal mode for fastest acquisition
+			mmc.startSequenceAcquisition(num_images, 0, true);
+			mmc.sleep(1000);
+			
+			// start scan
+			command = "1SCAN";
+			answer = setTigerCommand(port,command,false);
+			print("Running slow scan... ");
+		
+			// execute acquisition until no more images are left in the buffer
+			while (mmc.getRemainingImageCount() > 0 || mmc.isSequenceRunning(mmc.getCameraDevice())) {
+				// if there are images in the buffer, grab and process
+				if (mmc.getRemainingImageCount() > 0) {
+					// convert top image in buffer to imageProcessor
+					TaggedImage tagged = mmc.popNextTaggedImage();
+					Image image = mm.data().convertTaggedImage(tagged);
+							
+					//Create metadata object for image
+					MetadataBuilder mdb = image.getMetadata().copy();
+					md = mdb.positionName("ch"+channel_tracker+"_y"+y_counter).build();
+							
+					//Build datastore coordinates for image
+					builder.stagePosition(y_counter).z(x_counter).channel(channel_tracker);
+					Coords coords = builder.build();
+				
+					//Create second image with metadata and datastore coordinates
+					image_toDataStore = image.copyWith(coords, md);
+						
+					//Place image into dataStore
+					store.putImage(image_toDataStore);
+		
+					// increment slow scan counters
+					x_counter++;
+		
+					// output progress report
+					//int test_counter = x_counter%1000;
+				//	if (test_counter==0) {
+						//print("Total camera fires:" +total_counter);
+				//		print("At strip "+(y_counter+1)+" of "+num_tiles+" total strips. Wrote "+x_counter+" images out of "+num_images+" for this strip so far...");
+				//	}
+				}
+				// no images in buffer, wait for another image to arrive.
+				else {
+					mmc.sleep(Math.min(.01 * exposure_ms, 10));
+				}
+			}
+		
+			// clean up slow scan acquistion
+			mmc.stopSequenceAcquisition();
+			mmc.clearCircularBuffer();
+
+			mmc.setConfig("Obis-State-405","Off");
+			mmc.waitForConfig("Obis-State-405","Off");
+			
+			mmc.setConfig("Obis-State-488","Off");
+			mmc.waitForConfig("Obis-State-488","Off");
+			
+			mmc.setConfig("Obis-State-561","Off");
+			mmc.waitForConfig("Obis-State-561","Off");
+			
+			mmc.setConfig("Obis-State-637","Off");
+			mmc.waitForConfig("Obis-State-637","Off");
+			
+			mmc.setConfig("Obis-State-730","Off");
+			mmc.waitForConfig("Obis-State-730","Off");
+			
+			// wait to give fly back a chance to finish and controller to return to visible
+			mmc.sleep(10000);
+		
+			// make sure the correct number of images were acquired
+			if (x_counter == num_images) {
+		
+				// check if fly back has finished and that controller is available
+				command = "STATUS";
+				answer = setTigerCommand(port,command,true);
+				print("Scan stage has reset to initial position.");
+		
+			}
+			// something went wrong
+			else {
+				print("An error occurred during image scanning...");
+		
+				// set slow scan stage to fast speed
+				command = "SPEED X=.5";
+				answer = setTigerCommand(port,command,false);
+				print("Set scan stage speed to fast.");
+		
+				// fly back to initial slow scan position
+				command = "MOVE X="+start_x*10000;
+				answer = setTigerCommand(port,command,true);
+				print("Moved scan stage to: "+start_y);
+		
+				// fly back to initial tiling position
+				command = "MOVE Y="+start_y*10000;
+				answer = setTigerCommand(port,command,true);
+				print("Moved tiling stage to: "+start_x);
+				
+				exit;
+				break;
+			}
+		}
+	}
+	// increment tiling counter
+	y_counter++;
+
+	// move tiling stage (overlap)*(large image size)
+	command = "MOVREL Y="+tile_step_asi;
+	answer = setTigerCommand(port,command,true);
+	print("Moved tiling stage to: "+(start_y+(y_counter*tile_step_mm)));
+}
+
+mmc.setConfig("Obis-State-405","Off");
+mmc.setConfig("Obis-State-488","Off");
+mmc.setConfig("Obis-State-561","Off");
+mmc.setConfig("Obis-State-637","Off");
+mmc.setConfig("Obis-State-730","Off");
+
+//Finish writing data to disk
+store.freeze();
+
+//Close dataStore object
+store.close();	
