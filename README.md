@@ -15,4 +15,4 @@ Control and analysis code for our OPM using a solid immersion tertiary objective
 This is a work in progress as we work towards fully automated imaging and a release. Integration of our fluidics setup, [pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), and real time data deskewing are next on the roadmap.
 
 # Contributions / Acknowledgements
-Peter Brown (ASU), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Jeffrey Moffitt (Harvard Medical School), Brian Long (Allen Brain Institute), Alfred Millet-Sikking (Calico), and Andrew York (Calico).
+Peter Brown (ASU), Rory Kruithoff (ASU), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Jeffrey Moffitt (Harvard Medical School), Brian Long (Allen Brain Institute), Alfred Millet-Sikking (Calico), and Andrew York (Calico).
