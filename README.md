@@ -1,4 +1,4 @@
-# High NA oblique plane microscopy for MERFISH
+# High NA oblique plane microscopy paired with multiplexed RNA-FISH
 Control and analysis code for our OPM using a solid immersion tertiary objective (aka [Mr. Snouty](https://andrewgyork.github.io/high_na_single_objective_lightsheet/)). Preprint [here](https://www.biorxiv.org/content/10.1101/2020.04.07.030569v2).
 
 * /Control-MM
@@ -6,7 +6,7 @@ Control and analysis code for our OPM using a solid immersion tertiary objective
 * /Reconstruction-python
   * Python code to execute stage deskew using orthogonal interpolation and create a [BigStitcher](https://github.com/PreibischLab/BigStitcher/) compatible HDF5 file. Orthogonal interpolation algorithm directly inspired by [Vincent Maioli PhD thesis](https://doi.org/10.25560/68022). Depends on [npy2bdv](https://github.com/nvladimus/npy2bdv/), [Numba](http://numba.pydata.org/), [scikit-image](https://scikit-image.org/), [natsort](https://natsort.readthedocs.io/en/master/index.html), and standard Python libraries.
 * /probedesign-python (work in progress)
-  * Python code to design MERFISH encoding probes, readout probes, amplifier scheme, and codebook from a set of genes. Encoding probe seqeuences are based on the [Oligopaints](https://oligopaints.hms.harvard.edu/) framework. Approach to our MERFISH probe design is a synthesis of the existing MERFISH literature and our prior RNA-FISH pipelines, which are referenced in the Jupyter notebook.
+  * Python code to design (multiplex by barcoding) or (multiplex by sequential) encoding probes, readout probes, amplifier scheme, and codebook from a set of genes. Encoding probe seqeuences are based on the [Oligopaints](https://oligopaints.hms.harvard.edu/) framework. Approach to our two-layer probe design is a synthesis of the existing MERFISH literature and our prior RNA-FISH pipelines, which are referenced in the Jupyter notebook.
 * /fluidics-python (stub)
   * Python code to control fluidics unit
 * /Control-pyMM (stub)
