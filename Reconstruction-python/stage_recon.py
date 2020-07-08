@@ -177,8 +177,11 @@ def main(argv):
         # determine the channel this directory corresponds to
         m = re.search('ch(\d+)', str(sub_dir), re.IGNORECASE)
         channel_id = int(m.group(1))
+<<<<<<< HEAD
         if channel_id>0:
             channel_id=channel_id-2
+=======
+>>>>>>> 61b0d296d03490c8c58bce26f17691658e53064e
 
         # determine the experimental tile this directory corresponds to
         m = re.search('y(\d+)', str(sub_dir), re.IGNORECASE)
@@ -192,6 +195,7 @@ def main(argv):
         files = natsorted(sub_dir.glob('*.tif'), alg=ns.PATH)
 
         # reverse file list so that tilt angle is along reconstruction direction 
+<<<<<<< HEAD
        # files.reverse()
 
         # find middle of tilted plane acquisition
@@ -201,6 +205,16 @@ def main(argv):
         print('Deskew block 1.')
         # read in first block of data with a small overlap for alignment in BigStitcher
         #sub_stack = np.asarray([io.imread(file, plugin='pil') for file in files[0:split+overlap]],dtype=np.float32)
+=======
+        files.reverse()
+
+        # find middle of tilted plane acquisition
+        split = len(files)//2
+        overlap = np.int64(np.floor(2*split*.05))
+
+        print('Deskew block 1.')
+        # read in first block of data with a small overlap for alignment in BigStitcher
+>>>>>>> 61b0d296d03490c8c58bce26f17691658e53064e
         sub_stack = np.asarray([io.imread(file) for file in files[0:split+overlap]],dtype=np.float32)
 
         # run deskew for the first block of data
@@ -215,8 +229,13 @@ def main(argv):
         print('Writing deskewed block 1.')
         # write BDV tile
         # https://github.com/nvladimus/npy2bdv 
+<<<<<<< HEAD
         bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id, \
             voxel_size_xyz=(.116,.116,.116), voxel_units='um')
+=======
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=0, tile=2*tile_id, \
+            voxel_size_xyz=(.116,.100,.116), voxel_units='um')
+>>>>>>> 61b0d296d03490c8c58bce26f17691658e53064e
 
         # free up memory
         del deskewed_downsample
@@ -224,7 +243,10 @@ def main(argv):
 
         print('Deskew block 2.')
         # read in second block of data with a small overlap for alignment in BigStitcher
+<<<<<<< HEAD
         #sub_stack = np.asarray([io.imread(file, plugin='pil') for file in files[split-overlap:]],dtype=np.float32)
+=======
+>>>>>>> 61b0d296d03490c8c58bce26f17691658e53064e
         sub_stack = np.asarray([io.imread(file) for file in files[split-overlap:]],dtype=np.float32)
 
         # run deskew for the second block of data
@@ -239,8 +261,13 @@ def main(argv):
         print('Writing deskewed block 2.')
         # write BDV tile
         # https://github.com/nvladimus/npy2bdv 
+<<<<<<< HEAD
         bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=2*tile_id+1, \
             voxel_size_xyz=(.116,.116,.116), voxel_units='um')
+=======
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=0, tile=2*tile_id+1, \
+            voxel_size_xyz=(.116,.100,.116), voxel_units='um')
+>>>>>>> 61b0d296d03490c8c58bce26f17691658e53064e
 
         # free up memory
         del deskewed_downsample
