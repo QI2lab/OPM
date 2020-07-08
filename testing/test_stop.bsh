@@ -138,11 +138,24 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 
 	return answer;
 }
+<<<<<<< Updated upstream:testing/test_stop.bsh
 
 float start_y = -.5;														// (mm)
 float start_x =11.0;															// (mm)
 
 port = "COM15";
+=======
+// scan settings
+// scan settings
+// scan settings
+float overlap = 0.2;			// (%)
+float start_x = 0.6;		// (mm)
+float end_x = 11.6;			// (mm)
+float start_y =  5.87928;			// (mm)
+float end_y = 7.3;			// (mm)
+
+port = "COM13";
+>>>>>>> Stashed changes:Control-MM/test_stop.bsh
 command = "SPEED X=.5";
 answer = setTigerCommand(port,command,false);
 print(answer);
