@@ -148,8 +148,8 @@ def main(argv):
     sub_dirs = natsorted(sub_dirs, alg=ns.PATH)
 
     # TO DO: automatically determine number of channels and tile positions
-    num_channels=1
-    num_tiles=69
+    num_channels=3
+    num_tiles=22
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
@@ -166,10 +166,10 @@ def main(argv):
     # create BDV H5 file with sub-sampling for BigStitcher
     # TO DO: modify npy2bdv to support B3D compression, https://git.embl.de/balazs/B3D
     #        this may involve change the underlying hdf5 install that h5py is using
-    output_path = output_dir_path / 'deskewed_ch0.h5'
-    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=2*num_tiles+1, \
-        subsamp=((1,1,1),(4,8,4),(8,16,8),),blockdim=((16, 32, 16),))
-
+    output_path = output_dir_path / 'deskewed_20200713.h5'
+    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=4*num_tiles, \
+        subsamp=((1,1,1),(2,2,2),(4,4,4),(8,8,8),),blockdim=((16, 16, 16),))
+    
     # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
     # TO DO: implement directory polling to do this in the background while data is being acquired.
     for sub_dir in sub_dirs:
@@ -178,79 +178,117 @@ def main(argv):
         m = re.search('ch(\d+)', str(sub_dir), re.IGNORECASE)
         channel_id = int(m.group(1))
 
-        if channel_id == 0:
+        if (channel_id==3):
+            channel_id = channel_id - 1
 
-            # determine the experimental tile this directory corresponds to
-            m = re.search('y(\d+)', str(sub_dir), re.IGNORECASE)
-            tile_id = int(m.group(1))
-            
-            # output metadata information to console
-            print('Channel ID: '+str(channel_id)+'; Experimental tile ID: '+str(tile_id)+ \
-                '; BDV tile IDs: '+str(2*tile_id)+' & '+str(2*tile_id+1))
+        # determine the experimental tile this directory corresponds to
+        m = re.search('y(\d+)', str(sub_dir), re.IGNORECASE)
+        tile_id = int(m.group(1))
 
-            # load bright field image for this channel
-            bright_field_file = input_dir_path / Path('ch0_bright.tif')
-            bright_field = np.asarray(io.imread(bright_field_file),dtype=np.float32)
-            
-            # find all individual tif files in the current channel + tile sub directory and sort 
-            files = natsorted(sub_dir.glob('*.tif'), alg=ns.PATH)
-            
-            # flip order so that light sheet tilt is along scan direction
-            files.reverse()
+        # output metadata information to console
+        print('Channel ID: '+str(channel_id)+'; Experimental tile ID: '+str(tile_id)+ \
+            '; BDV tile IDs: '+str(4*tile_id)+' - '+str(4*tile_id+3))
 
-            # find middle of tilted plane acquisition
-            split = len(files)//2
-            overlap = np.int64(np.floor(2*split*.1))
+        # load bright field image for this channel
+        bright_field_file = input_dir_path / Path('ch0_flatfield.tif')
+        bright_field = np.asarray(io.imread(bright_field_file),dtype=np.float32)
+        
+        # find all individual tif files in the current channel + tile sub directory and sort 
+        files = natsorted(sub_dir.glob('*.tif'), alg=ns.PATH)
 
-            print('Deskew block 1.')
-            # read in first block of data with a small overlap for alignment in BigStitcher
-            sub_stack = np.asarray([io.imread(file) for file in files[0:split+overlap]],dtype=np.float32)
-            sub_stack = sub_stack/bright_field
+        # flip order so that light sheet tilt is along scan direction
+        # files.reverse()
 
-            # run deskew for the first block of data
-            deskewed = stage_deskew(data=sub_stack,parameters=params)
-            del sub_stack
+        # find middle of tilted plane acquisition
+        num_split = 4
+        split = len(files)//num_split
+        overlap = np.int64(np.floor(split*.05))
 
-            # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
-            #deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
-            #del deskewed
-            gc.collect()
+        print('Deskew block 1.')
+        # read in first block of data with a small overlap for alignment in BigStitcher
+        sub_stack = np.asarray([io.imread(file) for file in files[0:split+overlap]],dtype=np.float32)
+        sub_stack = sub_stack/bright_field
+        
 
-            print('Writing deskewed block 1.')
-            # write BDV tile
-            # https://github.com/nvladimus/npy2bdv 
-            bdv_writer.append_view(deskewed, time=0, channel=channel_id, tile=2*tile_id, \
-                voxel_size_xyz=(.116,.116,.100), voxel_units='um')
+        # run deskew for the first block of data
+        deskewed = stage_deskew(data=sub_stack,parameters=params)
+        deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
+        del deskewed
+        del sub_stack
+        gc.collect()
 
-            # free up memory
-            del deskewed
-            gc.collect()
+        print('Writing deskewed block 1.')
+        # write BDV tile
+        # https://github.com/nvladimus/npy2bdv 
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=4*tile_id, voxel_size_xyz=(116, 116, 200), voxel_units='nm')
+        # free up memory
+        del deskewed_downsample
+        gc.collect()
 
-            print('Deskew block 2.')
-            # read in second block of data with a small overlap for alignment in BigStitcher
-            sub_stack = np.asarray([io.imread(file, plugin='pil') for file in files[split-overlap:]],dtype=np.float32)
-            sub_stack = sub_stack/bright_field
+        print('Deskew block 2.')
+        # read in second block of data with a small overlap for alignment in BigStitcher
+        sub_stack = np.asarray([io.imread(file) for file in files[split-overlap:2*split+overlap]],dtype=np.float32)
+        sub_stack = sub_stack/bright_field
 
-            # run deskew for the second block of data
-            deskewed = stage_deskew(data=sub_stack,parameters=params)
-            del sub_stack
+        # run deskew for the second block of data
+        deskewed = stage_deskew(data=sub_stack,parameters=params)
+        deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
+        del deskewed
+        del sub_stack
+        gc.collect()
 
-            # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
-            #deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
-            #del deskewed
-            gc.collect()
+        print('Writing deskewed block 2.')
+        # write BDV tile
+        # https://github.com/nvladimus/npy2bdv 
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=4*tile_id+1, voxel_size_xyz=(116, 116, 200), voxel_units='nm')
 
-            print('Writing deskewed block 2.')
-            # write BDV tile
-            # https://github.com/nvladimus/npy2bdv 
-            bdv_writer.append_view(deskewed, time=0, channel=channel_id, tile=2*tile_id+1, \
-                voxel_size_xyz=(.116,.116,.100), voxel_units='um')
+        # free up memory
+        del deskewed_downsample
+        gc.collect()
 
-            # free up memory
-            del deskewed
-            del bright_field
-            gc.collect()
+        print('Deskew block 3.')
+        # read in second block of data with a small overlap for alignment in BigStitcher
+        sub_stack = np.asarray([io.imread(file) for file in files[2*split-overlap:3*split+overlap]],dtype=np.float32)
+        sub_stack = sub_stack/bright_field
 
+        # run deskew for the second block of data
+        deskewed = stage_deskew(data=sub_stack,parameters=params)
+        deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
+        del deskewed
+        del sub_stack
+        gc.collect()
+
+        print('Writing deskewed block 3.')
+        # write BDV tile
+        # https://github.com/nvladimus/npy2bdv 
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=4*tile_id+2, voxel_size_xyz=(116, 116, 200), voxel_units='nm')
+
+        # free up memory
+        del deskewed_downsample
+        gc.collect()
+
+        print('Deskew block 4.')
+        # read in second block of data with a small overlap for alignment in BigStitcher
+        sub_stack = np.asarray([io.imread(file) for file in files[3*split-overlap:]],dtype=np.float32)
+        sub_stack = sub_stack/bright_field
+
+        # run deskew for the second block of data
+        deskewed = stage_deskew(data=sub_stack,parameters=params)
+        deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
+        del deskewed
+        del sub_stack
+        gc.collect()
+
+        print('Writing deskewed block 4.')
+        # write BDV tile
+        # https://github.com/nvladimus/npy2bdv 
+        bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, tile=4*tile_id+3, voxel_size_xyz=(116, 116, 200), voxel_units='nm')
+
+        # free up memory
+        del deskewed_downsample
+        del bright_field
+        gc.collect()
+    
     # write BDV xml file
     # https://github.com/nvladimus/npy2bdv
     bdv_writer.write_xml_file(ntimes=1)
