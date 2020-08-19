@@ -218,31 +218,18 @@ mmc.setProperty(plcName, propCellConfig, addrStageSync);
 // calculate scan properties
 
 float pixel_size_um = 0.116; 							// (um)
-<<<<<<< HEAD
-float step_size_um = 0.200;							// (um)
-=======
 float step_size_um = 0.100;							// (um)
->>>>>>> 61b0d296d03490c8c58bce26f17691658e53064e
 float scan_step_mm = step_size_um / 1000.;		// (mm)
 float exposure_s = exposure_ms / 1000.; 			// (s)
 float scan_rate = scan_step_mm / exposure_s;		// (mm/s)
 
 float scan_distance = Math.abs(start_x-end_x);							// (mm)
-<<<<<<< HEAD
-float tile_step_um = (1076.*pixel_size_um) * (1-overlap); 		 	// (um)
-float tile_step_mm = (1076.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
-float tile_step_asi = (1076.*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
-
-int num_images = Math.round(scan_distance / (scan_rate * exposure_s));
-int num_tiles = Math.round((Math.abs(end_y-start_y)/tile_step_mm)); 
-=======
-float tile_step_um = (712.*pixel_size_um) * (1-overlap); 		 	// (um)
-float tile_step_mm = (712.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
-float tile_step_asi = (712*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
+float tile_step_um = (2048.*pixel_size_um) * (1-overlap); 		 	// (um)
+float tile_step_mm = (2048.*pixel_size_um) * (1-overlap) * .001; 	// (mm)
+float tile_step_asi = (2048*pixel_size_um) * (1-overlap) * 10.0; // (.1 um)
 
 int num_images = Math.round(scan_distance / (scan_rate * exposure_s));
 int num_tiles = Math.round((Math.abs(Math.abs(start_y)-Math.abs(end_y))/tile_step_mm)); 
->>>>>>> 61b0d296d03490c8c58bce26f17691658e53064e
 if (num_tiles==0) {num_tiles=1;}
 
 print("Scan rate: "+scan_rate+" mm/s");
