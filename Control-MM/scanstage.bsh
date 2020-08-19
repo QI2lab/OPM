@@ -417,7 +417,7 @@ while (y_counter < num_tiles) {
 			mmc.waitForConfig("Obis-State-730","Off");
 			
 			// wait to give fly back a chance to finish and controller to return to visible
-			mmc.sleep(10000);
+			mmc.sleep(1000);
 		
 			// make sure the correct number of images were acquired
 			if (x_counter == num_images) {
