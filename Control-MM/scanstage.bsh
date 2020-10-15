@@ -154,21 +154,21 @@ String setTigerCommand(String port,String command,boolean checkbusy) {
 // --------------------------------
 
 // laser settings
-float[] laser_power = new float [] {10.0,10.0,0.0,60.0,0.0};		// (%)
-int[] laser_state = new int [] {1,1,0,1,0};								// (binary)
+float[] laser_power = new float [] {10.0,10.0,10.0,10.0,0.0};		// (%)
+int[] laser_state = new int [] {1,1,1,1,0};								// (binary)
 
 // exposure time
 float exposure_ms = 10.;	// (ms)
 
 // scan settings
-float overlap = 0.3;			// (%)
-float start_x = 14.5;		// (mm)
-float end_x = 24.5;			// (mm)
-float start_y = -4.5;			// (mm)
-float end_y = 1.5;			// (mm)
+float overlap = 0.2;			// (%)
+float start_x = 28;		// (mm)
+float end_x = 29;			// (mm)
+float start_y = 14.5;			// (mm)
+float end_y = 15.5;			// (mm)
 
 // tiger controller port
-port = "COM13";
+port = "COM6";
 
 // display aquisition flag
 // should be false unless running a small scan
@@ -217,8 +217,8 @@ mmc.setProperty(plcName, propCellConfig, addrStageSync);
 
 // calculate scan properties
 
-float pixel_size_um = 0.116; 							// (um)
-float step_size_um = 0.100;							// (um)
+float pixel_size_um = 0.115; 							// (um)
+float step_size_um = 0.200;							// (um)
 float scan_step_mm = step_size_um / 1000.;		// (mm)
 float exposure_s = exposure_ms / 1000.; 			// (s)
 float scan_rate = scan_step_mm / exposure_s;		// (mm/s)
@@ -241,7 +241,6 @@ print("Total images: "+(num_images*num_tiles));
 
 // setup camera
 mmc.setConfig("CameraReadout","2-CMS");
-mmc.setConfig("CameraTemp","Cold");
 mmc.setConfig("CameraTrigger","Trigger first");
 
 // set exposure
@@ -385,11 +384,10 @@ while (y_counter < num_tiles) {
 					x_counter++;
 		
 					// output progress report
-					//int test_counter = x_counter%1000;
-				//	if (test_counter==0) {
-						//print("Total camera fires:" +total_counter);
-				//		print("At strip "+(y_counter+1)+" of "+num_tiles+" total strips. Wrote "+x_counter+" images out of "+num_images+" for this strip so far...");
-				//	}
+					int test_counter = x_counter%1000;
+					if (test_counter==0) {
+						print("At strip "+(y_counter+1)+" of "+num_tiles+" total strips. Wrote "+x_counter+" images out of "+num_images+" for this strip so far...");
+					}
 				}
 				// no images in buffer, wait for another image to arrive.
 				else {
