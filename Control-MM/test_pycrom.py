@@ -31,8 +31,8 @@ def main():
     # 1 -> active
 
     state_405 = 0
-    state_488 = 0
-    state_561 = 1
+    state_488 = 1
+    state_561 = 0
     state_635 = 0
     state_730 = 0
 
@@ -52,7 +52,7 @@ def main():
     ROI = [1024, 0, 256, 2048] #unit: pixels
 
     # camera exposure
-    exposure_ms = 5 #unit: ms
+    exposure_ms = 10 #unit: ms
 
     # camera pixel size
     pixel_size_um = .115 # unit: um
@@ -125,10 +125,11 @@ def main():
     # set tile axis speed for all moves
     command = 'SPEED Y=.5'
     core.set_property('TigerCommHub','SerialCommand',command)
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
     # check to make sure Tiger is not busy
     ready='B'
-    while(not(ready=='N')):
+    while(ready!='N'):
         command = 'STATUS'
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
@@ -138,10 +139,11 @@ def main():
     # expects 1/10 um
     command = 'MOVE Y='+str(tile_axis_start_asi)
     core.set_property('TigerCommHub','SerialCommand',command)
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
     # check to make sure stage has finished move
     ready='B'
-    while(not(ready=='N')):
+    while(ready!='N'):
         command = 'STATUS'
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
@@ -150,10 +152,11 @@ def main():
     # set scan axis speed for large move to initial position
     command = 'SPEED X=.5'
     core.set_property('TigerCommHub','SerialCommand',command)
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
     # check to make sure Tiger is not busy
     ready='B'
-    while(not(ready=='N')):
+    while(ready!='N'):
         command = 'STATUS'
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
@@ -163,10 +166,11 @@ def main():
     # expects 1/10 um
     command = 'MOVE X='+str(scan_axis_start_asi)
     core.set_property('TigerCommHub','SerialCommand',command)
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
     # check to make sure stage has finished move
     ready='B'
-    while(not(ready=='N')):
+    while(ready!='N'):
         command = 'STATUS'
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
@@ -176,10 +180,11 @@ def main():
     # expects mm/s
     command = 'SPEED X='+str(scan_axis_speed)
     core.set_property('TigerCommHub','SerialCommand',command)
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
     # check to make sure Tiger is not busy
     ready='B'
-    while(not(ready=='N')):
+    while(ready!='N'):
         command = 'STATUS'
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
@@ -188,10 +193,11 @@ def main():
     # set scan axis to true 1D scan with no backlash
     command = '1SCAN X? Y=0 Z=9 F=0'
     core.set_property('TigerCommHub','SerialCommand',command)
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
     # check to make sure Tiger is not busy
     ready='B'
-    while(not(ready=='N')):
+    while(ready!='N'):
         command = 'STATUS'
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
@@ -201,10 +207,11 @@ def main():
     # expects mm
     command = '1SCANR X='+str(scan_axis_start_mm)+' Y='+str(scan_axis_end_mm)+' R=50'
     core.set_property('TigerCommHub','SerialCommand',command)
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
     # check to make sure Tiger is not busy
     ready='B'
-    while(not(ready=='N')):
+    while(ready!='N'):
         command = 'STATUS'
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
@@ -212,12 +219,12 @@ def main():
         
     # turn off repeated commands to Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+    answer = core.get_property('TigerCommHub','SerialCommand')
 
-    # crop FOV
-    core.set_roi(*ROI)
-
-    # set exposure
-    core.set_exposure(exposure_ms)
+    # set camera into 16bit readout mode
+    # give camera time to change modes if necessary
+    core.set_property('Camera','ReadoutRate','100MHz 16bit')
+    time.sleep(5)
 
     # set camera into low noise readout mode
     # give camera time to change modes if necessary
@@ -226,8 +233,14 @@ def main():
 
     # set camera to trigger first mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','TriggerMode','Internal Trigger')
-    time.sleep(1)
+    core.set_property('Camera','TriggerMode','Trigger first')
+    time.sleep(5)
+
+    # crop FOV
+    core.set_roi(*ROI)
+
+    # set exposure
+    core.set_exposure(exposure_ms)
 
     # set all lasers to off and user defined power
     core.set_config('Obis-State-405','Off')
@@ -288,8 +301,25 @@ def main():
 
                     # run acquisition
                     # TO DO: properly handle an error here if camera driver fails to return expected number of images.
-                    with Acquisition(directory=save_directory, name=save_name,post_camera_hook_fn=hook_fn) as acq:
-                        acq.acquire(events)
+                    with Acquisition(directory=save_directory, name=save_name, 
+                                     post_camera_hook_fn=hook_fn,show_display=False, max_multi_res_index=0) as acq:
+                        acq.acquire(events,keep_shutter_open=True)
+
+                    core=bridge.get_core()
+
+                    # allow for repeated commands to Tiger
+                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+                    # ensure scan axis has returned to initial position
+                    ready='B'
+                    while(ready!='N'):
+                        command = 'STATUS'
+                        core.set_property('TigerCommHub','SerialCommand',command)
+                        ready = core.get_property('TigerCommHub','SerialResponse')
+                        time.sleep(1)
+
+                    # turn off repeated commands to Tiger
+                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
                     if (c==0):
                         core.set_config("Obis-State-405","Off")
@@ -307,30 +337,17 @@ def main():
                         core.set_config("Obis-State-730","Off")
                         core.wait_for_config("Obis-State-730","Off")
 
-                    # allow for repeated commands to Tiger
-                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
-
-                    # ensure scan axis has returned to initial position
-                    ready='B'
-                    while(not(ready=='N')):
-                        command = 'STATUS'
-                        core.set_property('TigerCommHub','SerialCommand',command)
-                        ready = core.get_property('TigerCommHub','SerialResponse')
-                        time.sleep(1)
-
-                    # turn off repeated commands to Tiger
-                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
-
             # allow for repeated commands to Tiger
             core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
             # move height axis to new position
             command = 'MOV M='+str(height_axis_positions_asi[zstage])
             core.set_property('TigerCommHub','SerialCommand',command)
+            answer = core.get_property('TigerCommHub','SerialCommand')
 
             # make sure stage has finished move
             ready='B'
-            while(not(ready=='N')):
+            while(ready!='N'):
                 command = 'STATUS'
                 core.set_property('TigerCommHub','SerialCommand',command)
                 ready = core.get_property('TigerCommHub','SerialResponse')
@@ -344,12 +361,12 @@ def main():
 
         # move tile axis to new position
         command = 'MOV Y='+str(tile_axis_positions_asi[y])
-        print(command)
         core.set_property('TigerCommHub','SerialCommand',command)
+        answer = core.get_property('TigerCommHub','SerialCommand')
 
         # make sure stage has finished move
         ready='B'
-        while(not(ready=='N')):
+        while(ready!='N'):
             command = 'STATUS'
             core.set_property('TigerCommHub','SerialCommand',command)
             ready = core.get_property('TigerCommHub','SerialResponse')
@@ -365,16 +382,16 @@ def main():
         #                             No solution offered.
 
         # set camera to internal trigger mode
-        core.set_property('CameraTrigger','Internal Trigger')
+        core.set_property('Camera','TriggerMode','Internal Trigger')
         time.sleep(10)
 
         # set camera to trigger first mode
-        core.set_property('CameraTrigger','Trigger first')
+        core.set_property('Camera','TriggerMode','Trigger first')
         time.sleep(10)
         #-----------------------------------------------------------------------------------------------------------
 
     # set camera to internal trigger mode
-    core.set_property('CameraTrigger','Internal Trigger')
+    core.set_property('Camera','TriggerMode','Internal Trigger')
 
 # run
 if __name__ == "__main__":
