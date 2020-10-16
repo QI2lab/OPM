@@ -267,7 +267,7 @@ def main():
     # we call this 'z' here, even though it is actually oblique images acquired by moving scan axis (x) in our system
     events = []
     for z in range(number_of_images):
-        events.append({'axes': {'z': z}})
+        events.append({'axes': {'t': z}})
 
     # loop through all tile axis positions
     for y in range(len(tile_axis_positions_asi)):   
@@ -297,7 +297,7 @@ def main():
                         core.wait_for_config("Obis-State-730","On")
 
                     # setup file name
-                    save_name = 'scan_'+'y_'+str(y).zfill(4)+'x_'+str(zstage).zfill(4)+'c_'+str(c).zfill(2)
+                    save_name = Path('scan_'+'y_'+str(y).zfill(4)+'x_'+str(zstage).zfill(4)+'c_'+str(c).zfill(2))
 
                     # run acquisition
                     # TO DO: properly handle an error here if camera driver fails to return expected number of images.
@@ -305,7 +305,6 @@ def main():
                                      post_camera_hook_fn=hook_fn,show_display=False, max_multi_res_index=0) as acq:
                         acq.acquire(events,keep_shutter_open=True)
 
-                    core=bridge.get_core()
 
                     # allow for repeated commands to Tiger
                     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
