@@ -62,6 +62,8 @@ def setup_scan_fn(scan_array,event,bridge,event_queue):
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
     answer = core.get_property('TigerCommHub','SerialCommand')
 
+    return event
+
 def main():
 
     bridge = Bridge()
