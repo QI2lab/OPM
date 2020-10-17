@@ -145,7 +145,7 @@ def main():
     # create events to hold all of the scan axis images during constant speed stage scan
     # we call this 'z' here, even though it is actually oblique images acquired by moving scan axis (x) in our system
     events = []
-    for z in range(number_of_images-1):
+    for z in range(number_of_images):
         events.append({'axes': {'z': z}})
 
     # run acquisition
