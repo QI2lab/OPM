@@ -19,7 +19,6 @@ def camera_hook_fn(event,bridge,event_queue):
     core = bridge.get_core()
 
     print('post camera hook fn.')
-    print(event)
 
     command='1SCAN'
     core.set_property('TigerCommHub','SerialCommand',command)
@@ -32,75 +31,22 @@ def post_hook_fn(event,bridge,event_queue):
     core = bridge.get_core()
     
     print('post hardware hook fn.')
-    if (('y' in event) and ('z' in event)):
-        print(event)
 
-        # allow for repeated commands to Tiger
-        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+    # turn on for repeated commands to Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
-        # check to make sure Tiger is not busy
-        ready='B'
-        while(ready!='N'):
-            command = 'STATUS'
-            core.set_property('TigerCommHub','SerialCommand',command)
-            ready = core.get_property('TigerCommHub','SerialResponse')
-            time.sleep(.500)
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
 
-        # allow for repeated commands to Tiger
-        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+    # turn off for repeated commands to Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
-        # setup laser
-        # turn off lasers
-        core.set_config('Obis-State-405','Off')
-        core.wait_for_config('Obis-State-405','Off')
-        core.set_config('Obis-State-488','Off')
-        core.wait_for_config('Obis-State-488','Off')
-        core.set_config('Obis-State-561','Off')
-        core.wait_for_config('Obis-State-561','Off')
-        core.set_config('Obis-State-637','Off')
-        core.wait_for_config('Obis-State-637','Off')
-        core.set_config('Obis-State-730','Off')
-        core.wait_for_config('Obis-State-730','Off')
-
-        # turn on current channel
-        c = event['axes']['c']
-        if (c==0):
-            core.set_config("Obis-State-405","On")
-            core.wait_for_config("Obis-State-405","On")
-        elif (c==1):
-            core.set_config("Obis-State-488","On")
-            core.wait_for_config("Obis-State-488","On")
-        elif (c==2):
-            core.set_config("Obis-State-561","On")
-            core.wait_for_config("Obis-State-561","On")
-        elif (c==3):
-            core.set_config("Obis-State-637","On")
-            core.wait_for_config("Obis-State-637","On")
-        elif (c==4):
-            core.set_config("Obis-State-730","On")
-            core.wait_for_config("Obis-State-730","On")
-
-        # allow for repeated commands to Tiger
-        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
-
-        # check to make sure Tiger is not busy
-        ready='B'
-        while(ready!='N'):
-            command = 'STATUS'
-            core.set_property('TigerCommHub','SerialCommand',command)
-            ready = core.get_property('TigerCommHub','SerialResponse')
-            time.sleep(.500)
-
-        # allow for repeated commands to Tiger
-        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
-
-        # do not return event, so that this setup step is removed from the queue and camera is not called
-
-    else:
-        # call before constant speed stage scan, return large list of events
-        print(event)
-
-        return event
+    return event
 
 def main():
 
@@ -118,10 +64,10 @@ def main():
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 0
-    power_488 = 0
-    power_561 = 0
-    power_635 = 0
+    power_405 = 1
+    power_488 = 2
+    power_561 = 3
+    power_635 = 4
     power_730 = 0
 
     # exposure time
@@ -129,11 +75,11 @@ def main():
 
     # scan axis limits. Use stage positions reported by MM
     scan_axis_start_um = 28000. #unit: um
-    scan_axis_end_um = 28100. #unit: um
+    scan_axis_end_um = 28200. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
     tile_axis_start_um = 14600. #unit: um
-    tile_axis_end_um = 14650. #unit: um
+    tile_axis_end_um = 14800. #unit: um
 
     # height axis limits. Use stage positions reported by MM
     height_axis_start_um = 66160. #unit: um
@@ -324,39 +270,43 @@ def main():
     channel_powers = [power_405,power_488,power_561,power_635,power_730]
 
     # set all lasers to off and user defined power
-    core.set_config('Obis-State-405','Off')
-    core.wait_for_config('Obis-State-405','Off')
+    core.set_config('Obis-State-All','all_off')
+    core.wait_for_config('Obis-State-All','all_off')
+
     core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
-
-    core.set_config('Obis-State-488','Off')
-    core.wait_for_config('Obis-State-488','Off')
     core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
-
-    core.set_config('Obis-State-561','Off')
-    core.wait_for_config('Obis-State-561','Off')
     core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
-
-    core.set_config('Obis-State-637','Off')
-    core.wait_for_config('Obis-State-637','Off')
     core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
-
-    core.set_config('Obis-State-730','Off')
-    core.wait_for_config('Obis-State-730','Off')
     core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
     # create events to execute scan
     events = []
     for y in range(tile_axis_positions):
+        # calculate tile axis position
+        tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
         for z in range(height_axis_positions):
+            # calculate height axis positions
+            height_position_um = height_axis_start_um+(height_axis_step_um*z)
             for c in range(len(channel_states)):
-                for x in range(scan_axis_positions+1):
+                for x in range(scan_axis_positions):
                         if channel_states[c]==1:
-                            if x==0:
-                                tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
-                                height_position_um = height_axis_start_um+(height_axis_step_um*z)
-                                evt = { 'axes': {'x': x, 'y': y, 'z': z, 'c': c}, 'y': tile_position_um, 'z': height_position_um}
-                            else:
-                                evt = { 'axes': {'x': x, 'y': y, 'z': z, 'c': c}}
+                            # assign active config for current channel
+                            if (c==0):
+                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Obis-State-All', 'config': '405nm'}}
+                            elif (c==1):
+                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Obis-State-All', 'config': '488nm'}}
+                            elif (c==2):
+                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Obis-State-All', 'config': '561nm'}}
+                            elif (c==3):
+                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Obis-State-All', 'config': '637nm'}}
+                            elif (c==4):
+                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Obis-State-All', 'config': '730nm'}}
+
                             events.append(evt)
 
     # set camera to internal trigger
@@ -368,16 +318,8 @@ def main():
     with Acquisition(directory=save_directory, name=save_name, post_hardware_hook_fn=post_hook_fn,post_camera_hook_fn=camera_hook_fn, show_display=True, max_multi_res_index=0) as acq:
         acq.acquire(events)
 
-    core.set_config('Obis-State-405','Off')
-    core.wait_for_config('Obis-State-405','Off')
-    core.set_config('Obis-State-488','Off')
-    core.wait_for_config('Obis-State-488','Off')
-    core.set_config('Obis-State-561','Off')
-    core.wait_for_config('Obis-State-561','Off')
-    core.set_config('Obis-State-637','Off')
-    core.wait_for_config('Obis-State-637','Off')
-    core.set_config('Obis-State-730','Off')
-    core.wait_for_config('Obis-State-730','Off')
+    core.set_config('Obis-State-All','all_off')
+    core.wait_for_config('Obis-State-All','all_off')
 
 # run
 if __name__ == "__main__":
