@@ -17,7 +17,6 @@ def hook_fn(event,bridge,event_queue):
     core = bridge.get_core()
 
     print('post camera hook fn.')
-    print(event)
     print('fired stage scan')
 
     return event
@@ -27,23 +26,8 @@ def setup_scan_fn(event,bridge,event_queue):
     core = bridge.get_core()
 
     print('post hardware hook fn.')
-    print(event)
-    if (('y' in event) and ('z' in event)):
-        print('moved y stage to pos: '+str(event['axes']['y']))
-        print('moved z stage to pos: '+str(event['axes']['z']))
-        print('moved filter wheel to pos: ' +str(event['axes']['c']))
-        print('checking to see if hardware is finished...')
-    else:
-        print('Did not talk to hardware.')
-        return event
+    print('verified that stage controller is ready')
 
-def pre_scan_fn(event,bridge,event_queue):
-
-    core = bridge.get_core()
-
-    print('pre hardware hook fn.')
-    print('checking to see if hardware is available.')
-    
     return event
 
 def main():
@@ -67,27 +51,34 @@ def main():
     core.set_exposure(exposure_ms)
 
     # setup file name
-    save_directory=Path('F:/data/test/')
-    save_name = 'scan_'+'y_'+str(0).zfill(4)+'x_'+str(0).zfill(4)+'c_'+str(0).zfill(2)
+    save_directory=Path('E:/data/test/')
+    save_name = 'test_stages'
+
+    # get handle to xy and z stages
+    xy_stage = core.get_xy_stage_device()
+    z_stage = core.get_focus_device()
+
+    # move the stages to verify core can talk to them
+    # positions chosen at random
+    core.set_xy_position(100.,100.)
+    core.wait_for_device(xy_stage)
+    core.set_position(50.)
+    core.wait_for_device(z_stage)
 
     # create events to hold all of the scan axis images during constant speed stage scan
-    # we call this 'z' here, even though it is actually oblique images acquired by moving scan axis (x) in our system
-    wavelengths = ['405nm','488nm','561nm','635nm','730nm']
+    channel_configs = ['DAPI','FITC','Rhodamine','Cy5']
     events = []
     for y in range(2):
         for z in range(2):
-            for c in range(len(wavelengths)):
+            for c in range(len(channel_configs)):
                 for x in range(10):
-                    if z==0:
-                        evt = { 'axes': {'x': x, 'y': y, 'z': z, 'c': c},  'properties': [['Excitation','Label',wavelengths[c]]]}
-                    else:
-                        evt = { 'axes': {'x': z, 'y': y, 'z': z, 'c': c}}
-                    events.append(evt)
+                        evt = { 'axes': {'x': x, 'y': y, 'z': z, 'c': c},  'y': y*1000, 'z': z*100, 'channel': {'group': 'Channel', 'config': channel_configs[c]}}
+                        events.append(evt)
 
     # run acquisition
     # TO DO: properly handle an error here if camera driver fails to return expected number of images.
-    with Acquisition(directory=save_directory, name=save_name, pre_hardware_hook_fn=pre_scan_fn, 
-                    post_hardware_hook_fn=setup_scan_fn, post_camera_hook_fn=hook_fn, show_display=True, max_multi_res_index=0) as acq:
+    with Acquisition(directory=save_directory, name=save_name, post_hardware_hook_fn=setup_scan_fn, 
+                    post_camera_hook_fn=hook_fn, show_display=True, max_multi_res_index=0) as acq:
         acq.acquire(events)
 
 # run

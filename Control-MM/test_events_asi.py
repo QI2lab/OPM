@@ -18,11 +18,9 @@ def camera_hook_fn(event,bridge,event_queue):
 
     core = bridge.get_core()
 
-    print('post camera hook fn.')
-
     command='1SCAN'
     core.set_property('TigerCommHub','SerialCommand',command)
-    answer = core.get_property('TigerCommHub','SerialCommand')
+    answer = core.get_property('TigerCommHub','SerialCommand') # might be able to remove
 
     return event
     
@@ -30,9 +28,7 @@ def post_hook_fn(event,bridge,event_queue):
 
     core = bridge.get_core()
     
-    print('post hardware hook fn.')
-
-    # turn on for repeated commands to Tiger
+    # turn on 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
     # check to make sure Tiger is not busy
@@ -43,8 +39,18 @@ def post_hook_fn(event,bridge,event_queue):
         ready = core.get_property('TigerCommHub','SerialResponse')
         time.sleep(.500)
 
-    # turn off for repeated commands to Tiger
+    # turn off 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
+    core.set_shutter_open(True)
+
+    return event
+
+def pre_hook_fn(event,bridge,event_queue):
+
+    core = bridge.get_core()
+
+    core.set_shutter_open(False)
 
     return event
 
@@ -64,33 +70,33 @@ def main():
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 1
-    power_488 = 2
-    power_561 = 3
-    power_635 = 4
+    power_405 = 70
+    power_488 = 50
+    power_561 = 60
+    power_635 = 70
     power_730 = 0
 
     # exposure time
     exposure_ms = 10.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 28000. #unit: um
-    scan_axis_end_um = 28200. #unit: um
+    scan_axis_start_um = 27380. #unit: um
+    scan_axis_end_um = 27480. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 14600. #unit: um
-    tile_axis_end_um = 14800. #unit: um
+    tile_axis_start_um = 13300. #unit: um
+    tile_axis_end_um = 14300. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 66160. #unit: um
-    height_axis_end_um = 66200. #unit:  um
+    height_axis_start_um = 72252. #unit: um
+    height_axis_end_um = 72300. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
     ROI = [1024, 0, 256, 1024] #unit: pixels
 
     # setup file name
-    save_directory=Path('F:/20201018/')
+    save_directory=Path('E:/20201019/')
     save_name = 'scan_test'
 
     #------------------------------------------------------------------------------------------------------------------------------------
@@ -127,12 +133,7 @@ def main():
     core.set_exposure(exposure_ms)
 
     # get actual framerate, accounting for readout time
-    actual_exposure_ns = float(core.get_property('Camera','Timing-ExposureTimeNs')) #unit: ns
-    actual_readout_ns = float(core.get_property('Camera','Timing-ReadoutTimeNs')) #unit: ns
-    if (actual_readout_ns>actual_exposure_ns):
-        actual_readout_ms = actual_readout_ns/1000000. #unit: ms
-    else:
-        actual_readout_ms = actual_exposure_ns/1000000. #unit: ms
+    actual_readout_ms = float(core.get_property('Camera','ActualInterval-ms')) #unit: ms
 
     # camera pixel size
     pixel_size_um = .115 # unit: um
@@ -163,7 +164,9 @@ def main():
     # however, it may be better to hardcode displacement based on measurements of the light sheet Rayleigh length
     # for now, go with overlap calculation
     height_axis_overlap=0.2 #unit: percentage
-    height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: 1/10 um
+    height_axis_start_mm=height_axis_start_um/1000.0 # unit: mm
+    height_axis_end_mm=height_axis_end_um/1000.0 # unit: mm
+    height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
     height_axis_ROI = ROI[2]*pixel_size_um*np.sin(30*(np.pi/180.)) #unit: um
     height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
@@ -185,7 +188,7 @@ def main():
     core.set_property(plcName, propPosition, addrOutputBNC3)
     core.set_property(plcName, propCellConfig, addrStageSync)
 
-    # turn on for repeated commands to Tiger
+    # turn on 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
     # set tile axis speed for all moves
@@ -212,7 +215,7 @@ def main():
         ready = core.get_property('TigerCommHub','SerialResponse')
         time.sleep(.500)
 
-    # turn off for repeated commands to Tiger
+    # turn off 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
     # move scan scan stage to initial position
@@ -221,7 +224,7 @@ def main():
     core.set_position(height_axis_start_um)
     core.wait_for_device(z_stage)
 
-    # turn on for repeated commands to Tiger
+    # turn on 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
     # set scan axis speed to correct speed for continuous stage scan
@@ -261,18 +264,17 @@ def main():
         core.set_property('TigerCommHub','SerialCommand',command)
         ready = core.get_property('TigerCommHub','SerialResponse')
         time.sleep(.500)
-        
-    # turn off repeated commands to Tiger
+  
+    # turn off 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
+    core.set_auto_shutter(False)
 
     # construct boolean array for lasers to use
     channel_states = [state_405,state_488,state_561,state_635,state_730]
     channel_powers = [power_405,power_488,power_561,power_635,power_730]
 
     # set all lasers to off and user defined power
-    core.set_config('Obis-State-All','all_off')
-    core.wait_for_config('Obis-State-All','all_off')
-
     core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
     core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
     core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
@@ -285,27 +287,27 @@ def main():
         # calculate tile axis position
         tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
         for z in range(height_axis_positions):
-            # calculate height axis positions
+            # calculate tile axis position
             height_position_um = height_axis_start_um+(height_axis_step_um*z)
             for c in range(len(channel_states)):
                 for x in range(scan_axis_positions):
                         if channel_states[c]==1:
                             # assign active config for current channel
                             if (c==0):
-                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
-                                    'channel' : {'group': 'Obis-State-All', 'config': '405nm'}}
+                                evt = { 'axes': {'x': x, 'y':y, 'z':z,}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Coherent-Laser', 'config': '1 (405-100C)'}}
                             elif (c==1):
-                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
-                                    'channel' : {'group': 'Obis-State-All', 'config': '488nm'}}
+                                evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Coherent-Laser', 'config': '2 (488-150C)'}}
                             elif (c==2):
-                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
-                                    'channel' : {'group': 'Obis-State-All', 'config': '561nm'}}
+                                evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Coherent-Laser', 'config': '3 (OBIS LS 561-150)'}}
                             elif (c==3):
-                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
-                                    'channel' : {'group': 'Obis-State-All', 'config': '637nm'}}
+                                evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Coherent-Laser', 'config': '4 (637-140C)'}}
                             elif (c==4):
-                                evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'y': tile_position_um, 'z': height_position_um,
-                                    'channel' : {'group': 'Obis-State-All', 'config': '730nm'}}
+                                evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'y': tile_position_um, 'z': height_position_um,
+                                    'channel' : {'group': 'Coherent-Laser', 'config': '5 (730-30C)'}}
 
                             events.append(evt)
 
@@ -315,11 +317,8 @@ def main():
     time.sleep(1)
 
     # run acquisition
-    with Acquisition(directory=save_directory, name=save_name, post_hardware_hook_fn=post_hook_fn,post_camera_hook_fn=camera_hook_fn, show_display=True, max_multi_res_index=0) as acq:
-        acq.acquire(events)
-
-    core.set_config('Obis-State-All','all_off')
-    core.wait_for_config('Obis-State-All','all_off')
+    with Acquisition(directory=save_directory, name=save_name, pre_hardware_hook_fn=pre_hook_fn, post_hardware_hook_fn=post_hook_fn,post_camera_hook_fn=camera_hook_fn, show_display=True, max_multi_res_index=0) as acq:
+        acq.acquire(events,keep_shutter_open=True)
 
 # run
 if __name__ == "__main__":

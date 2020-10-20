@@ -9,5 +9,7 @@ data_path = Path('F:\\20201018\\scan_test_13\\')
 dataset = Dataset(data_path)
 
 # create dask array for dataset
-dask_array = dataset.as_array(stitched=False)
-print(dask_array.shape)
+#dask_array = dataset.as_array(stitched=False)
+#print(dask_array.shape)
+
+print(dataset.read_metadata(z=0, channel_name='405nm', x=0, y=0))
