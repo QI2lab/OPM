@@ -51,7 +51,7 @@ def main():
     core.set_exposure(exposure_ms)
 
     # setup file name
-    save_directory=Path('E:/data/test/')
+    save_directory=Path('C:/data/test/')
     save_name = 'test_stages'
 
     # get handle to xy and z stages
@@ -72,7 +72,7 @@ def main():
         for z in range(2):
             for c in range(len(channel_configs)):
                 for x in range(10):
-                        evt = { 'axes': {'x': x, 'y': y, 'z': z, 'c': c},  'y': y*1000, 'z': z*100, 'channel': {'group': 'Channel', 'config': channel_configs[c]}}
+                        evt = { 'axes': {'x': x, 'y': y, 'z': z},  'x': 100, 'y': y*1000, 'z': z*100, 'channel': {'group': 'Channel', 'config': channel_configs[c]}}
                         events.append(evt)
 
     # run acquisition
