@@ -71,15 +71,17 @@ def main():
     for y in range(2):
         for z in range(2):
             for c in range(len(channel_configs)):
-                for x in range(10):
-                        evt = { 'axes': {'x': x, 'y': y, 'z': z, 'c': c},  'y': y*1000, 'z': z*100, 'channel': {'group': 'Channel', 'config': channel_configs[c]}}
+                for x in range(2):
+                        evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'x': 100, 'y': y*1000, 'z': z*100, 'channel': {'group': 'Channel', 'config': channel_configs[c]}}
                         events.append(evt)
 
     # run acquisition
     # TO DO: properly handle an error here if camera driver fails to return expected number of images.
     with Acquisition(directory=save_directory, name=save_name, post_hardware_hook_fn=setup_scan_fn, 
-                    post_camera_hook_fn=hook_fn, show_display=True, max_multi_res_index=0) as acq:
+                    post_camera_hook_fn=hook_fn, show_display=False, max_multi_res_index=0, debug=False) as acq:
         acq.acquire(events)
+        acq.acquire(None)
+        acq.await_completion()
 
 # run
 if __name__ == "__main__":

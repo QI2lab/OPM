@@ -3,13 +3,10 @@ from pathlib import Path
 import napari
 
 # This path is to the top level of the dataset
-data_path = Path('F:\\20201018\\scan_test_13\\')
+data_path = Path('E:\\20201024\\restrepo_z000_1\\')
 
 # construct dataset
 dataset = Dataset(data_path)
 
-# create dask array for dataset
-#dask_array = dataset.as_array(stitched=False)
-#print(dask_array.shape)
-
-print(dataset.read_metadata(z=0, channel_name='405nm', x=0, y=0))
+dask_array = dataset.as_array(verbose=False)
+print(dask_array.shape)
