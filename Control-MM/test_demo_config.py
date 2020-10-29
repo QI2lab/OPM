@@ -51,7 +51,7 @@ def main():
     core.set_exposure(exposure_ms)
 
     # setup file name
-    save_directory=Path('E:/data/test/')
+    save_directory=Path('C:/data/test/')
     save_name = 'test_stages'
 
     # get handle to xy and z stages
