@@ -56,38 +56,38 @@ def main():
     state_405 = 1
     state_488 = 1
     state_561 = 1
-    state_635 = 1
+    state_635 = 0
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 80
-    power_488 = 30
-    power_561 = 20
-    power_635 = 90
+    power_405 = 50
+    power_488 = 70
+    power_561 = 50
+    power_635 = 0
     power_730 = 0
 
     # exposure time
     exposure_ms = 5.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 8880. #unit: um
-    scan_axis_end_um = 13680. #unit: um
+    scan_axis_start_um = -1700. #unit: um
+    scan_axis_end_um = 700. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 3650. #unit: um
-    tile_axis_end_um = 9050. #unit: um
+    tile_axis_start_um = 1300. #unit: um
+    tile_axis_end_um = 2300. #unit: um
 
     # height axis limits. Use stage positions reported by MM
     height_axis_start_um = 0.#unit: um
-    height_axis_end_um = 30. #unit:  um
+    height_axis_end_um = 20. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [1024, 0, 256, 1600] #unit: pixels
+    ROI = [0, 1024, 1600, 256] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20201024/')
-    save_name = 'restrepo'
+    save_directory=Path('E:/20201106/')
+    save_name = 'human_lung_test2new'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -150,7 +150,7 @@ def main():
     tile_axis_overlap=0.2 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
-    tile_axis_ROI = ROI[3]*pixel_size_um  #unit: um
+    tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
     tile_axis_step_um = np.round((tile_axis_ROI) * (1-tile_axis_overlap),2) #unit: um
     tile_axis_step_mm = tile_axis_step_um / 1000 #unit: mm
     tile_axis_positions = np.rint(tile_axis_range_mm / tile_axis_step_mm).astype(int)  #unit: number of positions
@@ -166,7 +166,7 @@ def main():
     height_axis_overlap=0.2 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
-    height_axis_ROI = ROI[2]*pixel_size_um*np.sin(30*(np.pi/180.)) #unit: um
+    height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30*(np.pi/180.)) #unit: um
     height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
     height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
     height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int) #unit: number of positions
@@ -182,11 +182,12 @@ def main():
     plcName = 'PLogic:E:36'
     propPosition = 'PointerPosition'
     propCellConfig = 'EditCellConfig'
-    addrOutputBNC3 = 35
+    #addrOutputBNC3 = 35
+    addrOutputBNC1 = 33
     addrStageSync = 46  # TTL5 on Tiger backplane = stage sync signal
     
     # connect stage sync signal to BNC output
-    core.set_property(plcName, propPosition, addrOutputBNC3)
+    core.set_property(plcName, propPosition, addrOutputBNC1)
     core.set_property(plcName, propCellConfig, addrStageSync)
 
     # turn on 'transmit repeated commands' for Tiger
@@ -280,10 +281,11 @@ def main():
     core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
     core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
+    print('Number of X positions: '+str(scan_axis_positions))
     print('Number of Y tiles: '+str(tile_axis_positions))
     print('Number of Z slabs: '+str(height_axis_positions))
 
-    time.sleep(10)
+    #time.sleep(10)
 
     for z in range(height_axis_positions):
         # calculate height axis position
@@ -329,11 +331,10 @@ def main():
 
         # run acquisition at this Z plane
         with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
-                        post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                        post_camera_hook_fn=camera_hook_fn, show_display=True, max_multi_res_index=0) as acq:
             acq.acquire(events)
 
             # added this code in an attempt to clean up resources, given the ZMQ error we are getting when using two hooks
-            # this works with demo config, hopefull will work here
             acq.acquire(None)
             acq.await_completion()
         
