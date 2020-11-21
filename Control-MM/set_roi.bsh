@@ -1,0 +1,8 @@
+// assign the core to mmc variable
+mmc = mm.getCore();
+
+// clean up any existing acquisitions
+mmc.stopSequenceAcquisition();
+mmc.clearCircularBuffer();
+
+mmc.setROI(244,1164,1600,256);
