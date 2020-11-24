@@ -54,40 +54,40 @@ def main():
     # 0 -> inactive
     # 1 -> active
     state_405 = 1
-    state_488 = 1
-    state_561 = 1
-    state_635 = 0
+    state_488 = 0
+    state_561 = 0
+    state_635 = 1
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 50
-    power_488 = 70
-    power_561 = 50
-    power_635 = 0
+    power_405 = 80
+    power_488 = 0
+    power_561 = 0
+    power_635 = 80
     power_730 = 0
 
     # exposure time
     exposure_ms = 5.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -1700. #unit: um
-    scan_axis_end_um = 700. #unit: um
+    scan_axis_start_um = -4000. #unit: um
+    scan_axis_end_um = 1000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 1300. #unit: um
-    tile_axis_end_um = 2300. #unit: um
+    tile_axis_start_um = -7000 #unit: um
+    tile_axis_end_um = -2000. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 0.#unit: um
-    height_axis_end_um = 20. #unit:  um
+    height_axis_start_um = 360.#unit: um
+    height_axis_end_um = 390. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
     ROI = [0, 1024, 1600, 256] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20201106/')
-    save_name = 'human_lung_test2new'
+    save_directory=Path('E:/2020120/')
+    save_name = 'shaffer_lung'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -103,25 +103,25 @@ def main():
     # set camera into 16bit readout mode
     # give camera time to change modes if necessary
     core.set_property('Camera','ReadoutRate','100MHz 16bit')
-    time.sleep(5)
+    time.sleep(1)
 
     # set camera into low noise readout mode
     # give camera time to change modes if necessary
     core.set_property('Camera','Gain','2-CMS')
-    time.sleep(5)
+    time.sleep(1)
 
     # set camera to trigger first mode
     # give camera time to change modes if necessary
     core.set_property('Camera','Trigger Timeout (secs)',300)
-    time.sleep(5)
+    time.sleep(1)
 
     # set camera to internal trigger
     # give camera time to change modes if necessary
     core.set_property('Camera','TriggerMode','Internal Trigger')
-    time.sleep(5)
+    time.sleep(1)
 
     # change core timeout for long stage moves
-    core.set_property('Core','TimeoutMs',20000)
+    core.set_property('Core','TimeoutMs',100000)
 
     # crop FOV
     #core.set_roi(*ROI)
@@ -194,7 +194,7 @@ def main():
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
     # set tile axis speed for all moves
-    command = 'SPEED Y=.5'
+    command = 'SPEED Y=.1'
     core.set_property('TigerCommHub','SerialCommand',command)
 
     # check to make sure Tiger is not busy
@@ -206,7 +206,7 @@ def main():
         time.sleep(.500)
 
     # set scan axis speed for large move to initial position
-    command = 'SPEED X=.5'
+    command = 'SPEED X=.1'
     core.set_property('TigerCommHub','SerialCommand',command)
 
     # check to make sure Tiger is not busy
@@ -254,9 +254,9 @@ def main():
         ready = core.get_property('TigerCommHub','SerialResponse')
         time.sleep(.500)
 
-    # set range and return speed (25% of max) for scan axis
+    # set range and return speed (5% of max) for scan axis
     # expects mm
-    command = '1SCANR X='+str(scan_axis_start_mm)+' Y='+str(scan_axis_end_mm)+' R=25'
+    command = '1SCANR X='+str(scan_axis_start_mm)+' Y='+str(scan_axis_end_mm)+' R=10'
     core.set_property('TigerCommHub','SerialCommand',command)
 
     # check to make sure Tiger is not busy
@@ -287,66 +287,67 @@ def main():
 
     #time.sleep(10)
 
-    for z in range(height_axis_positions):
-        # calculate height axis position
-        height_position_um = height_axis_start_um+(height_axis_step_um*z)
+    for y in range(tile_axis_positions):
+        # calculate tile axis position
+        tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
+        
+        # move XY stage to new tile axis position
+        core.set_xy_position(scan_axis_start_um,tile_position_um)
+        core.wait_for_device(xy_stage)
+            
+        for z in range(height_axis_positions):
+            # calculate height axis position
+            height_position_um = height_axis_start_um+(height_axis_step_um*z)
 
-        # move Z stage to new height axis position
-        core.set_position(height_position_um)
-        core.wait_for_device(z_stage)
+            # move Z stage to new height axis position
+            core.set_position(height_position_um)
+            core.wait_for_device(z_stage)
 
-        # create events to execute scan across this z plane
-        events = []
-        for y in range(tile_axis_positions):
-            # calculate tile axis position
-            tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
+            # create events to execute scan across this z plane
+            events = []
+            
             for c in range(len(channel_states)):
                 for x in range(scan_axis_positions+10):
                     if channel_states[c]==1:
                         if (c==0):
-                            evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'x': scan_axis_start_um, 'y': tile_position_um, 'z': height_position_um,
-                                'channel' : {'group': 'Coherent-State', 'config': '405nm'}}
+                            evt = { 'axes': {'x': x}, 'channel' : {'group': 'Coherent-State', 'config': '405nm'}}
                         elif (c==1):
-                            evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'x': scan_axis_start_um, 'y': tile_position_um, 'z': height_position_um,
-                                'channel' : {'group': 'Coherent-State', 'config': '488nm'}}
+                            evt = { 'axes': {'x': x}, 'channel' : {'group': 'Coherent-State', 'config': '488nm'}}
                         elif (c==2):
-                            evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'x': scan_axis_start_um, 'y': tile_position_um, 'z': height_position_um,
-                                'channel' : {'group': 'Coherent-State', 'config': '561nm'}}
+                            evt = { 'axes': {'x': x}, 'channel' : {'group': 'Coherent-State', 'config': '561nm'}}
                         elif (c==3):
-                            evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'x': scan_axis_start_um, 'y': tile_position_um, 'z': height_position_um,
-                                'channel' : {'group': 'Coherent-State', 'config': '637nm'}}
+                            evt = { 'axes': {'x': x}, 'channel' : {'group': 'Coherent-State', 'config': '637nm'}}
                         elif (c==4):
-                            evt = { 'axes': {'x': x, 'y':y, 'z':z}, 'x': scan_axis_start_um, 'y': tile_position_um, 'z': height_position_um,
-                                'channel' : {'group': 'Coherent-State', 'config': '730nm'}}
+                            evt = { 'axes': {'x': x}, 'channel' : {'group': 'Coherent-State', 'config': '730nm'}}
 
                         events.append(evt)
 
-        # set camera to trigger first mode for stage synchronization
-        # give camera time to change modes
-        core.set_property('Camera','TriggerMode','Trigger first')
-        time.sleep(5)
+            # set camera to trigger first mode for stage synchronization
+            # give camera time to change modes
+            core.set_property('Camera','TriggerMode','Trigger first')
+            time.sleep(1)
 
-        # update save_name with current Z plane
-        save_name_z = save_name + '_z'+str(z).zfill(3)
+            # update save_name with current Z plane
+            save_name_z = save_name +'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
-        # run acquisition at this Z plane
-        with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
-                        post_camera_hook_fn=camera_hook_fn, show_display=True, max_multi_res_index=0) as acq:
-            acq.acquire(events)
+            # run acquisition at this Z plane
+            with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
+                            post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                acq.acquire(events)
 
-            # added this code in an attempt to clean up resources, given the ZMQ error we are getting when using two hooks
-            acq.acquire(None)
-            acq.await_completion()
-        
-        # turn off lasers
-        core.set_config('Coherent-State','off')
-        core.wait_for_config('Coherent-State','off')
+                # added this code in an attempt to clean up resources, given the ZMQ error we are getting when using two hooks
+                acq.acquire(None)
+                acq.await_completion()
+            
+            # turn off lasers
+            core.set_config('Coherent-State','off')
+            core.wait_for_config('Coherent-State','off')
 
-        # set camera to internal trigger
-        # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
-        # give camera time to change modes
-        core.set_property('Camera','TriggerMode','Internal Trigger')
-        time.sleep(5)
+            # set camera to internal trigger
+            # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
+            # give camera time to change modes
+            core.set_property('Camera','TriggerMode','Internal Trigger')
+            time.sleep(1)
 
 # run
 if __name__ == "__main__":
