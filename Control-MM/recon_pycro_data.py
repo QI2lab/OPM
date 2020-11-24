@@ -18,6 +18,7 @@ import sys
 import getopt
 import re
 from skimage.measure import block_reduce
+from skimage.util import apply_parallel
 import time
 from numba import njit, prange
 
@@ -138,13 +139,15 @@ def main(argv):
     # Create Path object to directory
     input_dir_path=Path(input_dir_string)
 
-    # determine number of "z" slabs in root directory. loop over each one.
-    z_dir_path = [f for f in input_dir_path.iterdir() if f.is_dir()]
-    num_z = len(z_dir_path)
+    # determine number of directories in root directory. loop over each one.
+    tile_dir_path = [f for f in input_dir_path.iterdir() if f.is_dir()]
+    num_tiles = len(tile_dir_path)
 
-    # TO DO: automatically determine number of channels and tile positions from metadata. Should be trivial
-    num_channels=3
-    num_tiles=7
+    # TO DO: read text file with this information in root directory
+    num_y = 73
+    num_z = 3
+    num_channels = 2
+    split=40
 
     # create parameter array
     # [theta, stage move distance, camera pixel size]
@@ -160,62 +163,76 @@ def main(argv):
     # https://github.com/nvladimus/npy2bdv
     # create BDV H5 file with sub-sampling for BigStitcher
     output_path = output_dir_path / 'full.h5'
-    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_z*(2*num_tiles)+1, \
-        subsamp=((1,1,1),(4,8,4),(8,16,8),),blockdim=((16, 32, 16),))
-
-    # initialize tile_z counter
-    tile_z=0
+    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=(num_z*num_y*split)+1, \
+        subsamp=((1,1,1),(2,2,2),(4,4,4),(8,8,8),(16,16,16)),blockdim=((16, 16, 8),))
 
     # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
     # TO DO: implement directory polling to do this in the background while data is being acquired.
-    for z_id in range(num_z-1,-1,-1):
+    for tile in range(0,num_tiles):
+
+        # load tile
+        tile_dir_path_to_load = tile_dir_path[tile]
+        print('Loading directory: '+str(tile_dir_path_to_load))
+
+        # decode directory name to determine tile_id in h5. reverse Z order, normal y order
+        test_string = tile_dir_path_to_load.parts[-1].split('_')
+        for i in range(len(test_string)):
+            if 'y0' in test_string[i]:
+                y_idx = int(test_string[i].split('y')[1])
+            if 'z0' in test_string[i]:
+                z_idx = int(test_string[i].split('z')[1])
+
+        tile_id = ((num_z-z_idx-1)*(num_y))+y_idx
+        print('y index: '+str(y_idx)+' z index: '+str(z_idx)+' H5 tile id: '+str(tile_id))
 
         # https://pycro-manager.readthedocs.io/en/latest/read_data.html
-        # Open pycromanager dataset. Open question on why this is so slow and some errors that pop up
-        # TO DO: work with Henry on opening at a Dask Array. Then we can easily pull the data we need.
-        path_to_load = z_dir_path[z_id]
-        print(path_to_load)
-        dataset = Dataset(path_to_load)
+        dataset = Dataset(tile_dir_path_to_load)
+        
+        # extract number of images in the tile
+        num_x = len(dataset.axes['x'])
+        num_x = num_x-10
 
+        # loop over channels inside tile
         for channel_id in range(num_channels):
-            for tile_id in range(num_tiles):
 
-                # output metadata information to console
-                print('Channel ID: '+str(channel_id)+'; Experimental tile ID: '+str((z_id*num_tiles)+tile_id)+
-                    '; BDV tile IDs: '+str(((tile_z*num_tiles)+tile_id)))
-                    
-                print('Load tile.')
-                # read all x stage positions for this (tile,channel,z) combination
-                sub_stack = np.zeros([5000,256,1600])
-                for i in range(5000):
-                    sub_stack[i,:,:] = dataset.read_image(channel=channel_id, x=i+10, y=tile_id, z=z_id, read_metadata=False)
+            # read images from dataset. Skip first 10 images for stage speed up
+            sub_stack = np.zeros([num_x,256,1600])
+            for i in range(num_x):
+                sub_stack[i,:,:] = dataset.read_image(channel=channel_id, x=i+10, y=0, z=0, read_metadata=False)
 
-                #TO DO: Integrate Microvolution hook here to do deconvolution on skewed data before deskewing.
-                
-                print('Deskew tile.')
-                # run deskew for the first block of data
-                deskewed = stage_deskew(data=sub_stack,parameters=params)
-                del sub_stack
+            #TO DO: Integrate Microvolution hook here to do deconvolution on skewed data before deskewing.
+            
+            print('Deskew tile.')
+            # run deskew
+            deskewed = stage_deskew(data=sub_stack,parameters=params)
+            del sub_stack
+            gc.collect()
 
-                # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
-                deskewed_downsample = block_reduce(deskewed,block_size=(2,1,1),func=np.mean)
-                del deskewed
-                gc.collect()
+            # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
+            deskewed_downsample = block_reduce(deskewed, block_size=(2,1,1), func=np.mean)
+            del deskewed
+            gc.collect()
 
-                print('Write tile.')
-                # write BDV tile
-                # https://github.com/nvladimus/npy2bdv 
-                bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, 
-                                        tile=(tile_z*num_tiles)+tile_id,
+            print('Split and write tiles.')
+            # write BDV tile
+            # https://github.com/nvladimus/npy2bdv 
+            for split_id in range(split):
+                size = np.floor(num_x/split)
+                size_overlap = size * 1.1
+
+                if split_id == split-1:
+                    deskewed_downsample_substack = deskewed_downsample[split_id*size:]
+                else:
+                    deskewed_downsample_substack = deskewed_downsample[split_id*size:(split_id+1)*size_overlap]
+
+                bdv_writer.append_view(deskewed_downsample_substack, time=0, channel=channel_id, 
+                                        tile=(tile_id*split)+split_id,
                                         voxel_size_xyz=(.115,.115,.200), voxel_units='um')
 
-                # free up memory
-                del deskewed_downsample
-                #del deskewed_downsample
-                gc.collect()
-
-        # tile_z increment
-        tile_z=tile_z+1
+            # free up memory
+            del deskewed_downsample
+            #del deskewed_downsample
+            gc.collect()
 
     # write BDV xml file
     # https://github.com/nvladimus/npy2bdv
