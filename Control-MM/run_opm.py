@@ -11,6 +11,8 @@ from pycromanager import Bridge, Acquisition
 from pathlib import Path
 import numpy as np
 import time
+import sys
+import msvcrt
 import pandas as pd
 from hardware.APump import Apump
 from hardware.HamiltonMVP import HamiltonMVP
@@ -46,7 +48,7 @@ def post_hook_fn(event,bridge,event_queue):
 
     return event
 
-def run_fluidic_controller(round,full_program, mvp_controller, pump_controller):
+def run_fluidic_program(round,full_program, mvp_controller, pump_controller):
 
     # parse dataframe for current round
     pd_current_round = pd_full_program() # select everything with this round
@@ -62,18 +64,20 @@ def run_fluidic_controller(round,full_program, mvp_controller, pump_controller):
         mvp_controller.changePort()
 
         # extract volume to pump and time
-        pump_time = pd_current_round[]*60
-        pump_amount = pd_current_round
+        pump_time_min = pd_current_round[]
+        pump_time_sec = pump_time_min * 60
+        pump_amount_ml = pd_current_round
 
         # convert ml/min rate to pump rate
         # this is hardcoded to our fluidic setup
         # please check for your own setup
-        
+        conversion_factor = 
+        pump_rate = pump_amount/pump_time * conversion_factor
 
         # run pump
         pump_controller.startFlow(pump_rate,direction='Forward')
-        time.sleep(pump_time)
-        pump_controller.stopFlow
+        time.sleep(pump_time_sec)
+        pump_controller.stopFlow()
     
     return True
 
@@ -344,9 +348,9 @@ def main():
     valve_controller.autoAddress()
     valve_controller.autoDetectValves()
 
-    for fluidic_round in range(total_fluidic_rounds):
+    for r in range(total_fluidic_rounds):
 
-        if (~run_fluidic_controller(fluidic_round,full_fluidic_program, mvp_controller, pump_controller)):
+        if (~run_fluidic_controller(r,full_fluidic_program, mvp_controller, pump_controller)):
             print('Error in fluidics! Stopping scan.')
             exit()
 
@@ -408,6 +412,26 @@ def main():
                 # turn off lasers
                 core.set_config('Coherent-State','off')
                 core.wait_for_config('Coherent-State','off')
+
+                timeout = 5
+                startTime = time.time()
+                inp = None
+
+                print('Press any key to pause acquisition...')
+                while True:
+                    if msvcrt.kbhit():
+                        inp = msvcrt.getch()
+                        break
+                    elif time.time() - startTime > timeout:
+                        break
+
+                if inp:
+                    inp2 = 'f'
+                    while (!(inp2=='c'):
+                        print('Enter "c" to continue.')
+                        inp2 = msvcrt.getch()
+                else:
+                    print('Continuing acquisition.')
 
             # set camera to internal trigger
             # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
