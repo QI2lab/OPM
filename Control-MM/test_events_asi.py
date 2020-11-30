@@ -60,33 +60,33 @@ def main():
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 80
+    power_405 = 50
     power_488 = 0
     power_561 = 0
-    power_635 = 80
+    power_635 = 90
     power_730 = 0
 
     # exposure time
     exposure_ms = 5.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -4000. #unit: um
-    scan_axis_end_um = 1000. #unit: um
+    scan_axis_start_um = -26000. #unit: um
+    scan_axis_end_um = -6000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -7000 #unit: um
-    tile_axis_end_um = -2000. #unit: um
+    tile_axis_start_um = -13500 #unit: um
+    tile_axis_end_um = -1500. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 360.#unit: um
-    height_axis_end_um = 390. #unit:  um
+    height_axis_start_um = 320.#unit: um
+    height_axis_end_um = 360. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1600, 256] #unit: pixels
+    ROI = [0, 1024, 1599, 255] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/2020120/')
+    save_directory=Path('E:/2020123/')
     save_name = 'shaffer_lung'
 
     #------------------------------------------------------------------------------------------------------------------------------------
@@ -147,7 +147,7 @@ def main():
     scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
 
     # tile axis setup
-    tile_axis_overlap=0.2 #unit: percentage
+    tile_axis_overlap=0.1 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
     tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
@@ -163,7 +163,7 @@ def main():
     # the height of the scan is the length of the ROI in the tilted direction * sin(tilt angle)
     # however, it may be better to hardcode displacement based on measurements of the light sheet Rayleigh length
     # for now, go with overlap calculation
-    height_axis_overlap=0.2 #unit: percentage
+    height_axis_overlap=0.1 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
     height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30*(np.pi/180.)) #unit: um
