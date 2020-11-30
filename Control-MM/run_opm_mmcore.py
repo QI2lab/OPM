@@ -5,6 +5,15 @@ Reverting to calling core MM functions for acquisition and npy2bdv for storage.
 NDTiffStorage is extremely slow to load datasets when storing a lot of data.
 
 Open question if Python-Java bridge is fast enough to pull images to store in H5...we'll find out.
+It isn't quite fast enough to keep up with data generation.
+End up with 20% of total images in sequence buffer at end of scan.
+
+
+TO DO:
+1. Investigate adding rotation + deskew affine after creating H5/XML.
+2. Swap out Python-Java bridge for native camera API to avoid pulling across Pycromanager bridge.
+3. Integrate fluidics components from MERFISH branch. These will go into TIME dimension in BDV H5.
+4. Optimize block size for writing. Can we do this over network?
 
 Shepherd 11/20
 '''
@@ -12,10 +21,9 @@ Shepherd 11/20
 # imports
 from pycromanager import Bridge
 from pathlib import Path
-import npy2bv
+import npy2bdv
 import numpy as np
 import time
-
 
 def main():
 
@@ -33,34 +41,34 @@ def main():
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 80
+    power_405 = 10
     power_488 = 0
     power_561 = 0
-    power_635 = 80
+    power_635 = 10
     power_730 = 0
 
     # exposure time
     exposure_ms = 5.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -4000. #unit: um
-    scan_axis_end_um = 1000. #unit: um
+    scan_axis_start_um = -26000. #unit: um
+    scan_axis_end_um = -25500. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
     tile_axis_start_um = -7000 #unit: um
-    tile_axis_end_um = -2000. #unit: um
+    tile_axis_end_um = -6500. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 360.#unit: um
-    height_axis_end_um = 390. #unit:  um
+    height_axis_start_um = 345.#unit: um
+    height_axis_end_um = 375. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1600, 256] #unit: pixels
+    ROI = [0, 1024, 1599, 255] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/2020120/')
-    save_name = 'shaffer_lung'
+    save_directory=Path('E:/20201130/')
+    save_name = Path('shaffer_lung_v1.h5')
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -110,7 +118,7 @@ def main():
     pixel_size_um = .115 # unit: um
 
     # scan axis setup
-    scan_axis_step_um = 0.2  # unit: um
+    scan_axis_step_um = 0.4  # unit: um
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -226,7 +234,7 @@ def main():
         ready = core.get_property('TigerCommHub','SerialResponse')
         time.sleep(.500)
 
-    # set range and return speed (5% of max) for scan axis
+    # set range and return speed (10% of max) for scan axis
     # expects mm
     command = '1SCANR X='+str(scan_axis_start_mm)+' Y='+str(scan_axis_end_mm)+' R=10'
     core.set_property('TigerCommHub','SerialCommand',command)
@@ -260,7 +268,7 @@ def main():
     print('Number of X positions: '+str(scan_axis_positions))
     print('Number of Y tiles: '+str(tile_axis_positions))
     print('Number of Z slabs: '+str(height_axis_positions))
-    print('Number of channels:' +str(np.sum(channel_states))
+    print('Number of channels:' +str(np.sum(channel_states)))
     print('Number of BDV H5 tiles: '+str(total_tiles))
 
     # define unit tranformation matrix
@@ -269,8 +277,8 @@ def main():
                         (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
 
     # create BDV H5 using npy2bdv
-    fname = save_directory + save_name + '.h5'
-    bdv_writer = npy2bdv.BdvWriter(fname, nchannels=np.sum(channel_states), ntiles=total_tiles, subsamp=((1, 1, 1),), blockdim=((32,32,32),))
+    fname = save_directory/save_name
+    bdv_writer = npy2bdv.BdvWriter(fname, nchannels=np.sum(channel_states), ntiles=total_tiles, subsamp=((1, 1, 1),), blockdim=((1,128,256),))
 
     # reset tile index for BDV H5 file
     tile_index = 0
@@ -284,6 +292,9 @@ def main():
         core.wait_for_device(xy_stage)
             
         for z in range(height_axis_positions):
+
+            print('Tile index: '+str(tile_index))
+
             # calculate height axis position
             height_position_um = height_axis_start_um+(height_axis_step_um*z)
 
@@ -308,87 +319,114 @@ def main():
                         core.set_config('Coherent-State','561nm')
                         core.wait_for_config('Coherent-State','561nm')
                     elif (c==3):
-                        core.set_config('Coherent-State','635nm')
-                        core.wait_for_config('Coherent-State','635nm')
+                        core.set_config('Coherent-State','637nm')
+                        core.wait_for_config('Coherent-State','637nm')
                     elif (c==4):
                         core.set_config('Coherent-State','730nm')
                         core.wait_for_config('Coherent-State','730nm')
 
-                # set camera to trigger first mode for stage synchronization
-                core.set_property('Camera','TriggerMode','Trigger first')
-                time.sleep(1)
+                    print('Channel index: '+str(channel_index))
+                    print('Active channel: '+str(c))
 
-                # get current X, Y, and Z stage positions for translation transformation
-                point = core.get_xy_stage_position()
-                x_now = point.get_x()
-                y_now = point.get_y()
-                z_now = core.get_position(z_stage)
-                        
-                # calculate affine matrix components for translation transformation
-                affine_matrix = unit_matrix
-                affine_matrix[0,3] = y_now # x axis in BDV H5 (tile axis on scope).
-                affine_matrix[1,3] = z_now # y axis in BDV H5 (height axis on scope).
-                affine_matrix[2,3] = x_now # z axis in BDV H5 (scan axis on scope).
+                    # set camera to trigger first mode for stage synchronization
+                    core.set_property('Camera','TriggerMode','Trigger first')
+                    time.sleep(1)
 
-                # reset image counter for virtual stack
-                image_counter = 0
+                    # get current X, Y, and Z stage positions for translation transformation
+                    point = core.get_xy_stage_position()
+                    x_now = point.get_x()
+                    y_now = point.get_y()
+                    z_now = core.get_position(z_stage)
+                            
+                    # calculate affine matrix components for translation transformation
+                    affine_matrix = unit_matrix
+                    affine_matrix[0,3] = y_now/pixel_size_um # x axis in BDV H5 (tile axis on scope).
+                    affine_matrix[1,3] = z_now/(pixel_size_um*np.sin(30.*np.pi/180.)) # y axis in BDV H5 (height axis on scope).
+                    affine_matrix[2,3] = x_now/(pixel_size_um*np.cos(30.*np.pi/180.)) # z axis in BDV H5 (scan axis on scope).
 
-                # append virtual stack to BDV H5
-                bdv_writer.append_view(stack=None, virtual_stack_dim=(scan_axis_positions,ROI[2],ROI[3]) time=0, channel=channel_index, tile=tile_index, 
-                                            m_affine=affine_matrix, name_affine = 'stage translation', 
-                                            voxel_size_xyz=(.115,.115,.200), voxel_units='um', calibration=(1,1,1.74))
+                    # turn off 'transmit repeated commands' for Tiger
+                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
-                # start acquistion
-                core.start_sequence_acquisition(scan_axis_positions,0,True)
+                    # check to make sure Tiger is not busy
+                    ready='B'
+                    while(ready!='N'):
+                        command = 'STATUS'
+                        core.set_property('TigerCommHub','SerialCommand',command)
+                        ready = core.get_property('TigerCommHub','SerialResponse')
+                        time.sleep(.500)
 
-                # tell stage to execute scan
-                command='1SCAN'
-                core.set_property('TigerCommHub','SerialCommand',command)
+                    # turn off 'transmit repeated commands' for Tiger
+                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
-                # grab images from buffer
-                while (core.get_remaining_image_count() > 0) or (core.is_sequence_running(core.get_camera_device())):
+                    # start acquistion
+                    core.start_sequence_acquisition(int(scan_axis_positions),float(0.0),True)
 
-                    # if there are images in the buffer, grab and process
-                    if (core.get_remaining_image_count() >0):
-                        # grab top image in buffer
-                        tagged_image = core.pop_next_tagged_image()
+                    # tell stage to execute scan
+                    command='1SCAN'
+                    core.set_property('TigerCommHub','SerialCommand',command)
 
-                        # grab metadata to convert 1D array to 2D image
-                        image_height = tagged_image.tags['Height']
-                        image_width = tagged_image.tags['Width']
+                    # reset image counter
+                    image_counter = 0
 
-                        # convert to 2D image
-                        image = tagged_image.pix.reshape((image_height,image_width))
+                    # place stack into BDV H5
+                    bdv_writer.append_view(stack=None, virtual_stack_dim=(scan_axis_positions,ROI[3],ROI[2]), time=0, channel=channel_index, tile=tile_index, 
+                                                m_affine=affine_matrix, name_affine = 'stage translation', 
+                                                voxel_size_xyz=(.115,.115,.200), voxel_units='um')
 
-                        # write virtual plane into BDV H5
-                        bdv_writer.append_plane(plane=image, plane_index=image_counter, time=0, channel=channel_index)
+                    # grab images from buffer
+                    while (image_counter < scan_axis_positions):
 
-                        # increment image counter
-                        image_counter = image_counter + 1
+                        # if there are images in the buffer, grab and process
+                        if (core.get_remaining_image_count() > 0):
+                            # grab top image in buffer
+                            tagged_image = core.pop_next_tagged_image()
 
-                    # no images in buffer, wait for another image to arrive.
-                    else:
-                        time.sleep(np.min(.01*exposure_ms, 10)/1000)
+                            # grab metadata to convert 1D array to 2D image
+                            image_height = tagged_image.tags['Height']
+                            image_width = tagged_image.tags['Width']
 
-                # increment tile index for BDV H5
-                tile_index = tile_index + 1
-							
-                # clean up slow scan acquistion
-                core.stop_sequence_acquistion()
-                core.clear_circular_buffer()
+                            # convert to 2D image and place into virtual stack in BDV H5
+                            bdv_writer.append_plane(plane=np.flipud(tagged_image.pix.reshape((image_height,image_width))), 
+                                                    plane_index=image_counter, time=0, channel=channel_index)
 
-                # turn off lasers
-                core.set_config('Coherent-State','off')
-                core.wait_for_config('Coherent-State','off')
+                            # increment image counter
+                            image_counter = image_counter + 1
 
-                # set camera to internal trigger
-                # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
-                # give camera time to change modes
-                core.set_property('Camera','TriggerMode','Internal Trigger')
-                time.sleep(1)
+                        # no images in buffer, wait for another image to arrive.
+                        else:
+                            time.sleep(np.minimum(.01*exposure_ms, 1)/1000)
+                    
+                    # clean up acquistion
+                    core.stop_sequence_acquisition()
 
-                # increment channel index for BDV H5 file
-                channel_index = channel_index + 1 
+                    # turn off lasers
+                    core.set_config('Coherent-State','off')
+                    core.wait_for_config('Coherent-State','off')
+
+                    # set camera to internal trigger
+                    # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
+                    core.set_property('Camera','TriggerMode','Internal Trigger')
+                    time.sleep(1)
+
+                    # increment channel index for BDV H5 file
+                    channel_index = channel_index + 1
+
+                    # turn off 'transmit repeated commands' for Tiger
+                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+                    # check to make sure Tiger is not busy
+                    ready='B'
+                    while(ready!='N'):
+                        command = 'STATUS'
+                        core.set_property('TigerCommHub','SerialCommand',command)
+                        ready = core.get_property('TigerCommHub','SerialResponse')
+                        time.sleep(.500)
+
+                    # turn off 'transmit repeated commands' for Tiger
+                    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+                    
+            # increment tile index for BDV H5
+            tile_index = tile_index + 1
 
     # write BDV XML and close BDV H5
     bdv_writer.write_xml_file(ntimes=1)
