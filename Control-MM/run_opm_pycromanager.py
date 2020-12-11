@@ -1,271 +1,355 @@
 #!/usr/bin/env python
 
 '''
-Stage scanning OPM post-processing using numpy, numba, skimage, and npy2bdv.
-New version to handle altered acquisition code for multi-color large area stage scans. 
-Orthgonal interpolation method as described by Vincent Maioli (http://doi.org/10.25560/68022)
+OPM stage control using Pyromanager.
 
-Shepherd 03/20
+Shepherd 11/20
 '''
 
 # imports
-import numpy as np
+from pycromanager import Bridge, Acquisition
 from pathlib import Path
-from pycromanager import Dataset
-import npy2bdv
-import gc
-import sys
-import getopt
-import re
-from skimage.measure import block_reduce
-from skimage.util import apply_parallel
+import numpy as np
 import time
-from numba import njit, prange
-
-# perform stage scanning reconstruction using orthogonal interpolation
-# http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-@njit(parallel=True)
-def stage_deskew(data,parameters):
-
-    # unwrap parameters 
-    theta = parameters[0]             # (degrees)
-    distance = parameters[1]          # (nm)
-    pixel_size = parameters[2]        # (nm)
-    [num_images,ny,nx]=data.shape  # (pixels)
-
-    # change step size from physical space (nm) to camera space (pixels)
-    pixel_step = distance/pixel_size    # (pixels)
-
-    # calculate the number of pixels scanned during stage scan 
-    scan_end = num_images * pixel_step  # (pixels)
-
-    # calculate properties for final image
-    final_ny = np.int64(np.ceil(scan_end+ny*np.cos(theta*np.pi/180))) # (pixels)
-    final_nz = np.int64(np.ceil(ny*np.sin(theta*np.pi/180)))          # (pixels)
-    final_nx = np.int64(nx)                                           # (pixels)
-
-    # create final image
-    output = np.zeros((final_nz, final_ny, final_nx),dtype=np.float32)  # (pixels,pixels,pixels - data is float32)
-
-    # precalculate trig functions for scan angle
-    tantheta = np.float32(np.tan(theta * np.pi/180)) # (float32)
-    sintheta = np.float32(np.sin(theta * np.pi/180)) # (float32)
-    costheta = np.float32(np.cos(theta * np.pi/180)) # (float32)
-
-    # perform orthogonal interpolation
-
-    # loop through output z planes
-    # defined as parallel loop in numba
-    # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-    for z in prange(0,final_nz):
-        # calculate range of output y pixels to populate
-        y_range_min=np.minimum(0,np.int64(np.floor(np.float32(z)/tantheta)))
-        y_range_max=np.maximum(final_ny,np.int64(np.ceil(scan_end+np.float32(z)/tantheta+1)))
-
-        # loop through final y pixels
-        # defined as parallel loop in numba
-        # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-        for y in prange(y_range_min,y_range_max):
-
-            # find the virtual tilted plane that intersects the interpolated plane 
-            virtual_plane = y - z/tantheta
-
-            # find raw data planes that surround the virtual plane
-            plane_before = np.int64(np.floor(virtual_plane/pixel_step))
-            plane_after = np.int64(plane_before+1)
-
-            # continue if raw data planes are within the data range
-            if ((plane_before>=0) and (plane_after<num_images)):
-                
-                # find distance of a point on the  interpolated plane to plane_before and plane_after
-                l_before = virtual_plane - plane_before * pixel_step
-                l_after = pixel_step - l_before
-                
-                # determine location of a point along the interpolated plane
-                za = z/sintheta
-                virtual_pos_before = za + l_before*costheta
-                virtual_pos_after = za - l_after*costheta
-
-                # determine nearest data points to interpoloated point in raw data
-                pos_before = np.int64(np.floor(virtual_pos_before))
-                pos_after = np.int64(np.floor(virtual_pos_after))
-
-                # continue if within data bounds
-                if ((pos_before>=0) and (pos_after >= 0) and (pos_before<ny-1) and (pos_after<ny-1)):
-                    
-                    # determine points surrounding interpolated point on the virtual plane 
-                    dz_before = virtual_pos_before - pos_before
-                    dz_after = virtual_pos_after - pos_after
-
-                    # compute final image plane using orthogonal interpolation
-                    output[z,y,:] = (l_before * dz_after * data[plane_after,pos_after+1,:] + \
-                                    l_before * (1-dz_after) * data[plane_after,pos_after,:] + \
-                                    l_after * dz_before * data[plane_before,pos_before+1,:] + \
-                                    l_after * (1-dz_before) * data[plane_before,pos_before,:]) /pixel_step
 
 
-    # return output
-    return output
+def camera_hook_fn(event,bridge,event_queue):
 
-# parse experimental directory, load data, perform orthogonal deskew, and save as BDV H5 file
-def main(argv):
+    core = bridge.get_core()
 
-    # parse directory name from command line argument 
-    input_dir_string = ''
-    output_dir_string = ''
+    command='1SCAN'
+    core.set_property('TigerCommHub','SerialCommand',command)
+    #answer = core.get_property('TigerCommHub','SerialCommand') # might be able to remove
 
-    try:
-        arguments, values = getopt.getopt(argv,"hi:o:n:c:",["help","ipath=","opath="])
-    except getopt.GetoptError:
-        print('Error. stage_recon.py -i <inputdirectory> -o <outputdirectory>')
-        sys.exit(2)
-    for current_argument, current_value in arguments:
-        if current_argument == '-h':
-            print('Usage. stage_recon.py -i <inputdirectory> -o <outputdirectory>')
-            sys.exit()
-        elif current_argument in ("-i", "--ipath"):
-            input_dir_string = current_value
-        elif current_argument in ("-o", "--opath"):
-            output_dir_string = current_value
+    return event
+    
+def post_hook_fn(event,bridge,event_queue):
+
+    core = bridge.get_core()
+    
+    # turn on 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+
+    # turn off 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
+    return event
+
+def main():
+
+    #------------------------------------------------------------------------------------------------------------------------------------
+    #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
+    #------------------------------------------------------------------------------------------------------------------------------------
+
+    # lasers to use
+    # 0 -> inactive
+    # 1 -> active
+    state_405 = 1
+    state_488 = 0
+    state_561 = 0
+    state_635 = 1
+    state_730 = 0
+
+    # laser powers (0 -> 100%)
+    power_405 = 10
+    power_488 = 0
+    power_561 = 0
+    power_635 = 5
+    power_730 = 0
+
+    # exposure time
+    exposure_ms = 5.
+
+    # scan axis limits. Use stage positions reported by MM
+    scan_axis_start_um = 6000. #unit: um
+    scan_axis_end_um = 16000. #unit: um
+
+    # tile axis limits. Use stage positions reported by MM
+    tile_axis_start_um = -1300 #unit: um
+    tile_axis_end_um = -1350. #unit: um
+
+    # height axis limits. Use stage positions reported by MM
+    height_axis_start_um = 320.#unit: um
+    height_axis_end_um = 360. #unit:  um
+
+    # FOV parameters
+    # ONLY MODIFY IF NECESSARY
+    ROI = [0, 1024, 1599, 255] #unit: pixels
+
+    # setup file name
+    save_directory=Path('E:/20201211/')
+    save_name = 'shaffer_lung'
+
+    #------------------------------------------------------------------------------------------------------------------------------------
+    #----------------------------------------------End setup of scan parameters----------------------------------------------------------
+    #------------------------------------------------------------------------------------------------------------------------------------
+
+    bridge = Bridge()
+    core = bridge.get_core()
+
+    # turn off lasers
+    core.set_config('Coherent-State','off')
+    core.wait_for_config('Coherent-State','off')
+
+    # set camera into 16bit readout mode
+    # give camera time to change modes if necessary
+    core.set_property('Camera','ReadoutRate','100MHz 16bit')
+    time.sleep(1)
+
+    # set camera into low noise readout mode
+    # give camera time to change modes if necessary
+    core.set_property('Camera','Gain','2-CMS')
+    time.sleep(1)
+
+    # set camera to trigger first mode
+    # give camera time to change modes if necessary
+    core.set_property('Camera','Trigger Timeout (secs)',300)
+    time.sleep(1)
+
+    # set camera to internal trigger
+    # give camera time to change modes if necessary
+    core.set_property('Camera','TriggerMode','Internal Trigger')
+    time.sleep(1)
+
+    # change core timeout for long stage moves
+    time.sleep(1)
+
+    # crop FOV
+    #core.set_roi(*ROI)
+
+    # set exposure
+    core.set_exposure(exposure_ms)
+
+    # get actual framerate from micromanager properties
+    # TO DO: fix need for user to have manually run an exposure with correct crop to get this value
+    actual_readout_ms = float(core.get_property('Camera','ActualInterval-ms')) #unit: ms
+
+    # camera pixel size
+    pixel_size_um = .115 # unit: um
+
+    # scan axis setup
+    scan_axis_step_um = 0.2  # unit: um
+    scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
+    scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
+    scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
+    scan_axis_range_um = np.abs(scan_axis_end_um-scan_axis_start_um)  # unit: um
+    scan_axis_range_mm = scan_axis_range_um / 1000 #unit: mm
+    actual_exposure_s = actual_readout_ms / 1000. #unit: s
+    scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s,2) #unit: mm/s
+    scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
+
+    # tile axis setup
+    tile_axis_overlap=0.2 #unit: percentage
+    tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
+    tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
+    tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
+    tile_axis_step_um = np.round((tile_axis_ROI) * (1-tile_axis_overlap),2) #unit: um
+    tile_axis_step_mm = tile_axis_step_um / 1000 #unit: mm
+    tile_axis_positions = np.rint(tile_axis_range_mm / tile_axis_step_mm).astype(int)  #unit: number of positions
+    # if tile_axis_positions rounded to zero, make sure we acquire at least one position
+    if tile_axis_positions == 0:
+        tile_axis_positions=1
+
+    # height axis setup
+    height_axis_overlap=0.2 #unit: percentage
+    height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
+    height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
+    #height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30*(np.pi/180.)) #unit: um TO DO: Why is overlap so large when using oblique pixel height??
+    height_axis_ROI = ROI[3]*pixel_size_um #unit: um 
+    height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
+    height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
+    height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int) #unit: number of positions
+    # if height_axis_positions rounded to zero, make sure we acquire at least one position
+    if height_axis_positions==0:
+        height_axis_positions=1
+
+    # get handle to xy and z stages
+    xy_stage = core.get_xy_stage_device()
+    z_stage = core.get_focus_device()
+
+    # Setup Tiger controller to pass signal when the scan stage cross the start position to the PLC
+    plcName = 'PLogic:E:36'
+    propPosition = 'PointerPosition'
+    propCellConfig = 'EditCellConfig'
+    #addrOutputBNC3 = 35 # BNC3 on the PLC front panel
+    addrOutputBNC1 = 33 # BNC1 on the PLC front panel
+    addrStageSync = 46  # TTL5 on Tiger backplane = stage sync signal
+    
+    # connect stage sync signal to BNC output
+    core.set_property(plcName, propPosition, addrOutputBNC1)
+    core.set_property(plcName, propCellConfig, addrStageSync)
+
+    # turn on 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+    # set tile axis speed for all moves
+    command = 'SPEED Y=.1'
+    core.set_property('TigerCommHub','SerialCommand',command)
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+
+    # set scan axis speed for large move to initial position
+    command = 'SPEED X=.1'
+    core.set_property('TigerCommHub','SerialCommand',command)
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+
+    # turn off 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
+    # move scan scan stage to initial position
+    core.set_xy_position(scan_axis_start_um,tile_axis_start_um)
+    core.wait_for_device(xy_stage)
+    core.set_position(height_axis_start_um)
+    core.wait_for_device(z_stage)
+
+    # turn on 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+    # set scan axis speed to correct speed for continuous stage scan
+    # expects mm/s
+    command = 'SPEED X='+str(scan_axis_speed)
+    core.set_property('TigerCommHub','SerialCommand',command)
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+
+    # set scan axis to true 1D scan with no backlash
+    command = '1SCAN X? Y=0 Z=9 F=0'
+    core.set_property('TigerCommHub','SerialCommand',command)
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+
+    # set range and return speed (5% of max) for scan axis
+    # expects mm
+    command = '1SCANR X='+str(scan_axis_start_mm)+' Y='+str(scan_axis_end_mm)+' R=10'
+    core.set_property('TigerCommHub','SerialCommand',command)
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+  
+    # turn off 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
+    # construct boolean array for lasers to use
+    channel_states = [state_405,state_488,state_561,state_635,state_730]
+    channel_powers = [power_405,power_488,power_561,power_635,power_730]
+
+    # set lasers to user defined power
+    core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
+    core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
+    core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
+    core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
+    core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
+
+    print('Number of X positions: '+str(scan_axis_positions))
+    print('Number of Y tiles: '+str(tile_axis_positions))
+    print('Number of Z slabs: '+str(height_axis_positions))
+
+    #time.sleep(10)
+
+    for y in range(tile_axis_positions):
+        # calculate tile axis position
+        tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
         
-    if (input_dir_string == ''):
-        print('Input parse error.')
-        sys.exit(2)
-
-    # Load data
-    # this approach assumes data is generated by QI2lab pycromanager control code
-
-    # https://docs.python.org/3/library/pathlib.html
-    # Create Path object to directory
-    input_dir_path=Path(input_dir_string)
-
-    # determine number of directories in root directory. loop over each one.
-    tile_dir_path = [f for f in input_dir_path.iterdir() if f.is_dir()]
-    num_tiles = len(tile_dir_path)
-
-    # TO DO: read text file with this information in root directory
-    num_y = 73
-    num_z = 3
-    num_channels = 2
-    split=40
-
-    # create parameter array
-    # [theta, stage move distance, camera pixel size]
-    # units are [degrees,nm,nm]
-    params=np.array([30,200,115],dtype=np.float32)
-
-    # check if user provided output path
-    if (output_dir_string==''):
-        output_dir_path = input_dir_path
-    else:
-        output_dir_path = Path(output_dir_string)
-
-    # https://github.com/nvladimus/npy2bdv
-    # create BDV H5 file with sub-sampling for BigStitcher
-    output_path = output_dir_path / 'full.h5'
-    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=(num_z*num_y*split)+1, \
-        subsamp=((1,1,1),(2,2,2),(4,4,4),(8,8,8),(16,16,16)),blockdim=((16, 16, 8),))
-
-    # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
-    # TO DO: implement directory polling to do this in the background while data is being acquired.
-    for tile in range(0,num_tiles):
-
-        # load tile
-        tile_dir_path_to_load = tile_dir_path[tile]
-        print('Loading directory: '+str(tile_dir_path_to_load))
-
-        # decode directory name to determine tile_id in h5. reverse Z order, normal y order
-        test_string = tile_dir_path_to_load.parts[-1].split('_')
-        for i in range(len(test_string)):
-            if 'y0' in test_string[i]:
-                y_idx = int(test_string[i].split('y')[1])
-            if 'z0' in test_string[i]:
-                z_idx = int(test_string[i].split('z')[1])
-
-        tile_id = ((num_z-z_idx-1)*(num_y))+y_idx
-        print('y index: '+str(y_idx)+' z index: '+str(z_idx)+' H5 tile id: '+str(tile_id))
-
-        # https://pycro-manager.readthedocs.io/en/latest/read_data.html
-        dataset = Dataset(tile_dir_path_to_load)
-        
-        # extract number of images in the tile
-        num_x = len(dataset.axes['x'])
-        num_x = num_x-10
-
-        # loop over channels inside tile
-        for channel_id in range(num_channels):
-
-            # read images from dataset. Skip first 10 images for stage speed up
-            sub_stack = np.zeros([num_x,256,1600])
-            for i in range(num_x):
-                sub_stack[i,:,:] = dataset.read_image(channel=channel_id, x=i+10, y=0, z=0, read_metadata=False)
-
-            #TO DO: Integrate Microvolution hook here to do deconvolution on skewed data before deskewing.
+        # move XY stage to new tile axis position
+        core.set_xy_position(scan_axis_start_um,tile_position_um)
+        core.wait_for_device(xy_stage)
             
-            print('Deskew tile.')
-            # run deskew
-            deskewed = stage_deskew(data=sub_stack,parameters=params)
-            del sub_stack
-            gc.collect()
+        for z in range(height_axis_positions):
+            # calculate height axis position
+            height_position_um = height_axis_start_um+(height_axis_step_um*z)
 
-            # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
-            deskewed_downsample = block_reduce(deskewed, block_size=(2,1,1), func=np.mean)
-            del deskewed
-            gc.collect()
+            # move Z stage to new height axis position
+            core.set_position(height_position_um)
+            core.wait_for_device(z_stage)
 
-            print('Split and write tiles.')
-            # write BDV tile
-            # https://github.com/nvladimus/npy2bdv 
-            for split_id in range(split):
-                size = np.floor(num_x/split)
-                size_overlap = size * 1.1
+            # create events to execute scan across this z plane
+            events = []
+            
+            for c in range(len(channel_states)):
+                for x in range(scan_axis_positions+10): #TO DO: Fix need for extra frames in ASI setup, not here.
+                    if channel_states[c]==1:
+                        if (c==0):
+                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Coherent-State', 'config': '405nm'}}
+                        elif (c==1):
+                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Coherent-State', 'config': '488nm'}}
+                        elif (c==2):
+                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Coherent-State', 'config': '561nm'}}
+                        elif (c==3):
+                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Coherent-State', 'config': '637nm'}}
+                        elif (c==4):
+                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Coherent-State', 'config': '730nm'}}
 
-                if split_id == split-1:
-                    deskewed_downsample_substack = deskewed_downsample[split_id*size:]
-                else:
-                    deskewed_downsample_substack = deskewed_downsample[split_id*size:(split_id+1)*size_overlap]
+                        events.append(evt)
 
-                bdv_writer.append_view(deskewed_downsample_substack, time=0, channel=channel_id, 
-                                        tile=(tile_id*split)+split_id,
-                                        voxel_size_xyz=(.115,.115,.200), voxel_units='um')
+            # set camera to trigger first mode for stage synchronization
+            # give camera time to change modes
+            core.set_property('Camera','TriggerMode','Trigger first')
+            time.sleep(1)
 
-            # free up memory
-            del deskewed_downsample
-            #del deskewed_downsample
-            gc.collect()
+            # update save_name with current Z plane
+            save_name_z = save_name +'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
-    # write BDV xml file
-    # https://github.com/nvladimus/npy2bdv
-    bdv_writer.write_xml_file(ntimes=1)
-    bdv_writer.close()
+            # run acquisition at this Z plane
+            with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
+                            post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                acq.acquire(events)
 
-    # clean up memory
-    gc.collect()
+                # added this code in an attempt to clean up resources, given the ZMQ error we are getting when using two hooks
+                acq.acquire(None)
+                acq.await_completion()
 
+            # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
+            # in the background.
+            acq = None
+            
+            # turn off lasers
+            core.set_config('Coherent-State','off')
+            core.wait_for_config('Coherent-State','off')
+
+            # set camera to internal trigger
+            # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
+            # give camera time to change modes
+            core.set_property('Camera','TriggerMode','Internal Trigger')
+            time.sleep(1)
 
 # run
 if __name__ == "__main__":
-    main(sys.argv[1:])
-
-
-# The MIT License
-#
-# Copyright (c) 2020 Douglas Shepherd, Arizona State University
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+    main()
