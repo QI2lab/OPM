@@ -5,9 +5,6 @@ Reverting to calling core MM functions for acquisition and npy2bdv for storage.
 NDTiffStorage is extremely slow to load datasets when storing a lot of data.
 
 Open question if Python-Java bridge is fast enough to pull images to store in H5...we'll find out.
-It isn't quite fast enough to keep up with data generation.
-End up with 20% of total images in sequence buffer at end of scan.
-
 
 TO DO:
 1. Investigate adding rotation + deskew affine after creating H5/XML.
@@ -24,6 +21,8 @@ from pathlib import Path
 import npy2bdv
 import numpy as np
 import time
+import os
+import gc
 
 def main():
 
@@ -41,34 +40,34 @@ def main():
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 10
+    power_405 = 90
     power_488 = 0
     power_561 = 0
-    power_635 = 10
+    power_635 = 90
     power_730 = 0
 
     # exposure time
     exposure_ms = 5.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -26000. #unit: um
-    scan_axis_end_um = -25500. #unit: um
+    scan_axis_start_um = 5300. #unit: um
+    scan_axis_end_um = 15300. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -7000 #unit: um
-    tile_axis_end_um = -6500. #unit: um
+    tile_axis_start_um = -5000. #unit: um
+    tile_axis_end_um = 5000. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 345.#unit: um
-    height_axis_end_um = 375. #unit:  um
+    height_axis_start_um = 265.#unit: um
+    height_axis_end_um = 325. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
     ROI = [0, 1024, 1599, 255] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20201130/')
-    save_name = Path('shaffer_lung_v1.h5')
+    save_directory=Path('Y:/20201207/')
+    save_name = Path('shaffer_lung')
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -101,6 +100,9 @@ def main():
 
     # change core timeout for long stage moves
     core.set_property('Core','TimeoutMs',100000)
+
+    # set circular buffer to 10 GB
+    core.set_circular_buffer_memory_footprint(15000)
 
     # crop FOV
     #core.set_roi(*ROI)
@@ -143,13 +145,13 @@ def main():
     # height axis setup
     # this is more complicated, since we have an oblique light sheet
     # the height of the scan is the length of the ROI in the tilted direction * sin(tilt angle)
-    height_axis_overlap=0.2 #unit: percentage
+    height_axis_overlap=0.1 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
     height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30*(np.pi/180.)) #unit: um
     height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
     height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
-    height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int) #unit: number of positions
+    height_axis_positions = np.ceil(height_axis_range_mm / height_axis_step_mm).astype(int) #unit: number of positions
     # if height_axis_positions rounded to zero, make sure we acquire at least one position
     if height_axis_positions==0:
         height_axis_positions=1
@@ -276,14 +278,17 @@ def main():
                         (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
                         (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
 
-    # create BDV H5 using npy2bdv
-    fname = save_directory/save_name
-    bdv_writer = npy2bdv.BdvWriter(fname, nchannels=np.sum(channel_states), ntiles=total_tiles, subsamp=((1, 1, 1),), blockdim=((1,128,256),))
-
-    # reset tile index for BDV H5 file
-    tile_index = 0
-    
+    # run acquisition over all positions
     for y in range(tile_axis_positions):
+
+        # create BDV H5 using npy2bdv
+        y_save_name = str(save_name) + '_y'+str(y).zfill(4)+'.h5'
+        fname = save_directory/Path(y_save_name)
+        bdv_writer = npy2bdv.BdvWriter(fname, nchannels=np.sum(channel_states), ntiles=height_axis_positions, subsamp=((1, 1, 1),), blockdim=((256,16,128),))
+
+        # reset tile index for BDV H5 file
+        tile_index = 0
+
         # calculate tile axis position
         tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
         
@@ -309,6 +314,13 @@ def main():
 
                 # determine active channel
                 if channel_states[c]==1:
+                    # set camera to trigger first mode for stage synchronization
+                    core.set_property('Camera','TriggerMode','Trigger first')
+                    time.sleep(5)
+
+                    # create memory object to hold data
+                    raw_data = np.empty([scan_axis_positions,ROI[3],ROI[2]],dtype=np.uint16)
+
                     if (c==0):
                         core.set_config('Coherent-State','405nm')
                         core.wait_for_config('Coherent-State','405nm')
@@ -327,10 +339,6 @@ def main():
 
                     print('Channel index: '+str(channel_index))
                     print('Active channel: '+str(c))
-
-                    # set camera to trigger first mode for stage synchronization
-                    core.set_property('Camera','TriggerMode','Trigger first')
-                    time.sleep(1)
 
                     # get current X, Y, and Z stage positions for translation transformation
                     point = core.get_xy_stage_position()
@@ -359,6 +367,7 @@ def main():
                     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
                     # start acquistion
+                    core.initialize_circular_buffer()
                     core.start_sequence_acquisition(int(scan_axis_positions),float(0.0),True)
 
                     # tell stage to execute scan
@@ -367,11 +376,6 @@ def main():
 
                     # reset image counter
                     image_counter = 0
-
-                    # place stack into BDV H5
-                    bdv_writer.append_view(stack=None, virtual_stack_dim=(scan_axis_positions,ROI[3],ROI[2]), time=0, channel=channel_index, tile=tile_index, 
-                                                m_affine=affine_matrix, name_affine = 'stage translation', 
-                                                voxel_size_xyz=(.115,.115,.200), voxel_units='um')
 
                     # grab images from buffer
                     while (image_counter < scan_axis_positions):
@@ -385,19 +389,19 @@ def main():
                             image_height = tagged_image.tags['Height']
                             image_width = tagged_image.tags['Width']
 
-                            # convert to 2D image and place into virtual stack in BDV H5
-                            bdv_writer.append_plane(plane=np.flipud(tagged_image.pix.reshape((image_height,image_width))), 
-                                                    plane_index=image_counter, time=0, channel=channel_index)
-
+                            # place image in memory
+                            raw_data[image_counter,:,:]=tagged_image.pix.reshape((image_height,image_width))
+                 
                             # increment image counter
                             image_counter = image_counter + 1
 
                         # no images in buffer, wait for another image to arrive.
                         else:
-                            time.sleep(np.minimum(.01*exposure_ms, 1)/1000)
-                    
+                            time.sleep(np.minimum(.001*exposure_ms, .1)/1000)
+           
                     # clean up acquistion
                     core.stop_sequence_acquisition()
+                    core.clear_circular_buffer()
 
                     # turn off lasers
                     core.set_config('Coherent-State','off')
@@ -406,7 +410,21 @@ def main():
                     # set camera to internal trigger
                     # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
                     core.set_property('Camera','TriggerMode','Internal Trigger')
-                    time.sleep(1)
+
+                    # set circular buffer to 0.1 GB for H5 processing/writing step
+                    core.set_circular_buffer_memory_footprint(100)
+
+                    # write from np.memmap to BDV H5 with stage translations
+                    bdv_writer.append_view(stack=raw_data, time=0, channel=channel_index, tile=tile_index, 
+                                           m_affine=affine_matrix, name_affine = 'stage translation', 
+                                           voxel_size_xyz=(pixel_size_um,pixel_size_um,scan_axis_step_um), voxel_units='um')
+
+                    # clean up memory
+                    del raw_data
+                    gc.collect()
+
+                    # set circular buffer to 15 GB
+                    core.set_circular_buffer_memory_footprint(15000)
 
                     # increment channel index for BDV H5 file
                     channel_index = channel_index + 1
@@ -428,9 +446,9 @@ def main():
             # increment tile index for BDV H5
             tile_index = tile_index + 1
 
-    # write BDV XML and close BDV H5
-    bdv_writer.write_xml_file(ntimes=1)
-    bdv_writer.close()
+        # write BDV XML and close BDV H5
+        bdv_writer.write_xml_file(ntimes=1)
+        bdv_writer.close()
 
 # run
 if __name__ == "__main__":
