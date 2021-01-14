@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 '''
-OPM stage control using Pyromanager.
+OPM stage scan using Pyromanager.
 
-Shepherd 11/20
+Shepherd 01/21
 '''
 
 # imports
@@ -11,6 +11,7 @@ from pycromanager import Bridge, Acquisition
 from pathlib import Path
 import numpy as np
 import time
+import pandas as pd
 
 
 def camera_hook_fn(event,bridge,event_queue):
@@ -176,6 +177,9 @@ def main():
     xy_stage = core.get_xy_stage_device()
     z_stage = core.get_focus_device()
 
+    # create empty dataframe to hold stage positions for BigStitcher H5 creation
+    df_stage_positions = pd.DataFrame(columns=['tile_y','tile_z','stage_x','stage_y','stage_z'])
+
     # Setup Tiger controller to pass signal when the scan stage cross the start position to the PLC
     plcName = 'PLogic:E:36'
     propPosition = 'PointerPosition'
@@ -320,13 +324,21 @@ def main():
 
                         events.append(evt)
 
+            # update save_name with current Z plane
+            save_name_z = save_name +'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
+
+            # save actual stage positions
+            stage_x,stage_y = core.get_position(xy_stage)
+            stage_z = core.get_position(z_stage)
+            df_current_stage = pd.DataFrame([y,z,stage_x,stage_y,stage_z],
+                                            columns=['tile_y','tile_z','stage_x','stage_y','stage_z'])
+
+            df_stage_positions = df_stage_positions.append(df_current_stage)
+
             # set camera to trigger first mode for stage synchronization
             # give camera time to change modes
             core.set_property('Camera','TriggerMode','Trigger first')
             time.sleep(5)
-
-            # update save_name with current Z plane
-            save_name_z = save_name +'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
             # run acquisition at this Z plane
             with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
@@ -350,6 +362,15 @@ def main():
             # give camera time to change modes
             core.set_property('Camera','TriggerMode','Internal Trigger')
             time.sleep(5)
+
+    # save stage positions
+    save_name_stage_pos = save_directory / 'stage_positions.pkl'
+    df_stage_positions.to_pickle(save_name_stage_pos)
+
+    # save stage scan parameters
+    df_stage_scan_params = pd.Dataframe([30.,scan_axis_step_um*100.,pixel_size_um*100.], columns=['theta','scan step','pixel size'])
+    save_name_stage_params = save_directory / 'stage_scan_params.pkl'
+    df_stage_positions.to_pickle(save_name_stage_params)
 
 # run
 if __name__ == "__main__":

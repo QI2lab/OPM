@@ -31,7 +31,7 @@ def stage_deskew(data,parameters):
     theta = parameters[0]             # (degrees)
     distance = parameters[1]          # (nm)
     pixel_size = parameters[2]        # (nm)
-    [num_images,ny,nx]=data.shape  # (pixels)
+    [num_images,ny,nx]=data.shape     # (pixels)
 
     # change step size from physical space (nm) to camera space (pixels)
     pixel_step = distance/pixel_size    # (pixels)
@@ -147,9 +147,11 @@ def main(argv):
     tile_dir_path_to_load = tile_dir_path[1]
     dataset = Dataset(tile_dir_path_to_load)
     dask_array = dataset.as_array()
-
     num_channels = dask_array.shape[1]
+    del dataset
+    del dask_array
 
+    # parse all directories to find number of unique y and z positions
     y_values = np.empty([num_tiles])
     z_values = np.empty([num_tiles])
 
@@ -165,10 +167,12 @@ def main(argv):
     num_y=np.unique(y_values).shape[0]
     num_z=np.unique(z_values).shape[0]
 
-    # create parameter array
+    # create parameter array from scan parameters saved by acquisition code
     # [theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
-    params=np.array([30,200,115],dtype=np.float32)
+    df_stage_scan_params = pd.read_pickle(input_dir_path / 'stage_scan_params.pkl')
+    stage_scan_params = df_stage_scan_params.to_numpy()
+    params=np.array(stage_scan_params,dtype=np.float32)
 
     # check if user provided output path
     if (output_dir_string==''):
@@ -182,15 +186,28 @@ def main(argv):
     bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=(num_z*num_y)+1, \
         subsamp=((1,1,1),(2,2,2),(4,4,4),(8,8,8),(16,16,16)),blockdim=((16, 16, 8),))
 
+    # open stage positions file
+    df_stage_positions = pd.read_pickle(input_dir_path / 'stage_positions.pkl')
+
+    # calculate pixel sizes of deskewed image in microns
+    deskewed_x_pixel = stage_scan_params[1] / 100.
+    deskewed_y_pixel = stage_scan_params[1] / 100.
+    deskewed_z_pixel = stage_scan_params[1]*np.sin(stage_scan_params[0] * np.pi/180.) / 100.
+
+    # create blank affine transformation to use for stage translation
+    unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
+                    (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
+                    (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
+
     # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
     # TO DO: implement directory polling to do this in the background while data is being acquired.
-    for tile in range(0,num_tiles):
+    for tile_id in range(num_tiles):
 
         # load tile
         tile_dir_path_to_load = tile_dir_path[tile]
         print('Loading directory: '+str(tile_dir_path_to_load))
 
-        # decode directory name to determine tile_id in h5. reverse Z order, normal y order
+        # decode directory name to determine which stage position to load
         test_string = tile_dir_path_to_load.parts[-1].split('_')
         for i in range(len(test_string)):
             if 'y0' in test_string[i]:
@@ -198,20 +215,23 @@ def main(argv):
             if 'z0' in test_string[i]:
                 z_idx = int(test_string[i].split('z')[1])
 
-        tile_id = ((num_z-z_idx-1)*(num_y))+y_idx
+        # load correct stage position from dataframe
+        df_current_stage = df_stage_positions.loc[(df['tile_y'] == y_idx) & df['tile_z'] == z_idx]
+        stage_x = df_current_stage['stage_x']
+        stage_y = df_current_stage['stage_y']
+        stage_z = df_current_stage['stage_z']
+
         print('y index: '+str(y_idx)+' z index: '+str(z_idx)+' H5 tile id: '+str(tile_id))
 
         # https://pycro-manager.readthedocs.io/en/latest/read_data.html
         dataset = Dataset(tile_dir_path_to_load)
         dask_array = dataset.as_array()
-
-        num_channels = dask_array.shape[1]
         num_images = dask_array.shape[0]
 
         # loop over channels inside tile
         for channel_id in range(num_channels):
 
-            # read images from dataset. Skip first 10 images for stage speed up
+            # read images from dataset. Skip first 10 images due to stage coming up to speed.
             sub_stack = dask_array[10:num_images,channel_id,:,:].compute()
 
             print('Deskew tile.')
@@ -225,10 +245,19 @@ def main(argv):
             del deskewed
             gc.collect()
 
-            print('Split and write tiles.')
+            # create affine transformation for stage translation
+            affine_matrix = unit_matrix
+            affine_matrix[0,3] = stage_x / deskewed_y_pixel # x-translation
+            affine_matrix[1,3] = stage_y / deskewed_y_pixel # y-translation
+            affine_matrix[2,3] = stage_z / deskewed_z_pixel # y-translation
+
+            print('Write tiles.')
             bdv_writer.append_view(deskewed_downsample, time=0, channel=channel_id, 
                                     tile=tile_id,
-                                    voxel_size_xyz=(.115,.115,.200), voxel_units='um')
+                                    voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, 2*deskewed_z_pixel), 
+                                    voxel_units='um',
+                                    m_affine=affine_matrix,
+                                    name_affine = 'tile '+str(tile_id)+' translation')
 
             # free up memory
             del deskewed_downsample
