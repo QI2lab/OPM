@@ -13,7 +13,6 @@ import numpy as np
 import time
 import pandas as pd
 
-
 def camera_hook_fn(event,bridge,event_queue):
 
     core = bridge.get_core()
@@ -70,24 +69,27 @@ def main():
     exposure_ms = 5.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -44500. #unit: um
-    scan_axis_end_um = -44000. #unit: um
+    scan_axis_start_um = 0. #unit: um
+    scan_axis_end_um = 500. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -5700 #unit: um
-    tile_axis_end_um = -5200. #unit: um
+    tile_axis_start_um = 0 #unit: um
+    tile_axis_end_um = 500. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = -18400.#unit: um
-    height_axis_end_um = -18330. #unit:  um
+    height_axis_start_um = -60.#unit: um
+    height_axis_end_um = 20. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1554, 255] #unit: pixels
+    ROI = [0, 1024, 1602, 255] #unit: pixels
 
     # setup file name
     save_directory=Path('E:/20201211_zstep/')
     save_name = 'rat_lung'
+
+    # set iterative rounds
+    iterative_rounds = 1
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -138,7 +140,7 @@ def main():
     pixel_size_um = .115 # unit: um
 
     # scan axis setup
-    scan_axis_step_um = 0.2  # unit: um
+    scan_axis_step_um = 0.4  # unit: um
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -161,10 +163,9 @@ def main():
         tile_axis_positions=1
 
     # height axis setup
-    height_axis_overlap=0.1 #unit: percentage
+    height_axis_overlap=0.2 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
-    #height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30*(np.pi/180.)) #unit: um TO DO: Why is overlap so large when using oblique pixel height??
     height_axis_ROI = ROI[3]*pixel_size_um #unit: um 
     height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
     height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
@@ -283,94 +284,102 @@ def main():
     core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
     core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
+    # output experiment info
+    print('Number of labeling rounds: '+str(iterative_rounds))
     print('Number of X positions: '+str(scan_axis_positions))
     print('Number of Y tiles: '+str(tile_axis_positions))
     print('Number of Z slabs: '+str(height_axis_positions))
 
-    #time.sleep(10)
-
-    for y in range(tile_axis_positions):
-        # calculate tile axis position
-        tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
-        
-        # move XY stage to new tile axis position
-        core.set_xy_position(scan_axis_start_um,tile_position_um)
-        core.wait_for_device(xy_stage)
+    for r in range(iterative_rounds):
+        for y in range(tile_axis_positions):
+            # calculate tile axis position
+            tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
             
-        for z in range(height_axis_positions):
-            # calculate height axis position
-            height_position_um = height_axis_start_um+(height_axis_step_um*z)
+            # move XY stage to new tile axis position
+            core.set_xy_position(scan_axis_start_um,tile_position_um)
+            core.wait_for_device(xy_stage)
+                
+            for z in range(height_axis_positions):
+                # calculate height axis position
+                height_position_um = height_axis_start_um+(height_axis_step_um*z)
 
-            # move Z stage to new height axis position
-            core.set_position(height_position_um)
-            core.wait_for_device(z_stage)
+                # move Z stage to new height axis position
+                core.set_position(height_position_um)
+                core.wait_for_device(z_stage)
 
-            # create events to execute scan across this z plane
-            events = []
-            
-            for c in range(len(channel_states)):
-                for x in range(scan_axis_positions+10): #TO DO: Fix need for extra frames in ASI setup, not here.
-                    if channel_states[c]==1:
-                        if (c==0):
-                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '405nm'}}
-                        elif (c==1):
-                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '488nm'}}
-                        elif (c==2):
-                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '561nm'}}
-                        elif (c==3):
-                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '637nm'}}
-                        elif (c==4):
-                            evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '730nm'}}
+                # create events to execute scan across this z plane
+                events = []
+                
+                # Changes to event structure motivated by Henry's notes that pycromanager struggles to read "non-standard" axes. 
+                # https://github.com/micro-manager/pycro-manager/issues/220
+                for c in range(len(channel_states)):
+                    for x in range(scan_axis_positions+10): #TO DO: Fix need for extra frames in ASI setup, not here.
+                        if channel_states[c]==1:
+                            if (c==0):
+                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '405'}}
+                            elif (c==1):
+                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '488'}}
+                            elif (c==2):
+                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '561'}}
+                            elif (c==3):
+                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '637'}}
+                            elif (c==4):
+                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '730'}}
 
-                        events.append(evt)
+                            events.append(evt)
 
-            # update save_name with current Z plane
-            save_name_z = save_name +'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
+                # update save_name with current Z plane
+                save_name_z = save_name +'_r'+str(r).zfill(4)+'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
-            # save actual stage positions
-            stage_x,stage_y = core.get_position(xy_stage)
-            stage_z = core.get_position(z_stage)
-            df_current_stage = pd.DataFrame([y,z,stage_x,stage_y,stage_z],
-                                            columns=['tile_y','tile_z','stage_x','stage_y','stage_z'])
+                # save actual stage positions
+                xy_pos = core.get_xy_stage_position()
+                stage_x = xy_pos.x
+                stage_y = xy_pos.y
+                stage_z = core.get_position()
+                current_stage_data = [{'tile_r': r, 'tile_y': y, 'tile_z': z, 'stage_x': stage_x, 'stage_y': stage_y, 'stage_z': stage_z}]
+                df_current_stage = pd.DataFrame(current_stage_data)
+                df_stage_positions = df_stage_positions.append(df_current_stage)
+                del df_current_stage
 
-            df_stage_positions = df_stage_positions.append(df_current_stage)
+                # set camera to trigger first mode for stage synchronization
+                # give camera time to change modes
+                core.set_property('Camera','TriggerMode','Trigger first')
+                time.sleep(5)
 
-            # set camera to trigger first mode for stage synchronization
-            # give camera time to change modes
-            core.set_property('Camera','TriggerMode','Trigger first')
-            time.sleep(5)
+                # run acquisition at this Z plane
+                with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
+                                post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                    acq.acquire(events)
 
-            # run acquisition at this Z plane
-            with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
-                            post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
-                acq.acquire(events)
+                    # added this code in an attempt to clean up resources, given the ZMQ error we are getting when using two hooks
+                    acq.acquire(None)
+                    acq.await_completion()
 
-                # added this code in an attempt to clean up resources, given the ZMQ error we are getting when using two hooks
-                acq.acquire(None)
-                acq.await_completion()
+                # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
+                # in the background.
+                # NOTE: This is a bug, the directory is not released until Micromanager is shutdown
+                # https://github.com/micro-manager/pycro-manager/issues/218
+                acq = None
+                
+                # turn off lasers
+                core.set_config('Laser','Off')
+                core.wait_for_config('Laser','Off')
 
-            # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
-            # in the background.
-            acq = None
-            
-            # turn off lasers
-            core.set_config('Laser','Off')
-            core.wait_for_config('Laser','Off')
-
-            # set camera to internal trigger
-            # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
-            # give camera time to change modes
-            core.set_property('Camera','TriggerMode','Internal Trigger')
-            time.sleep(5)
+                # set camera to internal trigger
+                # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
+                # give camera time to change modes
+                core.set_property('Camera','TriggerMode','Internal Trigger')
+                time.sleep(5)
 
     # save stage positions
     save_name_stage_pos = save_directory / 'stage_positions.pkl'
     df_stage_positions.to_pickle(save_name_stage_pos)
 
     # save stage scan parameters
-    df_stage_scan_params = pd.Dataframe([30.,scan_axis_step_um*100.,pixel_size_um*100.], columns=['theta','scan step','pixel size'])
+    scan_param_data = [{'theta': 30.0, 'scan step': scan_axis_step_um*1000., 'pixel size': pixel_size_um*1000.}]
+    df_stage_scan_params = pd.DataFrame(scan_param_data)
     save_name_stage_params = save_directory / 'stage_scan_params.pkl'
-    df_stage_positions.to_pickle(save_name_stage_params)
+    df_stage_scan_params.to_pickle(save_name_stage_params)
 
 # run
 if __name__ == "__main__":
