@@ -199,12 +199,13 @@ def main(argv):
 
     # calculate pixel sizes of deskewed image in microns
     # Cannot use a different pixel size in (x,y) in BigStitcher, so calculate here for posterity
-    deskewed_x_pixel = np.round(params[2]*np.cos(params[0] * np.pi/180.),2) / 100.
-    deskewed_y_pixel = np.round(params[2]) / 100.
-    deskewed_z_pixel = np.round(params[2]*np.sin(params[0] * np.pi/180.),2) / 100.
+    deskewed_x_pixel = np.round(params[2]*np.cos(params[0] * np.pi/180.),0) / 1000.
+    deskewed_y_pixel = np.round(params[2],0) / 1000.
+    deskewed_z_pixel = np.round(params[2]*np.sin(params[0] * np.pi/180.),1) / 1000.
+    print(deskewed_x_pixel,deskewed_y_pixel,deskewed_z_pixel)
 
-    # amount of sub_sampling in z
-    z_sub_sample = 2
+    # amount of down sampling in z
+    z_down_sample = 2
 
     # create blank affine transformation to use for stage translation
     unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
@@ -232,7 +233,7 @@ def main(argv):
         test_string = tile_dir_path_to_load.parts[-1].split('_')
         for i in range(len(test_string)):
             if 'r0' in test_string[i]:
-                r_idx = int(test_string[i].split('y')[1])
+                r_idx = int(test_string[i].split('r')[1])
             if 'y0' in test_string[i]:
                 y_idx = int(test_string[i].split('y')[1])
             if 'z0' in test_string[i]:
@@ -244,11 +245,12 @@ def main(argv):
         mask3 = df_stage_positions['tile_r'] == float(r_idx)
         temp = df_stage_positions[mask1 & mask2 & mask3]
 
-        stage_x = float(temp['stage_x'])
-        stage_y = float(temp['stage_y'])
-        stage_z = float(temp['stage_z'])
+        stage_x = np.round(float(temp['stage_x']),2)
+        stage_y = np.round(float(temp['stage_y']),2)
+        stage_z = np.round(float(temp['stage_z']),2)
+        print(stage_x,stage_y,stage_z)
         
-        print('round '+str(r_idx)+' of '+str(unique_r)+'; y tile '+str(y_idx)+' of '+str(unique_y)+'; z tile '+str(z_idx)+' of '+str(unique_z))
+        print('round '+str(r_idx+1)+' of '+str(unique_r)+'; y tile '+str(y_idx+1)+' of '+str(unique_y)+'; z tile '+str(z_idx+1)+' of '+str(unique_z))
 
         # https://pycro-manager.readthedocs.io/en/latest/read_data.html
         dataset = Dataset(tile_dir_path_to_load)
@@ -263,7 +265,7 @@ def main(argv):
             sub_stack = dask_array[10:num_images,channel_id,:,:]
 
             # perform flat-fielding
-            corrected_sub_stack = flat_field.manage_flat_field(output_dir_path,channel_id,sub_stack,ij)
+            corrected_sub_stack = flat_field.manage_flat_field(output_dir_path,channel_id,z_idx,sub_stack,ij)
             del sub_stack
 
             # ------------------------------------------------------------------------------------
@@ -281,7 +283,7 @@ def main(argv):
             del corrected_sub_stack
 
             # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
-            deskewed_downsample = block_reduce(deskewed, block_size=(z_sub_sample,1,1), func=np.mean)
+            deskewed_downsample = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
             del deskewed
 
             # create affine transformation for stage translation
@@ -289,13 +291,13 @@ def main(argv):
             affine_matrix = unit_matrix
             affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # x-translation 
             affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # y-translation
-            affine_matrix[2,3] = (-1*stage_z) / (z_sub_sample*deskewed_z_pixel*10)  # z-translation
+            affine_matrix[2,3] = (-1*stage_z) / (z_down_sample*deskewed_z_pixel*10)  # z-translation
 
             # save tile in BDV H5 with actual stage positions
             print('Write deskewed data for channel '+str(channel_id))
             bdv_writer.append_view(deskewed_downsample, time=r_idx, channel=channel_id, 
                                     tile=tile_id,
-                                    voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_sub_sample*deskewed_z_pixel), 
+                                    voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel), 
                                     voxel_units='um',
                                     m_affine=affine_matrix,
                                     name_affine = 'tile '+str(tile_id)+' translation')

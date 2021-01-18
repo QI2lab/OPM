@@ -18,13 +18,13 @@ import scyjava
 from scyjava import jimport
 from skimage.io import imread, imsave
 
-def manage_flat_field(output_dir_path,channel_id,sub_stack,ij):
+def manage_flat_field(output_dir_path,channel_id,z,sub_stack,ij):
 
     # check if flat-field exists on disk
-    channel_flat_field_name = 'flatfield_c'+str(channel_id)+'.tif'
+    channel_flat_field_name = 'flatfield_z'+str(z)+'_c'+str(channel_id)+'.tif'
     flat_field_name = output_dir_path / channel_flat_field_name
 
-    channel_dark_field_name = 'darkfield_c'+str(channel_id)+'.tif'
+    channel_dark_field_name = 'darkfield_z'+str(z)+'_c'+str(channel_id)+'.tif'
     dark_field_name = output_dir_path / channel_dark_field_name
 
     if flat_field_name.exists ():

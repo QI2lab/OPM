@@ -59,33 +59,33 @@ def main():
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 60
+    power_405 = 100
     power_488 = 0
-    power_561 = 30
-    power_635 = 70
+    power_561 = 100
+    power_635 = 100
     power_730 = 0
 
     # exposure time
-    exposure_ms = 5.
+    exposure_ms = 10.
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 0. #unit: um
-    scan_axis_end_um = 500. #unit: um
+    scan_axis_start_um = -2900. #unit: um
+    scan_axis_end_um = -2400. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 0 #unit: um
-    tile_axis_end_um = 500. #unit: um
+    tile_axis_start_um = -690 #unit: um
+    tile_axis_end_um = -190. #unit: um
 
     # height axis limits. Use stage positions reported by MM
     height_axis_start_um = -60.#unit: um
-    height_axis_end_um = 20. #unit:  um
+    height_axis_end_um = 0. #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1602, 255] #unit: pixels
+    ROI = [0, 1024, 1602, 510] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20201211_zstep/')
+    save_directory=Path('E:/20210117c/')
     save_name = 'rat_lung'
 
     # set iterative rounds
@@ -104,12 +104,12 @@ def main():
 
     # set camera into 16bit readout mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','ReadoutRate','100MHz 16bit')
+    core.set_property('Camera','ReadoutRate','200MHz 11bit')
     time.sleep(1)
 
     # set camera into low noise readout mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','Gain','2-CMS')
+    core.set_property('Camera','Gain','3-Sensitivity')
     time.sleep(1)
 
     # set camera to trigger first mode
@@ -157,7 +157,7 @@ def main():
     tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
     tile_axis_step_um = np.round((tile_axis_ROI) * (1-tile_axis_overlap),2) #unit: um
     tile_axis_step_mm = tile_axis_step_um / 1000 #unit: mm
-    tile_axis_positions = np.rint(tile_axis_range_mm / tile_axis_step_mm).astype(int)  #unit: number of positions
+    tile_axis_positions = np.rint(tile_axis_range_mm / tile_axis_step_mm).astype(int)+1  #unit: number of positions
     # if tile_axis_positions rounded to zero, make sure we acquire at least one position
     if tile_axis_positions == 0:
         tile_axis_positions=1
@@ -166,10 +166,10 @@ def main():
     height_axis_overlap=0.2 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
-    height_axis_ROI = ROI[3]*pixel_size_um #unit: um 
+    height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
     height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
     height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
-    height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int) #unit: number of positions
+    height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int)+1 #unit: number of positions
     # if height_axis_positions rounded to zero, make sure we acquire at least one position
     if height_axis_positions==0:
         height_axis_positions=1
@@ -307,7 +307,7 @@ def main():
                 core.set_position(height_position_um)
                 core.wait_for_device(z_stage)
 
-                # create events to execute scan across this z plane
+                # create events to execute scan
                 events = []
                 
                 # Changes to event structure motivated by Henry's notes that pycromanager struggles to read "non-standard" axes. 
@@ -328,7 +328,7 @@ def main():
 
                             events.append(evt)
 
-                # update save_name with current Z plane
+                # update save_name with current tile information
                 save_name_z = save_name +'_r'+str(r).zfill(4)+'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
                 # save actual stage positions
