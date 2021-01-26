@@ -43,7 +43,8 @@ def manage_flat_field(output_dir_path,channel_id,z,sub_stack,ij):
 
 def calculate_flat_field(sub_stack,ij):
     # convert dataset from numpy -> java
-    sub_stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(sub_stack.compute()))
+    sub_stack_for_flat_field = sub_stack[np.random.choice(sub_stack.shape[0], 500, replace=False)]
+    sub_stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(sub_stack_for_flat_field.compute()))
 
     # show image in imagej since BaSiC plugin cannot be run headless
     ij.ui().show(sub_stack_iterable)

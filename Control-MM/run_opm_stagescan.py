@@ -59,34 +59,34 @@ def main():
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 100
+    power_405 = 5
     power_488 = 0
-    power_561 = 100
-    power_635 = 100
+    power_561 = 50
+    power_635 = 50
     power_730 = 0
 
     # exposure time
-    exposure_ms = 10.
+    exposure_ms = 5.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -2900. #unit: um
-    scan_axis_end_um = -2400. #unit: um
+    scan_axis_start_um = -5800. #unit: um
+    scan_axis_end_um = -5700. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -690 #unit: um
-    tile_axis_end_um = -190. #unit: um
+    tile_axis_start_um = 3800 #unit: um
+    tile_axis_end_um = 3900. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = -60.#unit: um
-    height_axis_end_um = 0. #unit:  um
+    height_axis_start_um = 235. #unit: um
+    height_axis_end_um = 240 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1602, 510] #unit: pixels
+    ROI = [0, 1024, 1600, 256] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210117c/')
-    save_name = 'rat_lung'
+    save_directory=Path('E:/20210126c/')
+    save_name = 'amp_cy3b'
 
     # set iterative rounds
     iterative_rounds = 1
@@ -104,12 +104,14 @@ def main():
 
     # set camera into 16bit readout mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','ReadoutRate','200MHz 11bit')
+    core.set_property('Camera','ReadoutRate','100MHz 16bit')
+    #core.set_property('Camera','ReadoutRate','200MHz 11bit')
     time.sleep(1)
 
     # set camera into low noise readout mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','Gain','3-Sensitivity')
+    core.set_property('Camera','Gain','2-CMS')
+    #core.set_property('Camera','Gain','3-Sensitivity')
     time.sleep(1)
 
     # set camera to trigger first mode
@@ -140,7 +142,7 @@ def main():
     pixel_size_um = .115 # unit: um
 
     # scan axis setup
-    scan_axis_step_um = 0.4  # unit: um
+    scan_axis_step_um = 0.2  # unit: um
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -344,32 +346,28 @@ def main():
                 # set camera to trigger first mode for stage synchronization
                 # give camera time to change modes
                 core.set_property('Camera','TriggerMode','Trigger first')
-                time.sleep(5)
+                time.sleep(1)
 
                 # run acquisition at this Z plane
                 with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
                                 post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
                     acq.acquire(events)
 
-                    # added this code in an attempt to clean up resources, given the ZMQ error we are getting when using two hooks
-                    acq.acquire(None)
-                    acq.await_completion()
+                # turn off lasers
+                core.set_config('Laser','Off')
+                core.wait_for_config('Laser','Off')
 
                 # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
                 # in the background.
                 # NOTE: This is a bug, the directory is not released until Micromanager is shutdown
                 # https://github.com/micro-manager/pycro-manager/issues/218
                 acq = None
-                
-                # turn off lasers
-                core.set_config('Laser','Off')
-                core.wait_for_config('Laser','Off')
 
                 # set camera to internal trigger
                 # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
                 # give camera time to change modes
                 core.set_property('Camera','TriggerMode','Internal Trigger')
-                time.sleep(5)
+                time.sleep(1)
 
     # save stage positions
     save_name_stage_pos = save_directory / 'stage_positions.pkl'

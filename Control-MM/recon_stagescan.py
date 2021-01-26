@@ -22,6 +22,7 @@ import pandas as pd
 import flat_field
 import imagej
 import scyjava
+import dask.array as da
 
 # perform stage scanning reconstruction using orthogonal interpolation
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
@@ -111,6 +112,8 @@ def stage_deskew(data,parameters):
 # parse experimental directory, load data, perform orthogonal deskew, and save as BDV H5 file
 def main(argv):
 
+    perform_flat_field = False
+
     # parse directory name from command line argument 
     input_dir_string = ''
     output_dir_string = ''
@@ -128,6 +131,7 @@ def main(argv):
             input_dir_string = current_value
         elif current_argument in ("-o", "--opath"):
             output_dir_string = current_value
+        
         
     if (input_dir_string == ''):
         print('Input parse error.')
@@ -149,7 +153,10 @@ def main(argv):
     tile_dir_path_to_load = tile_dir_path[1]
     dataset = Dataset(tile_dir_path_to_load)
     dask_array = dataset.as_array()
+    num_scan_axis =  dask_array.shape[0]
     num_channels = dask_array.shape[1]
+    num_pix_y = dask_array.shape[2]
+    num_pix_x = dask_array.shape[3]
     del dataset
     del dask_array
 
@@ -202,7 +209,6 @@ def main(argv):
     deskewed_x_pixel = np.round(params[2]*np.cos(params[0] * np.pi/180.),0) / 1000.
     deskewed_y_pixel = np.round(params[2],0) / 1000.
     deskewed_z_pixel = np.round(params[2]*np.sin(params[0] * np.pi/180.),1) / 1000.
-    print(deskewed_x_pixel,deskewed_y_pixel,deskewed_z_pixel)
 
     # amount of down sampling in z
     z_down_sample = 2
@@ -248,62 +254,74 @@ def main(argv):
         stage_x = np.round(float(temp['stage_x']),2)
         stage_y = np.round(float(temp['stage_y']),2)
         stage_z = np.round(float(temp['stage_z']),2)
-        print(stage_x,stage_y,stage_z)
+        
         
         print('round '+str(r_idx+1)+' of '+str(unique_r)+'; y tile '+str(y_idx+1)+' of '+str(unique_y)+'; z tile '+str(z_idx+1)+' of '+str(unique_z))
+        print('x location: '+str(stage_y)+'; y location: '+str(stage_x)+'; z location: '+str(stage_z))
 
         # https://pycro-manager.readthedocs.io/en/latest/read_data.html
-        dataset = Dataset(tile_dir_path_to_load)
-        dask_array = dataset.as_array()
-        num_images = dask_array.shape[0]
+        try:
+            dataset = Dataset(tile_dir_path_to_load)
+            dask_ok = True
+        except:
+            dask_ok = False
 
-        # loop over channels inside tile
-        for channel_id in range(num_channels):
+        # handle bad pycromanager IFDs
+        if dask_ok:
+            dask_array = dataset.as_array()
+            num_images = dask_array.shape[0]
+         
+            # loop over channels inside tile
+            for channel_id in range(num_channels):
 
-            # read images from dataset. Skip first 10 images due to stage coming up to speed.
-            print('Load raw data for channel '+str(channel_id))
-            sub_stack = dask_array[10:num_images,channel_id,:,:]
+                # read images from dataset. Skip first 10 images due to stage coming up to speed.
+                print('Load raw data for channel '+str(channel_id))
+                sub_stack = dask_array[10:num_images,channel_id,:,:]
 
-            # perform flat-fielding
-            corrected_sub_stack = flat_field.manage_flat_field(output_dir_path,channel_id,z_idx,sub_stack,ij)
-            del sub_stack
+                # perform flat-fielding
+                if perform_flat_field:
+                    corrected_sub_stack = flat_field.manage_flat_field(output_dir_path,channel_id,z_idx,sub_stack,ij)
+                else:
+                    corrected_sub_stack = sub_stack.compute()
+                del sub_stack
 
-            # ------------------------------------------------------------------------------------
-            # TO DO: Finish this section
-            # select PSF for this channel
-            # run deconvolution using Microvolution wrapper
-            # DOI: 10.1364/OE.21.004766
-            # https://www.microvolution.com/
-            # possible to use other deconvolution here, if you don't have a Microvolution license
-            # ------------------------------------------------------------------------------------
+                # ------------------------------------------------------------------------------------
+                # TO DO: Finish this section
+                # select PSF for this channel
+                # run deconvolution using Microvolution wrapper
+                # DOI: 10.1364/OE.21.004766
+                # https://www.microvolution.com/
+                # possible to use other deconvolution here, if you don't have a Microvolution license
+                # ------------------------------------------------------------------------------------
 
-            # deskew
-            print('Deskew channel '+str(channel_id))
-            deskewed = stage_deskew(data=np.flipud(corrected_sub_stack),parameters=params)
-            del corrected_sub_stack
+                # deskew
+                print('Deskew channel '+str(channel_id))
+                deskewed = stage_deskew(data=np.flipud(corrected_sub_stack),parameters=params)
+                #deskewed = stage_deskew(data=corrected_sub_stack,parameters=params)
+                del corrected_sub_stack
 
-            # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
-            deskewed_downsample = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
-            del deskewed
+                # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
+                deskewed_downsample = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
+                del deskewed
 
-            # create affine transformation for stage translation
-            # swap x & y from instrument to BDV
-            affine_matrix = unit_matrix
-            affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # x-translation 
-            affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # y-translation
-            affine_matrix[2,3] = (-1*stage_z) / (z_down_sample*deskewed_z_pixel*10)  # z-translation
+                # create affine transformation for stage translation
+                # swap x & y from instrument to BDV
+                affine_matrix = unit_matrix
+                affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # x-translation 
+                affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # y-translation
+                affine_matrix[2,3] = (1*stage_z) / (z_down_sample*deskewed_z_pixel*10)  # z-translation
 
-            # save tile in BDV H5 with actual stage positions
-            print('Write deskewed data for channel '+str(channel_id))
-            bdv_writer.append_view(deskewed_downsample, time=r_idx, channel=channel_id, 
-                                    tile=tile_id,
-                                    voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel), 
-                                    voxel_units='um',
-                                    m_affine=affine_matrix,
-                                    name_affine = 'tile '+str(tile_id)+' translation')
+                # save tile in BDV H5 with actual stage positions
+                print('Write deskewed data for channel '+str(channel_id))
+                bdv_writer.append_view(deskewed_downsample, time=r_idx, channel=channel_id, 
+                                        tile=tile_id,
+                                        voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel), 
+                                        voxel_units='um',
+                                        m_affine=affine_matrix,
+                                        name_affine = 'tile '+str(tile_id)+' translation')
 
-            # free up memory
-            del deskewed_downsample
+                # free up memory
+                del deskewed_downsample
 
     # write BDV xml file
     # https://github.com/nvladimus/npy2bdv
