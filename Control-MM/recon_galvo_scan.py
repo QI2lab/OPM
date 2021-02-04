@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 
 '''
-Stage scanning OPM post-processing using numpy, numba, skimage, pyimagej, and npy2bdv.
-Places all tiles in actual stage positions and places iterative rounds into the time axis of BDV H5 for alignment
+Galvo scanning OPM post-processing using numpy, numba, skimage, pyimagej, and npy2bdv.
 Orthgonal interpolation method adapted from original description by Vincent Maioli (http://doi.org/10.25560/68022)
 
-Shepherd 01/21
+Shepherd 02/21
 '''
 
 # imports
@@ -112,8 +111,6 @@ def stage_deskew(data,parameters):
 # parse experimental directory, load data, perform orthogonal deskew, and save as BDV H5 file
 def main(argv):
 
-    perform_flat_field = True
-
     # parse directory name from command line argument 
     input_dir_string = ''
     output_dir_string = ''
@@ -132,7 +129,6 @@ def main(argv):
         elif current_argument in ("-o", "--opath"):
             output_dir_string = current_value
         
-        
     if (input_dir_string == ''):
         print('Input parse error.')
         sys.exit(2)
@@ -145,55 +141,31 @@ def main(argv):
     # Create Path object to directory
     input_dir_path=Path(input_dir_string)
 
-    # determine number of directories in root directory. loop over each one.
-    tile_dir_path = [f for f in input_dir_path.iterdir() if f.is_dir()]
-    num_tiles = len(tile_dir_path)
-
     # load first tile to get dataset dimensions
-    tile_dir_path_to_load = tile_dir_path[1]
-    dataset = Dataset(tile_dir_path_to_load)
+    dataset = Dataset(input_dir_path)
+    #img, img_metadata = dataset.read_image(x=0, read_metadata=True)
+    #print(img_metadata)
     dask_array = dataset.as_array()
-    num_scan_axis =  dask_array.shape[0]
-    if (len(dask_array.shape) == 3):
+
+    num_timepoints = dask_array.shape[0]
+    num_scan_axis =  dask_array.shape[1]
+
+    if (len(dask_array.shape) == 4):
         num_channels = 1
-        num_pix_y = dask_array.shape[1]
-        num_pix_x = dask_array.shape[2]
-    else:
-        num_channels = dask_array.shape[1]
         num_pix_y = dask_array.shape[2]
         num_pix_x = dask_array.shape[3]
+    else:
+        num_channels = dask_array.shape[2]
+        num_pix_y = dask_array.shape[3]
+        num_pix_x = dask_array.shape[4]
     del dataset
-    del dask_array
-
-    r_all_idx = np.empty([num_tiles])
-    y_all_idx = np.empty([num_tiles])
-    z_all_idx = np.empty([num_tiles])
-
-    # parse directories to determine number of (r,y,z) positions
-    for tile_id in range(num_tiles):
-        tile_dir_path_to_load = tile_dir_path[tile_id]
-
-        # decode round, y tile, and z tile directory name
-        test_string = tile_dir_path_to_load.parts[-1].split('_')
-        for i in range(len(test_string)):
-            if 'r0' in test_string[i]:
-                r_all_idx[tile_id] = int(test_string[i].split('r')[1])
-            if 'y0' in test_string[i]:
-                y_all_idx[tile_id] = int(test_string[i].split('y')[1])
-            if 'z0' in test_string[i]:
-                z_all_idx[tile_id] = int(test_string[i].split('z')[1])
-
-    # determine number of unique positions from lists of all (r,y,z) positions
-    unique_r = np.unique(r_all_idx).shape[0]
-    unique_y = np.unique(y_all_idx).shape[0]
-    unique_z = np.unique(z_all_idx).shape[0]
-
+    
     # create parameter array from scan parameters saved by acquisition code
     # [theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
-    df_stage_scan_params = pd.read_pickle(input_dir_path / 'stage_scan_params.pkl')
+    df_stage_scan_params = pd.read_pickle(input_dir_path / 'galvo_scan_params.pkl')
     params = np.squeeze(df_stage_scan_params.to_numpy())
-    
+
     # check if user provided output path
     if (output_dir_string==''):
         output_dir_path = input_dir_path
@@ -203,11 +175,8 @@ def main(argv):
     # https://github.com/nvladimus/npy2bdv
     # create BDV H5 file with sub-sampling for BigStitcher
     output_path = output_dir_path / 'full.h5'
-    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=num_tiles, \
+    bdv_writer = npy2bdv.BdvWriter(str(output_path), nchannels=num_channels, ntiles=1, \
         subsamp=((1,1,1),(2,2,2),(4,4,4),(8,8,8),(16,16,16)),blockdim=((16, 16, 16),))
-
-    # open stage positions file
-    df_stage_positions = pd.read_pickle(input_dir_path / 'stage_positions.pkl')
 
     # calculate pixel sizes of deskewed image in microns
     # Cannot use a different pixel size in (x,y) in BigStitcher, so calculate here for posterity
@@ -216,130 +185,52 @@ def main(argv):
     deskewed_z_pixel = np.round(params[2]*np.sin(params[0] * np.pi/180.),1) / 1000.
 
     # amount of down sampling in z
-    z_down_sample = 2
+    z_down_sample = 1
 
     # create blank affine transformation to use for stage translation
     unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
                             (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
                             (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
 
+    # loop over timepoints
+    for timepoint_id in range(num_timepoints):
+        print
+        # loop over channels inside tile
+        for channel_id in range(num_channels):
 
-    # open pyimagej in interactive mode because BaSiC flat-fielding plugin cannot run in headless mode
-    scyjava.config.add_option('-Xmx12g')
-    plugins_dir = Path('C:/Fiji.app/plugins')
-    scyjava.config.add_option(f'-Dplugins.dir={str(plugins_dir)}')
-    ij_path = Path('C:/Fiji.app')
-    ij = imagej.init(str(ij_path), headless=False)
-    ij.ui().showUI()
+            # read images from dataset. Skip first 10 images due to stage coming up to speed.
+            print('Load raw data for timepoint: ' + str(timepoint_id) + '; channel: '+str(channel_id))
+            if num_channels == 1:
+                sub_stack = dask_array[timepoint_id,:,:,:]
+            else:
+                sub_stack = dask_array[timepoint_id,:,channel_id,:,:]
 
-    # loop over each directory. Each directory will be placed as a "tile" into the BigStitcher file
-    # TO DO: implement directory polling to do this in the background while data is being acquired.
-    for tile_id in range(num_tiles):
+            print(sub_stack.shape)
 
-        # load tile
-        tile_dir_path_to_load = tile_dir_path[tile_id]
-        print('Loading directory: '+str(tile_dir_path_to_load))
+            # deskew
+            print('Deskew channel '+str(channel_id))
+            deskewed = stage_deskew(data=np.flipud(sub_stack.compute()),parameters=params)
+            #deskewed = stage_deskew(data=sub_stack.compute(),parameters=params)
+            del sub_stack
 
-        # decode directory name to determine which stage position to load
-        test_string = tile_dir_path_to_load.parts[-1].split('_')
-        for i in range(len(test_string)):
-            if 'r0' in test_string[i]:
-                r_idx = int(test_string[i].split('r')[1])
-            if 'y0' in test_string[i]:
-                y_idx = int(test_string[i].split('y')[1])
-            if 'z0' in test_string[i]:
-                z_idx = int(test_string[i].split('z')[1])
+            # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
+            #deskewed_downsample = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
+            #del deskewed
 
-        # load correct stage positions from dataframe
-        mask1 = df_stage_positions['tile_y'] == float(y_idx)
-        mask2 = df_stage_positions['tile_z'] == float(z_idx)
-        mask3 = df_stage_positions['tile_r'] == float(r_idx)
-        temp = df_stage_positions[mask1 & mask2 & mask3]
+            # save tile in BDV H5 with actual stage positions
+            print('Write deskewed data for channel '+str(channel_id))
+            bdv_writer.append_view(deskewed, time=timepoint_id, channel=channel_id, 
+                                    tile=0,
+                                    voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel), 
+                                    voxel_units='um')
 
-        stage_x = np.round(float(temp['stage_x']),2)
-        stage_y = np.round(float(temp['stage_y']),2)
-        stage_z = np.round(float(temp['stage_z']),2)
-        
-        
-        print('round '+str(r_idx+1)+' of '+str(unique_r)+'; y tile '+str(y_idx+1)+' of '+str(unique_y)+'; z tile '+str(z_idx+1)+' of '+str(unique_z))
-        print('x location: '+str(stage_y)+'; y location: '+str(stage_x)+'; z location: '+str(stage_z))
-
-        # https://pycro-manager.readthedocs.io/en/latest/read_data.html
-        try:
-            dataset = Dataset(tile_dir_path_to_load)
-            dask_ok = True
-        except:
-            dask_ok = False
-
-        # handle bad pycromanager IFDs
-        if dask_ok:
-            dask_array = dataset.as_array()
-            num_images = dask_array.shape[0]
-         
-            # loop over channels inside tile
-            for channel_id in range(num_channels):
-
-                # read images from dataset. Skip first 10 images due to stage coming up to speed.
-                print('Load raw data for channel '+str(channel_id))
-                if num_channels == 1:
-                    sub_stack = dask_array[10:num_images,:,:]
-                else:
-                    sub_stack = dask_array[10:num_images,channel_id,:,:]
-
-                # perform flat-fielding
-                if perform_flat_field:
-                    corrected_sub_stack = flat_field.manage_flat_field(output_dir_path,channel_id,z_idx,sub_stack,ij)
-                else:
-                    corrected_sub_stack = sub_stack.compute()
-                del sub_stack
-
-                # ------------------------------------------------------------------------------------
-                # TO DO: Finish this section
-                # select PSF for this channel
-                # run deconvolution using Microvolution wrapper
-                # DOI: 10.1364/OE.21.004766
-                # https://www.microvolution.com/
-                # possible to use other deconvolution here, if you don't have a Microvolution license
-                # ------------------------------------------------------------------------------------
-
-                # deskew
-                print('Deskew channel '+str(channel_id))
-                deskewed = stage_deskew(data=np.flipud(corrected_sub_stack),parameters=params)
-                #deskewed = stage_deskew(data=corrected_sub_stack,parameters=params)
-                del corrected_sub_stack
-
-                # downsample by 2x in z due to oversampling when going from OPM to coverslip geometry
-                deskewed_downsample = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
-                del deskewed
-
-                # create affine transformation for stage translation
-                # swap x & y from instrument to BDV
-                affine_matrix = unit_matrix
-                affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # x-translation 
-                affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # y-translation
-                affine_matrix[2,3] = (1000-1*stage_z) / (z_down_sample*deskewed_z_pixel*10)  # z-translation
-
-                # save tile in BDV H5 with actual stage positions
-                print('Write deskewed data for channel '+str(channel_id))
-                bdv_writer.append_view(deskewed_downsample, time=r_idx, channel=channel_id, 
-                                        tile=tile_id,
-                                        voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel), 
-                                        voxel_units='um',
-                                        m_affine=affine_matrix,
-                                        name_affine = 'tile '+str(tile_id)+' translation')
-
-                # free up memory
-                del deskewed_downsample
+            # free up memory
+            del deskewed
 
     # write BDV xml file
     # https://github.com/nvladimus/npy2bdv
-    bdv_writer.write_xml_file(ntimes=unique_r)
+    bdv_writer.write_xml_file(ntimes=num_timepoints)
     bdv_writer.close()
-
-    # call BigStitcher to stitch, ICP for chromatic and tile correction, and save updated XML
-
-    # shut down pyimagej
-    ij.getContext().dispose()
 
     # exit
     sys.exit()

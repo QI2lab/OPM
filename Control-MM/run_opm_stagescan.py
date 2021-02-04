@@ -52,41 +52,41 @@ def main():
     # lasers to use
     # 0 -> inactive
     # 1 -> active
-    state_405 = 1
+    state_405 = 0
     state_488 = 0
     state_561 = 1
-    state_635 = 1
+    state_635 = 0
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 5
+    power_405 = 0
     power_488 = 0
-    power_561 = 50
-    power_635 = 50
+    power_561 = 10.0
+    power_635 = 0
     power_730 = 0
 
     # exposure time
     exposure_ms = 5.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -5800. #unit: um
-    scan_axis_end_um = -5700. #unit: um
+    scan_axis_start_um = -1600. #unit: um
+    scan_axis_end_um = -1100. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 3800 #unit: um
-    tile_axis_end_um = 3900. #unit: um
+    tile_axis_start_um = -1750 #unit: um
+    tile_axis_end_um = -1250. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 235. #unit: um
-    height_axis_end_um = 240 #unit:  um
+    height_axis_start_um = 219.05 #unit: um
+    height_axis_end_um = 220.00 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
     ROI = [0, 1024, 1600, 256] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210126c/')
-    save_name = 'amp_cy3b'
+    save_directory=Path('E:/20210202c/')
+    save_name = 'beads561_200nm'
 
     # set iterative rounds
     iterative_rounds = 1
@@ -104,25 +104,30 @@ def main():
 
     # set camera into 16bit readout mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','ReadoutRate','100MHz 16bit')
+    core.set_property('Camera','ScanMode',3)
+    #core.set_property('Camera','ReadoutRate','100MHz 16bit')
     #core.set_property('Camera','ReadoutRate','200MHz 11bit')
-    time.sleep(1)
+    time.sleep(5)
 
     # set camera into low noise readout mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','Gain','2-CMS')
+    
+    #core.set_property('Camera','Gain','2-CMS')
     #core.set_property('Camera','Gain','3-Sensitivity')
-    time.sleep(1)
+    #time.sleep(1)
 
     # set camera to trigger first mode
     # give camera time to change modes if necessary
-    core.set_property('Camera','Trigger Timeout (secs)',300)
-    time.sleep(1)
+    #core.set_property('Camera','Trigger Timeout (secs)',300)
+    #time.sleep(1)
 
     # set camera to internal trigger
     # give camera time to change modes if necessary
-    core.set_property('Camera','TriggerMode','Internal Trigger')
-    time.sleep(1)
+    core.set_property('Camera','TRIGGER SOURCE','EXTERNAL')
+    time.sleep(5)
+    core.set_property('Camera','Trigger','START')
+    #core.set_property('Camera','TriggerMode','Internal Trigger')
+    time.sleep(5)
 
     # change core timeout for long stage moves
     core.set_property('Core','TimeoutMs',100000)
@@ -134,15 +139,17 @@ def main():
     # set exposure
     core.set_exposure(exposure_ms)
 
+    true_exposure = core.get_exposure()
+
     # get actual framerate from micromanager properties
     # TO DO: fix need for user to have manually run an exposure with correct crop to get this value
-    actual_readout_ms = float(core.get_property('Camera','ActualInterval-ms')) #unit: ms
+    actual_readout_ms = true_exposure+float(core.get_property('Camera','ReadoutTime')) #unit: ms
 
     # camera pixel size
     pixel_size_um = .115 # unit: um
 
     # scan axis setup
-    scan_axis_step_um = 0.2  # unit: um
+    scan_axis_step_um = 0.4  # unit: um
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -292,6 +299,27 @@ def main():
     print('Number of Y tiles: '+str(tile_axis_positions))
     print('Number of Z slabs: '+str(height_axis_positions))
 
+    # create events to execute scan
+    events = []
+    
+    # Changes to event structure motivated by Henry's notes that pycromanager struggles to read "non-standard" axes. 
+    # https://github.com/micro-manager/pycro-manager/issues/220
+    for c in range(len(channel_states)):
+        for x in range(scan_axis_positions+10): #TO DO: Fix need for extra frames in ASI setup, not here.
+            if channel_states[c]==1:
+                if (c==0):
+                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '405'}}
+                elif (c==1):
+                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '488'}}
+                elif (c==2):
+                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '561'}}
+                elif (c==3):
+                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '637'}}
+                elif (c==4):
+                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '730'}}
+
+                events.append(evt)
+
     for r in range(iterative_rounds):
         for y in range(tile_axis_positions):
             # calculate tile axis position
@@ -309,27 +337,6 @@ def main():
                 core.set_position(height_position_um)
                 core.wait_for_device(z_stage)
 
-                # create events to execute scan
-                events = []
-                
-                # Changes to event structure motivated by Henry's notes that pycromanager struggles to read "non-standard" axes. 
-                # https://github.com/micro-manager/pycro-manager/issues/220
-                for c in range(len(channel_states)):
-                    for x in range(scan_axis_positions+10): #TO DO: Fix need for extra frames in ASI setup, not here.
-                        if channel_states[c]==1:
-                            if (c==0):
-                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '405'}}
-                            elif (c==1):
-                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '488'}}
-                            elif (c==2):
-                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '561'}}
-                            elif (c==3):
-                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '637'}}
-                            elif (c==4):
-                                evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '730'}}
-
-                            events.append(evt)
-
                 # update save_name with current tile information
                 save_name_z = save_name +'_r'+str(r).zfill(4)+'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
@@ -345,8 +352,8 @@ def main():
 
                 # set camera to trigger first mode for stage synchronization
                 # give camera time to change modes
-                core.set_property('Camera','TriggerMode','Trigger first')
-                time.sleep(1)
+                #core.set_property('Camera','TriggerMode','Trigger first')
+                #time.sleep(1)
 
                 # run acquisition at this Z plane
                 with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
@@ -366,8 +373,8 @@ def main():
                 # set camera to internal trigger
                 # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
                 # give camera time to change modes
-                core.set_property('Camera','TriggerMode','Internal Trigger')
-                time.sleep(1)
+                #core.set_property('Camera','TriggerMode','Internal Trigger')
+                #time.sleep(1)
 
     # save stage positions
     save_name_stage_pos = save_directory / 'stage_positions.pkl'
