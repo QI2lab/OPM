@@ -15,14 +15,14 @@
 import sys
 import time
 
-import hardware.AbstractValve
+from hardware.AbstractValve import AbstractValve
 
 # ----------------------------------------------------------------------------------------
 # HamiltonMVP Class Definition
 # ----------------------------------------------------------------------------------------
 class HamiltonMVP(AbstractValve):
     def __init__(self,
-                 com_port = "COM2",
+                 com_port = "COM4",
                  num_simulated_valves = 0,
                  verbose = False):
 
