@@ -41,6 +41,28 @@ def post_hook_fn(event,bridge,event_queue):
     # turn off 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
+    # set camera to software control
+    core.set_config('Camera-TriggerInput','INTERNAL')
+    core.wait_for_config('Camera-TriggerInput','INTERNAL')
+
+    # set camera to external control
+    core.set_config('Camera-TriggerInput','EXTERNALSTART')
+    core.wait_for_config('Camera-TriggerInput','EXTERNALSTART')
+
+    # turn on 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+
+    # turn off 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
     return event
 
 def main():
@@ -53,14 +75,14 @@ def main():
     # 0 -> inactive
     # 1 -> active
     state_405 = 1
-    state_488 = 0
+    state_488 = 1
     state_561 = 1
     state_635 = 1
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 5
-    power_488 = 0
+    power_405 = 10
+    power_488 = 10
     power_561 = 50
     power_635 = 50
     power_730 = 0
@@ -69,24 +91,24 @@ def main():
     exposure_ms = 5.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -5800. #unit: um
-    scan_axis_end_um = -5700. #unit: um
+    scan_axis_start_um = 1000. #unit: um
+    scan_axis_end_um = 1500. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 3800 #unit: um
-    tile_axis_end_um = 3900. #unit: um
+    tile_axis_start_um = -4500 #unit: um
+    tile_axis_end_um = -4000. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 235. #unit: um
-    height_axis_end_um = 240 #unit:  um
+    height_axis_start_um = -130. #unit: um
+    height_axis_end_um = -100 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1600, 256] #unit: pixels
+    ROI = [0, 1024, 1600, 512] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210126c/')
-    save_name = 'amp_cy3b'
+    save_directory=Path('E:/20210211a/')
+    save_name = 'shield_prospc_sma'
 
     # set iterative rounds
     iterative_rounds = 1
@@ -102,47 +124,29 @@ def main():
     core.set_config('Laser','Off')
     core.wait_for_config('Laser','Off')
 
-    # set camera into 16bit readout mode
+    # set camera to external START trigger
     # give camera time to change modes if necessary
-    core.set_property('Camera','ReadoutRate','100MHz 16bit')
-    #core.set_property('Camera','ReadoutRate','200MHz 11bit')
-    time.sleep(1)
-
-    # set camera into low noise readout mode
-    # give camera time to change modes if necessary
-    core.set_property('Camera','Gain','2-CMS')
-    #core.set_property('Camera','Gain','3-Sensitivity')
-    time.sleep(1)
-
-    # set camera to trigger first mode
-    # give camera time to change modes if necessary
-    core.set_property('Camera','Trigger Timeout (secs)',300)
-    time.sleep(1)
-
-    # set camera to internal trigger
-    # give camera time to change modes if necessary
-    core.set_property('Camera','TriggerMode','Internal Trigger')
-    time.sleep(1)
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
     # change core timeout for long stage moves
     core.set_property('Core','TimeoutMs',100000)
     time.sleep(1)
 
-    # crop FOV
-    #core.set_roi(*ROI)
-
     # set exposure
     core.set_exposure(exposure_ms)
 
+    # grab exposure
+    true_exposure = core.get_exposure()
+
     # get actual framerate from micromanager properties
-    # TO DO: fix need for user to have manually run an exposure with correct crop to get this value
-    actual_readout_ms = float(core.get_property('Camera','ActualInterval-ms')) #unit: ms
+    actual_readout_ms = true_exposure+float(core.get_property('Camera','ReadoutTime')) #unit: ms
 
     # camera pixel size
     pixel_size_um = .115 # unit: um
 
     # scan axis setup
-    scan_axis_step_um = 0.2  # unit: um
+    scan_axis_step_um = 0.4  # unit: um
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -153,7 +157,7 @@ def main():
     scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
 
     # tile axis setup
-    tile_axis_overlap=0.2 #unit: percentage
+    tile_axis_overlap=0.3 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
     tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
@@ -319,17 +323,20 @@ def main():
                         if channel_states[c]==1:
                             if (c==0):
                                 evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '405'}}
+                                events.append(evt)
                             elif (c==1):
                                 evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '488'}}
+                                events.append(evt)
                             elif (c==2):
                                 evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '561'}}
+                                events.append(evt)
                             elif (c==3):
                                 evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '637'}}
+                                events.append(evt)
                             elif (c==4):
                                 evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '730'}}
-
-                            events.append(evt)
-
+                                events.append(evt)
+                    
                 # update save_name with current tile information
                 save_name_z = save_name +'_r'+str(r).zfill(4)+'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
@@ -343,14 +350,10 @@ def main():
                 df_stage_positions = df_stage_positions.append(df_current_stage)
                 del df_current_stage
 
-                # set camera to trigger first mode for stage synchronization
-                # give camera time to change modes
-                core.set_property('Camera','TriggerMode','Trigger first')
-                time.sleep(1)
-
                 # run acquisition at this Z plane
                 with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
-                                post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                                post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0, 
+                                saving_queue_size=5000) as acq:
                     acq.acquire(events)
 
                 # turn off lasers
@@ -362,12 +365,6 @@ def main():
                 # NOTE: This is a bug, the directory is not released until Micromanager is shutdown
                 # https://github.com/micro-manager/pycro-manager/issues/218
                 acq = None
-
-                # set camera to internal trigger
-                # this is necessary to avoid PVCAM driver issues that we keep having for long acquisitions.
-                # give camera time to change modes
-                core.set_property('Camera','TriggerMode','Internal Trigger')
-                time.sleep(1)
 
     # save stage positions
     save_name_stage_pos = save_directory / 'stage_positions.pkl'

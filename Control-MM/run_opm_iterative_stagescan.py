@@ -14,9 +14,8 @@ import time
 import sys
 import msvcrt
 import pandas as pd
-from hardware.APump import Apump
+from hardware.APump import APump
 from hardware.HamiltonMVP import HamiltonMVP
-
 
 def camera_hook_fn(event,bridge,event_queue):
 
@@ -29,6 +28,7 @@ def camera_hook_fn(event,bridge,event_queue):
     return event
     
 def post_hook_fn(event,bridge,event_queue):
+    global df_stage_positions
 
     core = bridge.get_core()
     
@@ -46,9 +46,40 @@ def post_hook_fn(event,bridge,event_queue):
     # turn off 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
+    # save actual stage positions
+    xy_pos = core.get_xy_stage_position()
+    stage_x = xy_pos.x
+    stage_y = xy_pos.y
+    stage_z = core.get_position()
+    current_stage_data = [{'stage_x': stage_x, 'stage_y': stage_y, 'stage_z': stage_z}]
+    df_current_stage = pd.DataFrame(current_stage_data)
+    df_stage_positions = df_stage_positions.append(df_current_stage, ignore_index=True)
+
+    # set camera to software control
+    core.set_config('Camera-TriggerInput','INTERNAL')
+    core.wait_for_config('Camera-TriggerInput','INTERNAL')
+
+    # set camera to external control
+    core.set_config('Camera-TriggerInput','EXTERNALSTART')
+    core.wait_for_config('Camera-TriggerInput','EXTERNALSTART')
+
+    # turn on 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+    # check to make sure Tiger is not busy
+    ready='B'
+    while(ready!='N'):
+        command = 'STATUS'
+        core.set_property('TigerCommHub','SerialCommand',command)
+        ready = core.get_property('TigerCommHub','SerialResponse')
+        time.sleep(.500)
+
+    # turn off 'transmit repeated commands' for Tiger
+    core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
     return event
 
-def lookup_valve(source_name)
+def lookup_valve(source_name):
 
     valve_dict = {'B01': [0,1], 'B02': [0,2], 'B03': [0,3], 'B04': [0,4], 'B05': [0,5], 'B06': [0,6], 'B07': [0,7], 
                   'B08': [1,1], 'B09': [1,2], 'B10': [1,3], 'B11': [1,4], 'B12': [1,5], 'B13': [1,6], 'B14': [1,7], 
@@ -140,6 +171,9 @@ def run_fluidic_program(r, df_program, mvp_controller, pump_controller):
 
 def main():
 
+    # hacky way to generate our own metadata on actual stage positions, not requested ones.
+    global df_stage_positions
+
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------
@@ -147,45 +181,45 @@ def main():
     # lasers to use
     # 0 -> inactive
     # 1 -> active
-    state_405 = 1
+    state_405 = 0
     state_488 = 1
     state_561 = 1
-    state_635 = 0
+    state_635 = 1
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 0
-    power_488 = 0
-    power_561 = 0
-    power_635 = 0
+    power_405 = 5
+    power_488 = 80
+    power_561 = 80
+    power_635 = 80
     power_730 = 0
 
     # exposure time
-    exposure_ms = 5.
+    exposure_ms = 5.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = -1700. #unit: um
-    scan_axis_end_um = 700. #unit: um
+    scan_axis_start_um = 2500. #unit: um
+    scan_axis_end_um = 3000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 1300. #unit: um
-    tile_axis_end_um = 2300. #unit: um
+    tile_axis_start_um = -6500 #unit: um
+    tile_axis_end_um = -6000. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 0.#unit: um
-    height_axis_end_um = 20. #unit:  um
+    height_axis_start_um = 95. #unit: um
+    height_axis_end_um = 97 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
     ROI = [0, 1024, 1600, 256] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/202102025/')
-    program_name = Path('20200205_oneround.csv')
-    df_program = pd.read_csv(save_directory / program_name)
-    save_name_prefix = 'human_lung'
+    save_directory=Path('E:/20210208a/')
+    program_name = Path('E:/20210208_firstround.csv')
+    save_name = 'fresh_bDNA'
 
-    iterative_rounds = df_program['round'].max()
+    run_fluidics = False
+    run_scope = True
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -199,17 +233,10 @@ def main():
     core.set_config('Laser','Off')
     core.wait_for_config('Laser','Off')
 
-    # set camera into fast readout mode
-    # give camera time to change modes if necessary
-    core.set_property('Camera','ScanMode',3)
-    time.sleep(5)
-
     # set camera to external START trigger
     # give camera time to change modes if necessary
-    core.set_property('Camera','TRIGGER SOURCE','EXTERNAL')
-    time.sleep(5)
-    core.set_property('Camera','Trigger','START')
-    time.sleep(5)
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
     # change core timeout for long stage moves
     core.set_property('Core','TimeoutMs',100000)
@@ -228,7 +255,7 @@ def main():
     pixel_size_um = .115 # unit: um
 
     # scan axis setup
-    scan_axis_step_um = 0.4  # unit: um
+    scan_axis_step_um = 0.2  # unit: um
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -239,7 +266,7 @@ def main():
     scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
 
     # tile axis setup
-    tile_axis_overlap=0.2 #unit: percentage
+    tile_axis_overlap=0.3 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
     tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
@@ -265,9 +292,6 @@ def main():
     # get handle to xy and z stages
     xy_stage = core.get_xy_stage_device()
     z_stage = core.get_focus_device()
-
-    # create empty dataframe to hold stage positions for BigStitcher H5 creation
-    df_stage_positions = pd.DataFrame(columns=['tile_r','tile_y','tile_z','stage_x','stage_y','stage_z'])
 
     # Setup Tiger controller to pass signal when the scan stage cross the start position to the PLC
     plcName = 'PLogic:E:36'
@@ -372,26 +396,33 @@ def main():
     core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
     core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
-    # setup pump parameters
-    pump_parameters = {'pump_com_port': 'COM3',
-                    'pump_ID': 30,
-                    'verbose': True,
-                    'simulate_pump': False,
-                    'serial_verbose': False,
-                    'flip_flow_direction': False}
+    if run_fluidics == True:
+        # setup pump parameters
+        pump_parameters = {'pump_com_port': 'COM3',
+                        'pump_ID': 30,
+                        'verbose': True,
+                        'simulate_pump': False,
+                        'serial_verbose': False,
+                        'flip_flow_direction': False}
 
-    # connect to pump
-    pump_controller = APump(pump_parameters)
+        # connect to pump
+        pump_controller = APump(pump_parameters)
 
-    # set pump to remote control
-    pump_controller.enableRemoteControl(True)
+        # set pump to remote control
+        pump_controller.enableRemoteControl(True)
 
-    # connect to valves
-    valve_controller = HamiltonMVP(com_port='COM4')
+        # connect to valves
+        valve_controller = HamiltonMVP(com_port='COM4')
 
-    # initialize valves
-    valve_controller.autoAddress()
-    valve_controller.autoDetectValves()
+        # initialize valves
+        valve_controller.autoAddress()
+        valve_controller.autoDetectValves()
+
+        df_program = pd.read_csv(program_name)
+        iterative_rounds = df_program['round'].max()
+
+    else:
+        iterative_rounds = 1
 
     # output experiment info
     print('Number of labeling rounds: '+str(iterative_rounds))
@@ -399,89 +430,92 @@ def main():
     print('Number of Y tiles: '+str(tile_axis_positions))
     print('Number of Z slabs: '+str(height_axis_positions))
 
-    # create events to execute scan
-    events = []
-    
-    # Changes to event structure motivated by Henry's notes that pycromanager struggles to read "non-standard" axes. 
-    # https://github.com/micro-manager/pycro-manager/issues/220
-    for c in range(len(channel_states)):
-        for x in range(scan_axis_positions+10): #TO DO: Fix need for extra frames in ASI setup, not here.
-            if channel_states[c]==1:
-                if (c==0):
-                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '405'}}
-                elif (c==1):
-                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '488'}}
-                elif (c==2):
-                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '561'}}
-                elif (c==3):
-                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '637'}}
-                elif (c==4):
-                    evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '730'}}
-
-                events.append(evt)
-
     for r in range(iterative_rounds):
 
-        success_fluidics = False
-        success_fluidics = run_fluidic_controller(r,df_program, valve_controller, pump_controller)
-        if not(success_fluidics):
-            print('Error in fluidics! Stopping scan.')
-            sys.exit()
-        
-        for y in range(tile_axis_positions):
-            # calculate tile axis position
-            tile_position_um = tile_axis_start_um+(tile_axis_step_um*y)
+        if run_fluidics == True:
+            success_fluidics = False
+            success_fluidics = run_fluidic_program(r, df_program, valve_controller, pump_controller)
+            if not(success_fluidics):
+                print('Error in fluidics! Stopping scan.')
+                sys.exit()
+
+        if run_scope == True:
+            # create events to execute scan
+            events = []
+            for y in range(tile_axis_positions):
+                # calculate tile axis position
+                tile_axis_position_um = tile_axis_start_um+(tile_axis_step_um*y)
+                for z in range(height_axis_positions):
+                    # calculate height axis position
+                    height_axis_position_um = height_axis_start_um+(height_axis_step_um*z)
+                    for c in range(len(channel_states)):
+                        for x in range(scan_axis_positions): #TO DO: Fix need for extra frames in ASI setup, not here.
+                            if channel_states[c]==1:
+                                if (c==0):
+                                    evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'x': scan_axis_start_um,
+                                            'y': tile_axis_position_um, 'z': height_axis_position_um, 'channel' : {'group': 'Laser', 'config': '405'}}
+                                    events.append(evt)
+                                elif (c==1):
+                                    evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'x': scan_axis_start_um,
+                                            'y': tile_axis_position_um, 'z': height_axis_position_um, 'channel' : {'group': 'Laser', 'config': '488'}}
+                                    events.append(evt)
+                                elif (c==2):
+                                    evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'x': scan_axis_start_um,
+                                            'y': tile_axis_position_um, 'z': height_axis_position_um, 'channel' : {'group': 'Laser', 'config': '561'}}
+                                    events.append(evt)
+                                elif (c==3):
+                                    evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'x': scan_axis_start_um,
+                                            'y': tile_axis_position_um, 'z': height_axis_position_um, 'channel' : {'group': 'Laser', 'config': '637'}}
+                                    events.append(evt)
+                                elif (c==4):
+                                    evt = { 'axes': {'x': x, 'y': y, 'z': z}, 'x': scan_axis_start_um,
+                                            'y': tile_axis_position_um, 'z': height_axis_position_um, 'channel' : {'group': 'Laser', 'config': '730'}}
+                                    events.append(evt)
+
+            #evt = None
+            #events.append(evt)
+
+            # run acquisition
+            save_name_r = 'r'+str(r).zfill(3)+'_'+save_name
+            '''
+            with Acquisition(directory=save_directory, name=save_name_r, post_hardware_hook_fn=post_hook_fn, 
+                             post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=None, debug=False) as acq:
+                acq.acquire(events)
+
+            '''
+            with Acquisition(directory=save_directory, name=save_name_r, image_process_fn=None, event_generation_hook_fn=None, 
+                             pre_hardware_hook_fn=None, post_hardware_hook_fn=post_hook_fn, post_camera_hook_fn=camera_hook_fn, 
+                             show_display=False, tile_overlap=None, max_multi_res_index=None, magellan_acq_index=None, 
+                             magellan_explore=False, process=False, saving_queue_size = 100, debug=True, mem_map_index=True) as acq:
+                acq.acquire(events)
             
-            # move XY stage to new tile axis position
-            core.set_xy_position(scan_axis_start_um,tile_position_um)
-            core.wait_for_device(xy_stage)
-                
-            for z in range(height_axis_positions):
-                # calculate height axis position
-                height_position_um = height_axis_start_um+(height_axis_step_um*z)
+            # turn off lasers
+            core.set_config('Laser','Off')
+            core.wait_for_config('Laser','Off')
 
-                # move Z stage to new height axis position
-                core.set_position(height_position_um)
-                core.wait_for_device(z_stage)
+            # clean up acqusition object
+            acq = None
 
-                # update save_name with current tile information
-                save_name_z = save_name +'_r'+str(r).zfill(4)+'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
-
-                # save actual stage positions
-                xy_pos = core.get_xy_stage_position()
-                stage_x = xy_pos.x
-                stage_y = xy_pos.y
-                stage_z = core.get_position()
-                current_stage_data = [{'tile_r': r, 'tile_y': y, 'tile_z': z, 'stage_x': stage_x, 'stage_y': stage_y, 'stage_z': stage_z}]
-                df_current_stage = pd.DataFrame(current_stage_data)
-                df_stage_positions = df_stage_positions.append(df_current_stage)
-                del df_current_stage
-
-                # run acquisition at this Z plane
-                with Acquisition(directory=save_directory, name=save_name_z, post_hardware_hook_fn=post_hook_fn,
-                                post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
-                    acq.acquire(events)
-
-                # turn off lasers
-                core.set_config('Laser','Off')
-                core.wait_for_config('Laser','Off')
-
-                # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
-                # in the background.
-                # This is a bug, the directory is not released until Micromanager is shutdown
-                # https://github.com/micro-manager/pycro-manager/issues/218
-                acq = None
-
-    # save stage positions
-    save_name_stage_pos = save_directory / 'stage_positions.pkl'
-    df_stage_positions.to_pickle(save_name_stage_pos)
+            # save stage scan positions
+            save_name_stage_positions = Path('r_'+str(r)+'_stage_scan_positions.pkl')
+            save_name_stage_positions = save_directory / save_name_stage_positions
+            df_stage_positions.to_pickle(save_name_stage_positions)
+            df_stage_positions = pd.DataFrame(columns=['stage_x','stage_y','stage_z'])
 
     # save stage scan parameters
     scan_param_data = [{'theta': 30.0, 'scan step': scan_axis_step_um*1000., 'pixel size': pixel_size_um*1000.}]
     df_stage_scan_params = pd.DataFrame(scan_param_data)
     save_name_stage_params = save_directory / 'stage_scan_params.pkl'
     df_stage_scan_params.to_pickle(save_name_stage_params)
+    # put camera back to software control
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
-# run
+
+#-----------------------------------------------------------------------------
+
+# create empty dataframe to hold stage positions for BigStitcher H5 creation
+df_stage_positions = pd.DataFrame(columns=['stage_x','stage_y','stage_z'])
+
 if __name__ == "__main__":
     main()
