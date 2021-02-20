@@ -15,30 +15,27 @@ plot_results = False
 figsize = (16, 8)
 now = datetime.datetime.now()
 time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-save_dir = "./%s_localization_fits" % time_stamp
+save_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\%s_localization" % time_stamp
 if not os.path.exists(save_dir):
     os.mkdir(save_dir)
 
 # paths to relevant data
-data_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\beads561_200nm_r0000_y0000_z0000_1"
-stage_data_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\stage_positions.pkl"
-scan_data_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\stage_scan_params.pkl"
+data_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1"
+scan_data_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\galvo_scan_params.pkl"
 
 # load data
-with open(stage_data_dir, "rb") as f:
-    stage_data = pickle.load(f)
-
 with open(scan_data_dir, "rb") as f:
     scan_data = pickle.load(f)
 
-ds = pycromanager.Dataset(data_dir)
+ds = pycromanager.Dataset(data_dir, full_res_only=True)
 # img, img_metadata = ds.read_image(read_metadata=True)
 summary = ds.summary_metadata
 # md = ds.read_metadata(channel=0, z=3)
+nvols = len(ds.axes["t"])
+nimgs = len(ds.axes["x"])
+nyp = ds.image_height
+nxp = ds.image_width
 
-# dataset as dask array
-# each image is 256 x 1600, with 256 direction along the lightsheet, i.e. the y'-direction
-ds_array = ds.as_array()
 
 # load parameters
 na = 1.
@@ -59,7 +56,7 @@ dstage = scan_data["scan step"][0] / 1000
 # identify candidate points in opm data
 # ###############################
 nmax_try = 1
-nsingle = 100
+nsingle = np.min([100, nimgs])
 n_overlap = 3
 thresh = 100
 # difference of gaussian filer
@@ -77,83 +74,96 @@ sigma_xy_min = 0.25 * sigma_xy
 sigma_z_max = 2 * sigma_z
 sigma_z_min = 0.25 * sigma_z
 
-tstart = time.perf_counter()
-centers_unique_all = []
-fit_params_unique_all = []
-rois_unique_all = []
-centers_fit_sequence_all = []
-centers_guess_all = []
-for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
-    save_dir_sub = os.path.join(save_dir, "region_%d" % aa)
-    if not os.path.exists(save_dir_sub):
-        os.mkdir(save_dir_sub)
+for vv in range(nvols):
+    save_dir_vol = os.path.join(save_dir, "vol_%d" % vv)
+    if not os.path.exists(save_dir_vol):
+        os.mkdir(save_dir_vol)
 
-    imgs = ds_array[aa - n_overlap:aa + nsingle].compute()
-    imgs = np.flip(imgs, axis=1) # to mach the conventions I have been using
-    npos, ny, nx = imgs.shape
-    gn = np.arange(npos) * dstage
+    tstart = time.perf_counter()
+    centers_unique_all = []
+    fit_params_unique_all = []
+    rois_unique_all = []
+    centers_fit_sequence_all = []
+    centers_guess_all = []
+    for aa in range(0, nimgs, nsingle):
+        save_dir_sub = os.path.join(save_dir_vol, "region_%d" % aa)
+        if not os.path.exists(save_dir_sub):
+            os.mkdir(save_dir_sub)
 
-    y_offset = (aa - n_overlap) * dstage
+        img_start = int(np.max([aa - n_overlap, 0]))
+        img_end = int(np.min([img_start + nsingle, ]))
+        nimgs_temp = img_end - img_start
 
-    imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_fit_sequence, centers_guess = localize.localize(
-                 imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_filter_small, xy_filter_big,
-                 xy_roi_size, z_roi_size, min_z_dist, min_xy_dist,
-                 sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
+        imgs = np.zeros((nimgs_temp, nyp, nxp))
+        for kk in range(img_start, img_end):
+            imgs[kk] = ds.read_image(t=vv, x=kk)
+        imgs = np.flip(imgs, axis=1) # to mach the conventions I have been using
 
-    centers_unique_all.append(centers_unique)
-    fit_params_unique_all.append(fit_params_unique)
-    rois_unique_all.append(rois_unique)
-    centers_fit_sequence_all.append(centers_fit_sequence)
-    centers_guess_all.append(centers_guess)
+        npos, ny, nx = imgs.shape
+        gn = np.arange(npos) * dstage
 
-    # plot localization fit diagnostic on good points
-    # picture coordinates in coverslip frame
-    x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
-    y += y_offset
+        y_offset = (aa - n_overlap) * dstage
 
-    if plot_results:
-        plt.ioff()
-        plt.switch_backend("agg")
-        print("plotting %d ROI's" % len(fit_params_unique))
-        results = joblib.Parallel(n_jobs=-1, verbose=10, timeout=None)(
-            joblib.delayed(localize.plot_roi)(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
-                                      figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
-            for ii in range(len(fit_params_unique)))
+        imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_fit_sequence, centers_guess = localize.localize(
+                     imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_filter_small, xy_filter_big,
+                     xy_roi_size, z_roi_size, min_z_dist, min_xy_dist,
+                     sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
 
-        # for debugging
-        # for ii in range(len(fit_params_unique)):
-        #     localize.plot_roi(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
-        #     figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
+        centers_unique_all.append(centers_unique)
+        fit_params_unique_all.append(fit_params_unique)
+        rois_unique_all.append(rois_unique)
+        centers_fit_sequence_all.append(centers_fit_sequence)
+        centers_guess_all.append(centers_guess)
 
-        plt.ion()
-        # plt.switch_backend("TkAgg")
-        plt.switch_backend("Qt5Agg")
+        # plot localization fit diagnostic on good points
+        # picture coordinates in coverslip frame
+        x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
+        y += y_offset
 
-# assemble results
-centers_unique_all = np.concatenate(centers_unique_all, axis=0)
-fit_params_unique_all = np.concatenate(fit_params_unique_all, axis=0)
-rois_unique_all = np.concatenate(rois_unique_all, axis=0)
-centers_fit_sequence_all = np.concatenate(centers_fit_sequence_all, axis=0)
-centers_guess_all = np.concatenate(centers_guess_all, axis=0)
+        if plot_results:
+            plt.ioff()
+            plt.switch_backend("agg")
+            print("plotting %d ROI's" % len(fit_params_unique))
+            results = joblib.Parallel(n_jobs=-1, verbose=10, timeout=None)(
+                joblib.delayed(localize.plot_roi)(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
+                                          figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
+                for ii in range(len(fit_params_unique)))
 
-# since left some overlap at the edges, have to again combine results
-centers_unique, unique_inds =localize.combine_nearby_peaks(centers_unique_all, min_xy_dist, min_z_dist, mode="keep-one")
-fit_params_unique = fit_params_unique_all[unique_inds]
-rois_unique = rois_unique_all[unique_inds]
+            # for debugging
+            # for ii in range(len(fit_params_unique)):
+            #     localize.plot_roi(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
+            #     figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
 
-tend = time.perf_counter()
-elapsed_t = tend - tstart
-hrs = (elapsed_t) // (60 * 60)
-mins = (elapsed_t - hrs * 60 * 60) // 60
-secs = (elapsed_t - hrs * 60 * 60 - mins * 60)
-print("Found %d centers in %dhrs %dmins and %0.2fs" % (len(centers_unique), hrs, mins, secs))
+            plt.ion()
+            # plt.switch_backend("TkAgg")
+            plt.switch_backend("Qt5Agg")
 
-full_results = {"centers": centers_unique, "fit_params": fit_params_unique, "rois": rois_unique,
-                "elapsed_t": elapsed_t}
-fname = os.path.join(save_dir, "localization_results.pkl")
-with open(fname, "wb") as f:
-    pickle.dump(full_results, f)
+    # assemble results
+    centers_unique_all = np.concatenate(centers_unique_all, axis=0)
+    fit_params_unique_all = np.concatenate(fit_params_unique_all, axis=0)
+    rois_unique_all = np.concatenate(rois_unique_all, axis=0)
+    centers_fit_sequence_all = np.concatenate(centers_fit_sequence_all, axis=0)
+    centers_guess_all = np.concatenate(centers_guess_all, axis=0)
 
+    # since left some overlap at the edges, have to again combine results
+    centers_unique, unique_inds =localize.combine_nearby_peaks(centers_unique_all, min_xy_dist, min_z_dist, mode="keep-one")
+    fit_params_unique = fit_params_unique_all[unique_inds]
+    rois_unique = rois_unique_all[unique_inds]
+
+    tend = time.perf_counter()
+    elapsed_t = tend - tstart
+    hrs = (elapsed_t) // (60 * 60)
+    mins = (elapsed_t - hrs * 60 * 60) // 60
+    secs = (elapsed_t - hrs * 60 * 60 - mins * 60)
+    print("Found %d centers in %dhrs %dmins and %0.2fs" % (len(centers_unique), hrs, mins, secs))
+
+    full_results = {"centers": centers_unique, "fit_params": fit_params_unique, "rois": rois_unique,
+                    "elapsed_t": elapsed_t}
+    fname = os.path.join(save_dir_vol, "localization_results.pkl")
+    with open(fname, "wb") as f:
+        pickle.dump(full_results, f)
+
+"""
 # ###############################
 # interpolate images so are on grids in coverslip coordinate system and plot all results
 # ###############################
@@ -222,3 +232,4 @@ plt.ylabel("Z (um)")
 plt.title("YZ")
 
 plt.show()
+"""

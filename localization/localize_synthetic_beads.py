@@ -1,6 +1,3 @@
-"""
-2/5/2021, Peter T. Brown
-"""
 import numpy as np
 import scipy
 from scipy import fft
