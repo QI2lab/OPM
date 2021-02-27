@@ -33,25 +33,25 @@ def main():
     # laser powers (0 -> 100%)
     power_405 = 0
     power_488 = 0
-    power_561 = 10.0
+    power_561 = 0
     power_635 = 0
     power_730 = 0
 
     # exposure time
-    exposure_ms = 2.0 #unit: ms
+    exposure_ms = 2. #unit: ms
 
     # scan axis range
     scan_axis_range_um = 10.0 # unit: microns
     
     # voltage start
-    min_volt = -0.54 # unit: volts
+    min_volt = -1.75 # unit: volts
 
     # setup file name
-    save_directory=Path('E:/20210203g/')
-    save_name = 'beads_0glyc_1000dilution'
+    save_directory=Path('E:/20210225a/')
+    save_name = 'galvo_skip_test'
 
     # set timepoints
-    timepoints = 5000 #unit: number of timepoints
+    timepoints = 1 #unit: number of timepoints
 
     # display data
     display_flag = False
@@ -68,12 +68,13 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # give camera time to change modes if necessary
-    core.set_property('Camera','ScanMode',3)
-    time.sleep(5)
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
-    # set camera into low noise readout mode
-    # give camera time to change modes if necessary
-
+    # set camera to internal trigger
+    core.set_config('Camera-TriggerSource','INTERNAL')
+    core.wait_for_config('Camera-TriggerSource','INTERNAL')
+    
     # set camera to internal trigger
     # give camera time to change modes if necessary
     core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
@@ -95,7 +96,7 @@ def main():
     scan_axis_step_volts = scan_axis_step_um * scan_axis_calibration # unit: V
     scan_axis_range_volts = scan_axis_range_um * scan_axis_calibration # unit: V
     scan_steps = np.rint(scan_axis_range_volts / scan_axis_step_volts).astype(np.int16) # galvo steps
-    print(scan_steps)
+    #print(scan_steps)
     
     # construct boolean array for lasers to use
     channel_states = [state_405,state_488,state_561,state_635,state_730]
@@ -143,19 +144,21 @@ def main():
                 if channel_states[c]==1:
                     evt = { 'axes': {'t': t, 'x': x, 'channel': c }}
                     events.append(evt)
+    print("Generated %d events" % len(events))
 
     # setup DAQ
     nvoltage_steps = scan_steps
     # 2 time steps per frame, except for first frame plus one final frame to reset voltage
     samples_per_ch = (nvoltage_steps * 2 - 1) + 1
     DAQ_sample_rate_Hz = 10000
-    retriggerable = True
+    #retriggerable = True
     num_DI_channels = 8
 
     # Generate values for DO
     dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
     dataDO[::2,:] = 1
     dataDO[-1, :] = 0
+    print("Digital output array:")
     print(dataDO[:, 0])
 
     # generate voltage steps
@@ -172,8 +175,10 @@ def main():
     # set back to right value at end
     wf[-1] = voltage_values[0]
     #wf[:] = 0 # for test: galvo is not moved
+    print("Analog output voltage array:")
     print(wf)
 
+    #def read_di_hook(event):
     try:    
         # ----- DIGITAL input -------
         taskDI = daq.Task()
@@ -181,7 +186,7 @@ def main():
         #taskDI.CreateDIChan("OnboardClock","",daq.DAQmx_Val_ChanForAllLines)
         
         ## Configure change detectin timing (from wave generator)
-        taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing
+        taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
         taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
         #taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_FiniteSamps,samples_per_ch)
 
@@ -212,7 +217,7 @@ def main():
         
         ## Configure timing (from DI task)
         taskAO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
-      
+        
         ## Write the output waveform
         samples_per_ch_ct = ct.c_int32()
         taskAO.WriteAnalogF64(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByScanNumber,wf,ct.byref(samples_per_ch_ct),None)
@@ -226,9 +231,19 @@ def main():
     except daq.DAQError as err:
         print("DAQmx Error %s"%err)
 
-    # run acquisition at this Z plane
-    with Acquisition(directory=save_directory, name=save_name, show_display=display_flag, max_multi_res_index=0) as acq:
-        acq.acquire(events)
+    def read_di_buffer_hook(event):
+        samps = (ct.c_int8 * 10)()
+        samps_per_ch_read = ct.c_uint32()
+        num_bytes_per_sample = ct.c_uint32()
+        #taskDI.ReadDigitalLines(1, 1e-3, False, len(samps), None, ct.byref(samps), ct.byref(samps_per_ch_read), ct.byref(num_bytes_per_sample))
+        return event
+
+    if 0:
+        # run acquisition at this Z plane
+        with Acquisition(directory=save_directory, name=save_name, show_display=display_flag, max_multi_res_index=0, saving_queue_size=5000) as acq:
+            acq.acquire(events)
+
+    time.sleep(nvoltage_steps * timepoints * 1)
 
     # stop DAQ
     try:
