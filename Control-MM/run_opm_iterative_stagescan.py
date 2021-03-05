@@ -198,25 +198,25 @@ def main():
     exposure_ms = 5.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 2500. #unit: um
-    scan_axis_end_um = 3000. #unit: um
+    scan_axis_start_um = 9500. #unit: um
+    scan_axis_end_um = 10000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -6500 #unit: um
-    tile_axis_end_um = -6000. #unit: um
+    tile_axis_start_um = 3250 #unit: um
+    tile_axis_end_um = 3750. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 95. #unit: um
-    height_axis_end_um = 97 #unit:  um
+    height_axis_start_um = 125. #unit: um
+    height_axis_end_um = 150 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1600, 256] #unit: pixels
+    ROI = [0, 1024, 1596, 508] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210208a/')
+    save_directory=Path('E:/20210227a/')
     program_name = Path('E:/20210208_firstround.csv')
-    save_name = 'fresh_bDNA'
+    save_name = 'flash_prospc_sample'
 
     run_fluidics = False
     run_scope = True

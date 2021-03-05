@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-OPM stage control with fluidics
+OPM stage control without fluidics
 
 Shepherd 02/21
 '''
@@ -19,6 +19,10 @@ def camera_hook_fn(event,bridge,event_queue):
 
     core = bridge.get_core()
 
+    # read camera trigger setup
+    trigger_state = core.get_property('Camera','TRIGGER SOURCE')
+    #print('Camera fn. trigger state: '+trigger_state)
+
     command='1SCAN'
     core.set_property('TigerCommHub','SerialCommand',command)
     #answer = core.get_property('TigerCommHub','SerialCommand') # might be able to remove
@@ -28,10 +32,23 @@ def camera_hook_fn(event,bridge,event_queue):
 def post_hook_fn(event,bridge,event_queue):
     core = bridge.get_core()
 
-    # set camera to external control
+    # set camera back to external control
+    # DCAM sets the camera back to INTERNAL mode after each acquisition
     core.set_config('Camera-TriggerSource','EXTERNAL')
     core.wait_for_config('Camera-TriggerSource','EXTERNAL')
-  
+
+    # verify that camera actually switched back to external trigger mode
+    trigger_state = core.get_property('Camera','TRIGGER SOURCE')
+
+    # if not in external control, keep trying until camera changes settings
+    while not(trigger_state =='EXTERNAL'):
+        time.sleep(2.0)
+        core.set_config('Camera-TriggerSource','EXTERNAL')
+        core.wait_for_config('Camera-TriggerSource','EXTERNAL')
+        trigger_state = core.get_property('Camera','TRIGGER SOURCE')
+
+    #print('Hook fn. trigger state: '+trigger_state)
+    
     # turn on 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
@@ -58,14 +75,14 @@ def main():
     # 0 -> inactive
     # 1 -> active
     state_405 = 1
-    state_488 = 1
+    state_488 = 0
     state_561 = 1
     state_635 = 1
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 10
-    power_488 = 10
+    power_405 = 50
+    power_488 = 0
     power_561 = 50
     power_635 = 50
     power_730 = 0
@@ -74,24 +91,24 @@ def main():
     exposure_ms = 5.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 200. #unit: um
-    scan_axis_end_um = 700. #unit: um
+    scan_axis_start_um = 8000. #unit: um
+    scan_axis_end_um = 9000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = 1000 #unit: um
-    tile_axis_end_um = 1500. #unit: um
+    tile_axis_start_um = -2000 #unit: um
+    tile_axis_end_um = -1000. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = -300. #unit: um
-    height_axis_end_um = -295 #unit:  um
+    height_axis_start_um = 45. #unit: um
+    height_axis_end_um = 80 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1024, 1600, 512] #unit: pixels
+    ROI = [0, 1152, 1596, 252] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210211f/')
-    save_name = 'flash_cd31_pdgfa'
+    save_directory=Path('E:/20210302b/')
+    save_name = 'flash_lung_prospc_newRI'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -109,9 +126,17 @@ def main():
     core.set_config('Camera-Setup','ScanMode3')
     core.wait_for_config('Camera-Setup','ScanMode3')
 
-    # set camera to fast readout mode
+    # set camera to START mode upon input trigger
     core.set_config('Camera-TriggerType','START')
     core.wait_for_config('Camera-TriggerType','START')
+
+    # set camera to positive input trigger
+    core.set_config('Camera-TriggerPolarity','POSITIVE')
+    core.wait_for_config('Camera-TriggerPolarity','POSITIVE')
+
+    # set camera to internal control
+    core.set_config('Camera-TriggerSource','INTERNAL')
+    core.wait_for_config('Camera-TriggerSource','INTERNAL')
 
     # change core timeout for long stage moves
     core.set_property('Core','TimeoutMs',100000)
@@ -153,7 +178,7 @@ def main():
         tile_axis_positions=1
 
     # height axis setup
-    height_axis_overlap=0.2 #unit: percentage
+    height_axis_overlap=0.3 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
     height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
@@ -280,7 +305,7 @@ def main():
     # create events to execute scan
     events = []
     for c in range(len(channel_states)):
-        for x in range(scan_axis_positions+30): #TO DO: Fix need for extra frames in ASI setup, not here.
+        for x in range(scan_axis_positions): #TO DO: Fix need for extra frames in ASI setup, not here.
             if channel_states[c]==1:
                 if (c==0):
                     evt = { 'axes': {'z': x}, 'channel' : {'group': 'Laser', 'config': '405'}}
@@ -317,6 +342,20 @@ def main():
             # update save_name with current tile information
             save_name_z = save_name +'_y'+str(y).zfill(4)+'_z'+str(z).zfill(4)
 
+            # turn on 'transmit repeated commands' for Tiger
+            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+            # check to make sure Tiger is not busy
+            ready='B'
+            while(ready!='N'):
+                command = 'STATUS'
+                core.set_property('TigerCommHub','SerialCommand',command)
+                ready = core.get_property('TigerCommHub','SerialResponse')
+                time.sleep(.500)
+
+            # turn off 'transmit repeated commands' for Tiger
+            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
             # save actual stage positions
             xy_pos = core.get_xy_stage_position()
             stage_x = xy_pos.x
@@ -340,10 +379,24 @@ def main():
             core.set_config('Laser','Off')
             core.wait_for_config('Laser','Off')
 
+            # turn on 'transmit repeated commands' for Tiger
+            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+            # check to make sure Tiger is not busy
+            ready='B'
+            while(ready!='N'):
+                command = 'STATUS'
+                core.set_property('TigerCommHub','SerialCommand',command)
+                ready = core.get_property('TigerCommHub','SerialResponse')
+                time.sleep(.500)
+
+            # turn off 'transmit repeated commands' for Tiger
+            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
             # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
             # in the background.
             # NOTE: This is a bug, the directory is not released until Micromanager is shutdown
-            # https://github.com/micro-manager/pycro-manager/issues/218
+            # https://github.com/micro-manager/pycro-manager/issues/242
             acq = None
 
     # save stage scan parameters
