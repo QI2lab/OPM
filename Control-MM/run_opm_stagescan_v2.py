@@ -75,40 +75,40 @@ def main():
     # 0 -> inactive
     # 1 -> active
     state_405 = 1
-    state_488 = 0
+    state_488 = 1
     state_561 = 1
     state_635 = 1
     state_730 = 0
 
     # laser powers (0 -> 100%)
-    power_405 = 50
-    power_488 = 0
-    power_561 = 50
-    power_635 = 50
+    power_405 = 25
+    power_488 = 50
+    power_561 = 100
+    power_635 = 100
     power_730 = 0
 
     # exposure time
-    exposure_ms = 5.0
+    exposure_ms = 10.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 8000. #unit: um
-    scan_axis_end_um = 9000. #unit: um
+    scan_axis_start_um = 2000. #unit: um
+    scan_axis_end_um = 3000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -2000 #unit: um
-    tile_axis_end_um = -1000. #unit: um
+    tile_axis_start_um = -4000 #unit: um
+    tile_axis_end_um = -3000. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 45. #unit: um
-    height_axis_end_um = 80 #unit:  um
+    height_axis_start_um = -243. #unit: um
+    height_axis_end_um = -195 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1152, 1596, 252] #unit: pixels
+    ROI = [0, 1152, 1608, 256] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210302b/')
-    save_name = 'flash_lung_prospc_newRI'
+    save_directory=Path('E:/20210308b/')
+    save_name = 'lung_bDNA_trial'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
