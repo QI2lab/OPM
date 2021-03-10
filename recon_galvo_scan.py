@@ -142,10 +142,11 @@ def main(argv):
     input_dir_path=Path(input_dir_string)
 
     # load first tile to get dataset dimensions
-    dataset = Dataset(input_dir_path)
-    #img, img_metadata = dataset.read_image(x=0, read_metadata=True)
-    #print(img_metadata)
+    dataset = Dataset(str(input_dir_path))
     dask_array = dataset.as_array()
+
+    print(dask_array.shape)
+    exit()
 
     num_timepoints = dask_array.shape[0]
     num_scan_axis =  dask_array.shape[1]
@@ -194,7 +195,6 @@ def main(argv):
 
     # loop over timepoints
     for timepoint_id in range(num_timepoints):
-        print
         # loop over channels inside tile
         for channel_id in range(num_channels):
 
