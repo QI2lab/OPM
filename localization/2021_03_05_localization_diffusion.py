@@ -1,3 +1,5 @@
+import glob
+import re
 import os
 import datetime
 import time
@@ -5,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 import joblib
+import tifffile
 import pycromanager
 
 import localize
@@ -16,30 +19,28 @@ figsize = (16, 8)
 now = datetime.datetime.now()
 time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
 
-# root_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1"
-# root_dir = r"\\10.206.26.21\opm2\20210203\beads_0glyc_1000dilution_1"
-root_dir = r
+root_dir = r"\\10.206.26.21\opm2\20210305a\crowders_densest_50glycerol"
+fnames = glob.glob(os.path.join(root_dir, "*.tif"))
+img_inds = np.array([int(re.match(".*Image1_(\d+).tif", f).group(1)) for f in fnames])
+fnames = [f for _, f in sorted(zip(img_inds, fnames))]
+
+
 save_dir = os.path.join(root_dir, "%s_localization" % time_stamp)
 if not os.path.exists(save_dir):
     os.mkdir(save_dir)
 
 # paths to relevant data
 data_dir = root_dir
-scan_data_dir = os.path.join(root_dir, "galvo_scan_params.pkl")
+scan_data_dir = os.path.join(root_dir, "..", "galvo_scan_params.pkl")
 
 # load data
 with open(scan_data_dir, "rb") as f:
     scan_data = pickle.load(f)
 
-ds = pycromanager.Dataset(data_dir, full_res_only=True)
-# img, img_metadata = ds.read_image(read_metadata=True)
-summary = ds.summary_metadata
-# md = ds.read_metadata(channel=0, z=3)
-nvols = len(ds.axes["t"])
-nimgs = len(ds.axes["x"])
-nyp = ds.image_height
-nxp = ds.image_width
-
+nvols = 10000
+nimgs = 25
+nyp = 256
+nxp = 1600
 
 # load parameters
 na = 1.
@@ -100,7 +101,7 @@ for vv in range(nvols):
 
         imgs = np.zeros((nimgs_temp, nyp, nxp))
         for kk in range(img_start, img_end):
-            imgs[kk] = ds.read_image(t=vv, x=kk)
+            imgs[kk] = tifffile.imread(fnames[vv * nimgs + kk])
         imgs = np.flip(imgs, axis=1) # to mach the conventions I have been using
 
         npos, ny, nx = imgs.shape

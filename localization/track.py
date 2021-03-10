@@ -10,7 +10,9 @@ import trackpy as tp
 import pandas as pd
 import matplotlib.pyplot as plt
 
-root_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\2021_02_21_12;56;10_localization"
+# root_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\2021_02_21_12;56;10_localization"
+# root_dir = r"\\10.206.26.21\opm2\20210203\beads_0glyc_1000dilution_1\2021_02_23_08;07;45_localization"
+root_dir = r"\\10.206.26.21\opm2\20210305a\crowders_densest_50glycerol\2021_03_07_08;12;02_localization"
 data_dirs = glob.glob(os.path.join(root_dir, r"vol_*"))
 inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_dirs])
 
@@ -34,11 +36,13 @@ df = pd.DataFrame(data, columns=["frame", "z", "y", "x", "zum", "yum", "xum"])
 
 
 linked = tp.link_df(df, search_range=(1.0, 1.0, 1.0), memory=3, pos_columns=["xum", "yum", "zum"])
-nmin_traj = 100
+# nmin_traj = 100
+nmin_traj = 20
 linked = tp.filter_stubs(linked, nmin_traj)
 
-fps = 20
-msd = tp.emsd(linked, mpp=1.0, fps=fps, max_lagtime=nmin_traj, pos_columns=["xum", "yum", "zum"])
+# frames per second = 1 / (frames per volume * frame rate)
+frames_per_sec = 1 / (25 * 2e-3)
+msd = tp.emsd(linked, mpp=1.0, fps=frames_per_sec, max_lagtime=nmin_traj, pos_columns=["xum", "yum", "zum"])
 
 # linear fit
 slope = np.linalg.lstsq(msd.index[:, np.newaxis], msd)[0][0]
@@ -57,5 +61,5 @@ ax.legend(loc='upper left')
 fname = os.path.join(root_dir, "msd.png")
 figh.savefig(fname)
 
-# plt.figure()
-# tp.plot_traj(linked[linked["particle"] == 1])
+plt.figure()
+tp.plot_traj(linked)

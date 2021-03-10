@@ -16,8 +16,8 @@ if __name__ == "__main__":
     na = 1. # numerical aperture
     ni = 1.4 # index of refraction
     wavelength = 0.532 # um
-    nx = 300
-    ny = 256
+    nx = 25
+    ny = 35
     dc = 0.115 # camera pixel size, um
     theta = 30 * np.pi / 180 # light sheet angle to coverslip
     normal = np.array([0, -np.sin(theta), np.cos(theta)]) # normal of camera pixel
@@ -25,7 +25,8 @@ if __name__ == "__main__":
     dz = dc * np.sin(theta) # distance planes above coverslip
     #dy = 2 * dc * np.cos(theta)  # stage scanning step
     dy = 0.4
-    gn = np.arange(0, 30, dy) # stage positions, todo: allow to be unequally spaced
+    # gn = np.arange(0, 30, dy) # stage positions
+    gn = np.arange(0, 10, dy)
     npos = len(gn)
 
     # ###############################
@@ -41,7 +42,7 @@ if __name__ == "__main__":
     # ###############################
     # generate random spots
     # ###############################
-    nc = 10
+    nc = 1
     centers = np.concatenate((np.random.uniform(0.25 * z.max(), 0.75 * z.max(), size=(nc, 1)),
                               np.random.uniform(0.25 * y.max(), 0.75 * y.max(), size=(nc, 1)),
                               np.random.uniform(x.min(), x.max(), size=(nc, 1))), axis=1)
@@ -54,7 +55,7 @@ if __name__ == "__main__":
     imgs_opm = np.zeros((npos, ny, nx))
     for kk in range(nc):
         params = [1, centers[kk, 2], centers[kk, 1], centers[kk, 0], sigma_xy, sigma_z, 0]
-        imgs_opm += localize.gaussian3d_pixelated_psf(x, y, z, dc, normal, params, sf=3)
+        imgs_opm += localize.gaussian3d_pixelated_psf(x, y, z, [dc, dc], normal, params, sf=3)
 
     # add shot-noise and gaussian readout noise
     nphotons = 100
@@ -131,7 +132,7 @@ if __name__ == "__main__":
         z_roi = z[:, roi[2]:roi[3]:, ]
 
         # gaussian fitting localization
-        def model_fn(p): return localize.gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, dc, normal, p, sf=3)
+        def model_fn(p): return localize.gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, [dc, dc], normal, p, sf=3)
         init_params = [np.max(img_roi), centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], 0.2, 1, np.mean(img_roi)]
         bounds = [[0, x_roi.min(), y_roi.min(), z_roi.min(), 0, 0, 0],
                   [np.inf, x_roi.max(), y_roi.max(), z_roi.max(), np.inf, np.inf, np.inf]]
@@ -173,7 +174,7 @@ if __name__ == "__main__":
     imgs_square = np.zeros((len(zi), len(yi), len(xi)))
     for kk in range(nc):
         params = [1, centers[kk, 2], centers[kk, 1], centers[kk, 0], sigma_xy, sigma_z, 0]
-        imgs_square += localize.gaussian3d_pixelated_psf(xi[None, None, :], yi[None, :, None], zi[:, None, None], dxi, np.array([0, 0, 1]), params, sf=3)
+        imgs_square += localize.gaussian3d_pixelated_psf(xi[None, None, :], yi[None, :, None], zi[:, None, None], [dxi, dyi], np.array([0, 0, 1]), params, sf=3)
     # add noise
     imgs_square, _, _ = localize.simulated_img(imgs_square, nphotons, gain, bg, noise, use_otf=False)
     # nan-mask region outside what we get from the OPM
@@ -304,6 +305,119 @@ if __name__ == "__main__":
     plt.plot(centers_fit[:, 1], centers_fit[:, 0], 'mx')
     plt.xlabel("Y (um)")
     plt.ylabel("Z (um)")
+
+    # radial localization
+    img = imgs_opm
+    nstep, ni1, ni2 = img.shape
+
+    yk = 0.5 * (y[:-1, :-1, :] + y[1:, 1:, :])
+    xk = 0.5 * (x[:, :, :-1] + x[:, :, 1:])
+    zk = 0.5 * (z[:, :-1] + z[:, 1:])
+    coords = (zk, yk, xk)
+
+    # take a cube of 8 voxels, and compute gradients at the center, using the four pixel diagonals that pass
+    # through the center
+    grad_n1 = img[1:, 1:, 1:] - img[:-1, :-1, :-1]
+    # vectors go [nz, ny, nx]
+    n1 = np.array([zk[0, 1, 0] - zk[0, 0, 0], yk[1, 1, 0] - yk[0, 0, 0], xk[0, 0, 1] - xk[0, 0, 0]])
+    n1 = n1 / np.linalg.norm(n1)
+
+    grad_n2 = img[1:, :-1, 1:] - img[:-1, 1:, :-1]
+    n2 = np.array([zk[0, 0, 0] - zk[0, 1, 0], yk[1, 0, 0] - yk[0, 1, 0], xk[0, 0, 1] - xk[0, 0, 0]])
+    n2 = n2 / np.linalg.norm(n2)
+
+    grad_n3 = img[1:, :-1, :-1] - img[:-1, 1:, 1:]
+    n3 = np.array([zk[0, 0, 0] - zk[0, 1, 0], yk[1, 0, 0] - yk[0, 1, 0], xk[0, 0, 0] - xk[0, 0, 1]])
+    n3 = n3 / np.linalg.norm(n3)
+
+    grad_n4 = img[1:, 1:, :-1] - img[:-1, :-1, 1:]
+    n4 = np.array([zk[0, 1, 0] - zk[0, 0, 0], yk[1, 1, 0] - yk[0, 0, 0], xk[0, 0, 0] - xk[0, 0, 1]])
+    n4 = n4 / np.linalg.norm(n4)
+
+    # compute the gradient xyz components
+    # 3 unknowns and 4 eqns, so use pseudo-inverse to optimize overdetermined system
+    mat = np.concatenate((n1[None, :], n2[None, :], n3[None, :], n4[None, :]), axis=0)
+    gradk = np.linalg.pinv(mat).dot(
+        np.concatenate((grad_n1.ravel()[None, :], grad_n2.ravel()[None, :],
+                        grad_n3.ravel()[None, :], grad_n4.ravel()[None, :]), axis=0))
+    gradk = np.reshape(gradk, [3, nstep - 1, ni1 - 1, ni2 - 1])
+
+    # compute weights by (1) increasing weight where gradient is large and (2) decreasing weight for points far away
+    # from the centroid (as small slope errors can become large as the line is extended to the centroi)
+    # approximate distance between (xk, yk) and (xc, yc) by assuming (xc, yc) is centroid of the gradient
+    grad_norm = np.sqrt(np.sum(gradk ** 2, axis=0))
+    centroid_gns = np.array([np.sum(zk * grad_norm), np.sum(yk * grad_norm), np.sum(xk * grad_norm)]) / \
+                   np.sum(grad_norm)
+    dk_centroid = np.sqrt((zk - centroid_gns[0]) ** 2 + (yk - centroid_gns[1]) ** 2 + (xk - centroid_gns[2]) ** 2)
+    # weights
+    wk = grad_norm ** 2 / dk_centroid
+
+    # in 3D, parameterize a line passing through point Po along normal n by
+    # V(t) = Pk + n * t
+    # distance between line and point Pc minimized at
+    # tmin = -\sum_{i=1}^3 (Pk_i - Pc_i) / \sum_i n_i^2
+    # dk^2 = \sum_k \sum_i (Pk + n * tmin - Pc)^2
+    # again, we want to minimize the quantity
+    # chi^2 = \sum_k dk^2 * wk
+    # so we take the derivatives of chi^2 with respect to Pc_x, Pc_y, and Pc_z, which gives a system of linear
+    # equations, which we can recast into a matrix equation
+    # np.array([[A, B, C], [D, E, F], [G, H, I]]) * np.array([[Pc_z], [Pc_y], [Pc_x]]) = np.array([[J], [K], [L]])
+    nk = gradk / np.linalg.norm(gradk, axis=0)
+
+    # def chi_sqr(xc, yc, zc):
+    #     cs = (zc, yc, xc)
+    #     chi = 0
+    #     for ii in range(3):
+    #         chi += np.sum((coords[ii] + nk[ii] * (cs[jj] - coords[jj]) - cs[ii]) ** 2 * wk)
+    #     return chi
+
+    # build 3x3 matrix from above
+    mat = np.zeros((3, 3))
+    for ll in range(3):  # rows of matrix
+        for ii in range(3):  # columns of matrix
+            if ii == ll:
+                mat[ll, ii] += np.sum(-wk * (nk[ii] * nk[ll] - 1))
+            else:
+                mat[ll, ii] += np.sum(-wk * nk[ii] * nk[ll])
+
+            for jj in range(3):  # internal sum
+                if jj == ll:
+                    mat[ll, ii] += np.sum(wk * nk[ii] * nk[jj] * (nk[jj] * nk[ll] - 1))
+                else:
+                    mat[ll, ii] += np.sum(wk * nk[ii] * nk[jj] * nk[jj] * nk[ll])
+
+    # build vector from above
+    vec = np.zeros((3, 1))
+    coord_sum = zk * nk[0] + yk * nk[1] + xk * nk[2]
+    for ll in range(3):  # sum over J, K, L
+        for ii in range(3):  # internal sum
+            if ii == ll:
+                vec[ll] += -np.sum((coords[ii] - nk[ii] * coord_sum) * (nk[ii] * nk[ll] - 1) * wk)
+            else:
+                vec[ll] += -np.sum((coords[ii] - nk[ii] * coord_sum) * nk[ii] * nk[ll] * wk)
+
+    # invert matrix
+    zc, yc, xc = np.linalg.inv(mat).dot(vec)
+
+    plt.figure(figsize=figsize)
+    grid = plt.GridSpec(1, 8)
+    plt.set_cmap("bone")
+    istart = 12
+
+    for ii in range(istart, istart + 9):
+        ax = plt.subplot(grid[0, ii-istart])
+        plt.imshow(img[ii])
+        plt.quiver
+
+        ax.set_yticks([])
+        ax.set_xticks([])
+
+    plt.figure()
+    xk_b, yk_b = np.broadcast_arrays(xk, yk)
+    plt.plot(xk_b[:, 16, :].ravel(), yk_b[:, 16, :].ravel(), 'k.')
+    plt.quiver(xk_b[:, 16, :], yk_b[:, 16, :], nk[2, :, 16, :], nk[1, :, 16, :], 'r')
+    # plt.quiver([xk[0, 0], yk[:, 16]], nk[2, :, 16, :], nk[1, :, 16, :], 'r')
+
 
 if 0:
         # ###############################
