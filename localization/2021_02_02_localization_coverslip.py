@@ -1,3 +1,6 @@
+"""
+Test localization using sample of beads on a coverslip
+"""
 import os
 import datetime
 import time
@@ -11,10 +14,9 @@ import localize
 
 # basic parameters
 plot_extra = False
-plot_results = False
+plot_results = True
 figsize = (16, 8)
 root_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\beads561_200nm_r0000_y0000_z0000_1"
-
 
 now = datetime.datetime.now()
 time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
@@ -172,15 +174,15 @@ dxi = xi[1] - xi[0]
 dyi = yi[1] - yi[0]
 dzi = zi[1] - zi[0]
 
-roi_plot = localize.get_centered_roi([34, 452, 148], [60, 200, 100])
-imgs_unskew = imgs_unskew[roi_plot[0]:roi_plot[1], roi_plot[2]:roi_plot[3], roi_plot[4]:roi_plot[5]]
-xi = xi[roi_plot[4]:roi_plot[5]]
-yi = yi[roi_plot[2]:roi_plot[3]]
-zi = zi[roi_plot[0]:roi_plot[1]]
-to_plot_centers_z = np.logical_and(centers_unique_all[:, 0] > zi.min(), centers_unique_all[:, 0] < zi.max())
-to_plot_centers_y = np.logical_and(centers_unique_all[:, 1] > yi.min(), centers_unique_all[:, 1] < yi.max())
-to_plot_centers_x = np.logical_and(centers_unique_all[:, 2] > xi.min(), centers_unique_all[:, 2] < xi.max())
-to_plot_centers = np.logical_and(to_plot_centers_x, np.logical_and(to_plot_centers_y, to_plot_centers_z))
+# roi_plot = localize.get_centered_roi([34, 452, 148], [60, 200, 100])
+# imgs_unskew = imgs_unskew[roi_plot[0]:roi_plot[1], roi_plot[2]:roi_plot[3], roi_plot[4]:roi_plot[5]]
+# xi = xi[roi_plot[4]:roi_plot[5]]
+# yi = yi[roi_plot[2]:roi_plot[3]]
+# zi = zi[roi_plot[0]:roi_plot[1]]
+# to_plot_centers_z = np.logical_and(centers_unique_all[:, 0] > zi.min(), centers_unique_all[:, 0] < zi.max())
+# to_plot_centers_y = np.logical_and(centers_unique_all[:, 1] > yi.min(), centers_unique_all[:, 1] < yi.max())
+# to_plot_centers_x = np.logical_and(centers_unique_all[:, 2] > xi.min(), centers_unique_all[:, 2] < xi.max())
+# to_plot_centers = np.logical_and(to_plot_centers_x, np.logical_and(to_plot_centers_y, to_plot_centers_z))
 
 # vmin = np.percentile(imgs_all, 0.1)
 # vmax = np.percentile(imgs_all, 99.99)
@@ -249,7 +251,7 @@ ax = figh2.add_axes([0.2, 0.35, 0.7, 0.7 * ar_xy / ar_fig], frameon=False)
 ax.imshow(np.nanmax(imgs_unskew, axis=0).transpose(), vmin=vmin, vmax=vmax, origin="lower",
            extent=[yi[0] - 0.5 * dyi, yi[-1] + 0.5 * dyi, xi[0] - 0.5 * dxi, xi[-1] + 0.5 * dxi])
 
-ax.plot(centers_unique_all[to_plot_centers, 1], centers_unique_all[to_plot_centers, 2], 'rx')
+ax.plot(centers_unique_all[:, 1], centers_unique_all[:, 2], 'rx')
 ax.set_yticks([])
 ax.set_xticks([])
 # plt.xlabel("Y (um)")
@@ -259,7 +261,7 @@ ax = figh2.add_axes([0.2, 0.07, 0.7, 0.7 / ar_yz / ar_fig], frameon=True)
 ax.imshow(np.nanmax(imgs_unskew, axis=2), vmin=vmin, vmax=vmax, origin="lower",
            extent=[yi[0] - 0.5 * dyi, yi[-1] + 0.5 * dyi, zi[0] - 0.5 * dzi, zi[-1] + 0.5 * dzi])
 
-ax.plot(centers_unique_all[to_plot_centers, 1], centers_unique_all[to_plot_centers, 0], 'rx')
+ax.plot(centers_unique_all[:, 1], centers_unique_all[:, 0], 'rx')
 ax.set_xlabel("Y (um)")
 ax.set_ylabel("Z (um)")
 
@@ -267,7 +269,7 @@ ax = figh2.add_axes([0.05, 0.35, 0.7 * ar_xy / ar_fig * ar_fig / ar_xz, 0.7 * ar
 plt.imshow(np.nanmax(imgs_unskew, axis=1).transpose(), vmin=vmin, vmax=vmax, origin="lower",
            extent=[zi[0] - 0.5 * dzi, zi[-1] + 0.5 * dzi, xi[0] - 0.5 * dxi, xi[-1] + 0.5 * dxi])
 
-plt.plot(centers_unique_all[to_plot_centers, 0], centers_unique_all[to_plot_centers, 2], 'rx')
+plt.plot(centers_unique_all[:, 0], centers_unique_all[:, 2], 'rx')
 plt.ylabel("X (um)")
 plt.xlabel("Z (um)")
 

@@ -27,14 +27,14 @@ now = datetime.datetime.now()
 time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
 
 # load data
-root_dir = r"\\10.206.26.21\opm2\20210305a\crowders_densest_50glycerol"
+root_dir = r"\\10.206.26.21\opm2\20210309\crowders-10x-50glyc"
 fnames = glob.glob(os.path.join(root_dir, "*.tif"))
-img_inds = np.array([int(re.match(".*Image1_(\d+).tif", f).group(1)) for f in fnames])
+img_inds = np.array([int(re.match(".*Image\d+_(\d+).tif", f).group(1)) for f in fnames])
 fnames = [f for _, f in sorted(zip(img_inds, fnames))]
 
 # paths to relevant data
 data_dir = root_dir
-scan_data_dir = os.path.join(root_dir, "..", "galvo_scan_params.pkl")
+scan_data_dir = os.path.join(root_dir, "galvo_scan_params.pkl")
 
 # load data
 with open(scan_data_dir, "rb") as f:

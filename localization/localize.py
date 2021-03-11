@@ -1,3 +1,6 @@
+"""
+Code for localization in native OPM frame
+"""
 import os
 import numpy as np
 import scipy
@@ -252,7 +255,7 @@ def gaussian3d_pixelated_psf(x, y, z, ds, normal, p, sf=3):
     :return:
     """
     if len(ds) != 2:
-        raise ValueError("ds should give a pair of values")
+        raise ValueError("ds = (dx, dy) length as not 2")
 
     # generate new points in pixel
     pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
@@ -271,14 +274,69 @@ def gaussian3d_pixelated_psf(x, y, z, ds, normal, p, sf=3):
     yy_s = y[..., None] + ys[None, ...]
     zz_s = z[..., None] + zs[None, ...]
 
-    psf_s = np.exp(
-        - (xx_s - p[1]) ** 2 / 2 / p[4] ** 2 - (yy_s - p[2]) ** 2 / 2 / p[4] ** 2 - (zz_s - p[3]) ** 2 / 2 / p[5] ** 2)
-    norm = np.sum(np.exp(-xs ** 2 / 2 / p[4] ** 2 - ys ** 2 / 2 / p[5] ** 2))
+    psf_s = np.exp(-(xx_s - p[1]) ** 2 / 2 / p[4] ** 2
+                   -(yy_s - p[2]) ** 2 / 2 / p[4] ** 2
+                   -(zz_s - p[3]) ** 2 / 2 / p[5] ** 2)
 
-    psf = p[0] / norm * np.sum(psf_s, axis=-1) + p[-1]
+    # normalization is such that the predicted peak value of the PSF ignoring binning would be p[0]
+    psf = p[0] * np.mean(psf_s, axis=-1) + p[-1]
 
     return psf
 
+def gaussian3d_pixelated_psf_jac(x, y, z, ds, normal, p, sf):
+    """
+    Jacobian of gaussian3d_pixelated_psf()
+
+    :param x:
+    :param y:
+    :param z: coordinates of z-planes to evaluate function at
+    :param ds: [dx, dy]
+    :param normal:
+    :param p: [A, cx, cy, cz, sxy, sz, bg]
+    :param sf: factor to oversample pixels. The value of each pixel is determined by averaging sf**2 equally spaced
+    points in the pixel.
+    :return:
+    """
+
+    if len(ds) != 2:
+        raise ValueError("ds = (dx, dy) length as not 2")
+
+    # generate new points in pixel
+    pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
+    xp, yp = np.meshgrid(ds[0] * pts, ds[1] * pts)
+    zp = np.zeros(xp.shape)
+
+    # rotate points to correct position using normal vector
+    # for now we will fix x, but lose generality
+    eyp = np.cross(normal, np.array([1, 0, 0]))
+    mat_r2rp = np.concatenate((np.array([1, 0, 0])[:, None], eyp[:, None], normal[:, None]), axis=1)
+    result = mat_r2rp.dot(np.concatenate((xp.ravel()[None, :], yp.ravel()[None, :], zp.ravel()[None, :]), axis=0))
+    xs, ys, zs = result
+
+    # now must add these to each point x, y, z
+    xx_s = x[..., None] + xs[None, ...]
+    yy_s = y[..., None] + ys[None, ...]
+    zz_s = z[..., None] + zs[None, ...]
+
+    psf_s = np.exp(-(xx_s - p[1]) ** 2 / 2 / p[4] ** 2
+                   -(yy_s - p[2]) ** 2 / 2 / p[4] ** 2
+                   -(zz_s - p[3]) ** 2 / 2 / p[5] ** 2)
+
+    # normalization is such that the predicted peak value of the PSF ignoring binning would be p[0]
+    # psf = p[0] * psf_sum + p[-1]
+
+    bcast_shape = (x + y + z).shape
+    # [A, cx, cy, cz, sxy, sz, bg]
+    jac = [np.mean(psf_s, axis=-1),
+           p[0] * np.mean(2 * (xx_s - p[1]) / 2 / p[4]**2 * psf_s, axis=-1),
+           p[0] * np.mean(2 * (yy_s - p[2]) / 2 / p[4]**2 * psf_s, axis=-1),
+           p[0] * np.mean(2 * (zz_s - p[3]) / 2/ p[5]**2 * psf_s, axis=-1),
+           p[0] * np.mean((2 / p[4]**3 * (xx_s - p[1])**2 / 2 +
+                           2 / p[4]**3 * (yy_s - p[2])**2 / 2) * psf_s, axis=-1),
+           p[0] * np.mean(2 / p[5]**3 * (zz_s - p[3])**2 / 2 * psf_s, axis=-1),
+           np.ones(bcast_shape)]
+
+    return jac
 
 def fit_model(img, model_fn, init_params, fixed_params=None, sd=None, bounds=None, model_jacobian=None, **kwargs):
     """
@@ -797,6 +855,17 @@ def point_in_trapezoid(pts, x, y, z):
     return in_region
 
 def fit_roi(img_roi, x_roi, y_roi, z_roi, init_params=None, fixed_params=None, bounds=None):
+    """
+    Fit single ROI
+    :param img_roi:
+    :param x_roi:
+    :param y_roi:
+    :param z_roi:
+    :param init_params:
+    :param fixed_params:
+    :param bounds:
+    :return:
+    """
 
     to_use = np.logical_not(np.isnan(img_roi))
     x_roi_full, y_roi_full, z_roi_full = np.broadcast_arrays(x_roi, y_roi, z_roi)
@@ -841,8 +910,11 @@ def fit_roi(img_roi, x_roi, y_roi, z_roi, init_params=None, fixed_params=None, b
     def model_fn(p):
         return gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, [dc, dc], normal, p, sf=3)
 
+    def jac_fn(p):
+        return gaussian3d_pixelated_psf_jac(x_roi, y_roi, z_roi, [dc, dc], normal, p, sf=3)
+
     # do fitting
-    results = fit_model(img_roi, model_fn, init_params, bounds=bounds, fixed_params=fixed_params)
+    results = fit_model(img_roi, model_fn, init_params, bounds=bounds, fixed_params=fixed_params, model_jacobian=jac_fn)
 
     return results
 
