@@ -1,3 +1,6 @@
+"""
+Localize diffusing beads in a series of volumes
+"""
 import os
 import datetime
 import time
@@ -15,13 +18,16 @@ plot_results = False
 figsize = (16, 8)
 now = datetime.datetime.now()
 time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-save_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\%s_localization" % time_stamp
+
+# root_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1"
+root_dir = r"\\10.206.26.21\opm2\20210203\beads_0glyc_1000dilution_1"
+save_dir = os.path.join(root_dir, "%s_localization" % time_stamp)
 if not os.path.exists(save_dir):
     os.mkdir(save_dir)
 
 # paths to relevant data
-data_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1"
-scan_data_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\galvo_scan_params.pkl"
+data_dir = root_dir
+scan_data_dir = os.path.join(root_dir, "galvo_scan_params.pkl")
 
 # load data
 with open(scan_data_dir, "rb") as f:
@@ -165,7 +171,7 @@ for vv in range(nvols):
 
 """
 # ###############################
-# interpolate images so are on grids in coverslip coordinate system and plot all results
+# interpolate images so are on grid s in coverslip coordinate system and plot all results
 # ###############################
 imgs_all = np.flip(ds_array.compute(), axis=1)
 nstep, ny, nx = imgs_all.shape

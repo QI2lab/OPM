@@ -1,6 +1,7 @@
 """
-Test localization methods on single ROI
+Test localization methods on a single synthetic ROI
 """
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 import localize
@@ -39,7 +40,12 @@ c_gt = np.array([params[3], params[2], params[1]])
 img, _, _ = localize.simulated_img(localize.gaussian3d_pixelated_psf(x, y, z, [dc, dc], normal, params, sf=3), 1, 2, 100, 5, use_otf=False)
 
 # localize
+tstart = time.process_time()
 results = localize.fit_roi(img, x, y, z)
+tend = time.process_time()
+print("Fit took %0.3gs" % (tend - tstart))
+
+
 c_nl = np.array([results["fit_params"][3], results["fit_params"][2], results["fit_params"][1]])
 
 c_rad = localize.localize_radial_symm(img, theta, dc, dstep)

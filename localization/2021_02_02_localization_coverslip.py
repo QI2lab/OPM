@@ -1,3 +1,6 @@
+"""
+Test localization using sample of beads on a coverslip
+"""
 import os
 import datetime
 import time
@@ -11,18 +14,20 @@ import localize
 
 # basic parameters
 plot_extra = False
-plot_results = False
+plot_results = True
 figsize = (16, 8)
+root_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\beads561_200nm_r0000_y0000_z0000_1"
+
 now = datetime.datetime.now()
 time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-save_dir = "./%s_localization_fits" % time_stamp
+save_dir = os.path.join(root_dir, "%s_localization_fits" % time_stamp)
 if not os.path.exists(save_dir):
     os.mkdir(save_dir)
 
 # paths to relevant data
-data_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\beads561_200nm_r0000_y0000_z0000_1"
-stage_data_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\stage_positions.pkl"
-scan_data_dir = r"\\10.206.26.21\opm2\20210202\beads_561nm_200nm_step\stage_scan_params.pkl"
+data_dir = root_dir
+stage_data_dir = os.path.join(root_dir, "../stage_positions.pkl")
+scan_data_dir = os.path.join(root_dir, "../stage_scan_params.pkl")
 
 # load data
 with open(stage_data_dir, "rb") as f:
@@ -39,6 +44,7 @@ summary = ds.summary_metadata
 # dataset as dask array
 # each image is 256 x 1600, with 256 direction along the lightsheet, i.e. the y'-direction
 ds_array = ds.as_array()
+ds_array = ds_array[500:700, :, :250]
 
 # load parameters
 na = 1.
@@ -168,8 +174,21 @@ dxi = xi[1] - xi[0]
 dyi = yi[1] - yi[0]
 dzi = zi[1] - zi[0]
 
-vmin = np.percentile(imgs_all, 0.1)
-vmax = np.percentile(imgs_all, 99.99)
+# roi_plot = localize.get_centered_roi([34, 452, 148], [60, 200, 100])
+# imgs_unskew = imgs_unskew[roi_plot[0]:roi_plot[1], roi_plot[2]:roi_plot[3], roi_plot[4]:roi_plot[5]]
+# xi = xi[roi_plot[4]:roi_plot[5]]
+# yi = yi[roi_plot[2]:roi_plot[3]]
+# zi = zi[roi_plot[0]:roi_plot[1]]
+# to_plot_centers_z = np.logical_and(centers_unique_all[:, 0] > zi.min(), centers_unique_all[:, 0] < zi.max())
+# to_plot_centers_y = np.logical_and(centers_unique_all[:, 1] > yi.min(), centers_unique_all[:, 1] < yi.max())
+# to_plot_centers_x = np.logical_and(centers_unique_all[:, 2] > xi.min(), centers_unique_all[:, 2] < xi.max())
+# to_plot_centers = np.logical_and(to_plot_centers_x, np.logical_and(to_plot_centers_y, to_plot_centers_z))
+
+# vmin = np.percentile(imgs_all, 0.1)
+# vmax = np.percentile(imgs_all, 99.99)
+vmin = 110
+vmax = 500
+plt.set_cmap("bone")
 
 plt.figure(figsize=figsize)
 plt.suptitle("Maximum intensity projection, XY\n"
@@ -220,5 +239,38 @@ plt.plot(centers_unique_all[:, 1], centers_unique_all[:, 0], 'rx')
 plt.xlabel("Y (um)")
 plt.ylabel("Z (um)")
 plt.title("YZ")
+
+ar_xy = (xi.max() - xi.min()) / (yi.max() - yi.min())
+ar_xz = (xi.max() - xi.min()) / (zi.max() - zi.min())
+ar_yz = (yi.max() - yi.min()) / (zi.max() - zi.min())
+ar_fig = figsize[1] / figsize[0]
+
+figh2 = plt.figure(figsize=figsize)
+
+ax = figh2.add_axes([0.2, 0.35, 0.7, 0.7 * ar_xy / ar_fig], frameon=False)
+ax.imshow(np.nanmax(imgs_unskew, axis=0).transpose(), vmin=vmin, vmax=vmax, origin="lower",
+           extent=[yi[0] - 0.5 * dyi, yi[-1] + 0.5 * dyi, xi[0] - 0.5 * dxi, xi[-1] + 0.5 * dxi])
+
+ax.plot(centers_unique_all[:, 1], centers_unique_all[:, 2], 'rx')
+ax.set_yticks([])
+ax.set_xticks([])
+# plt.xlabel("Y (um)")
+# plt.ylabel("X (um)")
+
+ax = figh2.add_axes([0.2, 0.07, 0.7, 0.7 / ar_yz / ar_fig], frameon=True)
+ax.imshow(np.nanmax(imgs_unskew, axis=2), vmin=vmin, vmax=vmax, origin="lower",
+           extent=[yi[0] - 0.5 * dyi, yi[-1] + 0.5 * dyi, zi[0] - 0.5 * dzi, zi[-1] + 0.5 * dzi])
+
+ax.plot(centers_unique_all[:, 1], centers_unique_all[:, 0], 'rx')
+ax.set_xlabel("Y (um)")
+ax.set_ylabel("Z (um)")
+
+ax = figh2.add_axes([0.05, 0.35, 0.7 * ar_xy / ar_fig * ar_fig / ar_xz, 0.7 * ar_xy / ar_fig], frameon=True)
+plt.imshow(np.nanmax(imgs_unskew, axis=1).transpose(), vmin=vmin, vmax=vmax, origin="lower",
+           extent=[zi[0] - 0.5 * dzi, zi[-1] + 0.5 * dzi, xi[0] - 0.5 * dxi, xi[-1] + 0.5 * dxi])
+
+plt.plot(centers_unique_all[:, 0], centers_unique_all[:, 2], 'rx')
+plt.ylabel("X (um)")
+plt.xlabel("Z (um)")
 
 plt.show()
