@@ -47,7 +47,7 @@ def main():
     min_volt = -1.75 # unit: volts
 
     # setup file name
-    save_directory=Path('E:/20210305a/')
+    save_directory=Path(r"E:\20210309\no_crowders")
     save_name = 'galvo_skip_test'
 
     # set timepoints
@@ -159,7 +159,10 @@ def main():
 
 
     # save galvo scan parameters
-    scan_param_data = [{'theta': 30.0, 'scan step': scan_axis_step_um*1000., 'pixel size': pixel_size_um*1000.}]
+    scan_param_data = [{'theta': 30.0, 'scan step': scan_axis_step_um*1000., 'pixel size': pixel_size_um*1000.,
+                        'galvo scan range um': scan_axis_range_um,
+                        'galvo volts per um': scan_axis_calibration, 'steps per volume': scan_steps,
+                        'galvo start volt': min_volt}]
     df_galvo_scan_params = pd.DataFrame(scan_param_data)
     save_name_galvo_params = save_directory / 'galvo_scan_params.pkl'
     df_galvo_scan_params.to_pickle(save_name_galvo_params)
