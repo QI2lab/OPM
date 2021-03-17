@@ -16,6 +16,7 @@ plot_extra = False
 plot_results = False
 figsize = (16, 8)
 
+frame_time_ms = 2
 na = 1.
 ni = 1.4
 excitation_wavelength = 0.561
@@ -27,7 +28,7 @@ now = datetime.datetime.now()
 time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
 
 # load data
-root_dir = r"\\10.206.26.21\opm2\20210309\crowders-10x-50glyc"
+root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210309", "crowders-10x-50glyc")
 fnames = glob.glob(os.path.join(root_dir, "*.tif"))
 img_inds = np.array([int(re.match(".*Image\d+_(\d+).tif", f).group(1)) for f in fnames])
 fnames = [f for _, f in sorted(zip(img_inds, fnames))]
@@ -51,6 +52,8 @@ normal = np.array([0, -np.sin(theta), np.cos(theta)]) # normal of camera pixel
 
 dc = scan_data["pixel size"][0] / 1000
 dstage = scan_data["scan step"][0] / 1000
+
+volume_um3 = (dstage * nimgs) * (dc * nxp) * (dc * np.cos(theta) * nyp)
 
 # build save dir
 save_dir = os.path.join(root_dir, "%s_localization" % time_stamp)
@@ -82,6 +85,7 @@ sigma_z_min = 0.25 * sigma_z
 
 # loop over volumes
 for vv in range(nvols):
+    print("starting volume %d/%d" % (vv + 1, nvols))
     tstart = time.perf_counter()
     centers_unique_all = []
     fit_params_unique_all = []
@@ -150,7 +154,7 @@ for vv in range(nvols):
     print("Found %d centers in %dhrs %dmins and %0.2fs" % (len(centers_unique), hrs, mins, secs))
 
     full_results = {"centers": centers_unique, "fit_params": fit_params_unique, "rois": rois_unique,
-                    "elapsed_t": elapsed_t}
+                    "volume_um3": volume_um3, "frame_time_ms": frame_time_ms, "elapsed_t": elapsed_t}
     fname = os.path.join(save_dir, "localization_results_vol_%d.pkl" % vv)
     with open(fname, "wb") as f:
         pickle.dump(full_results, f)
