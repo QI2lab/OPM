@@ -33,7 +33,7 @@ def main():
     # laser powers (0 -> 100%)
     power_405 = 0
     power_488 = 0
-    power_561 = 0
+    power_561 = 100
     power_635 = 0
     power_730 = 0
 
@@ -41,17 +41,17 @@ def main():
     #exposure_ms = 2. #unit: ms
 
     # scan axis range
-    scan_axis_range_um = 10.0 # unit: microns
+    scan_axis_range_um = 200.0 # unit: microns
     
     # voltage start
-    min_volt = -1.75 # unit: volts
+    min_volt = -3.4 # unit: volts
 
     # setup file name
-    save_directory=Path(r"E:\20210309\no_crowders")
-    save_name = 'galvo_skip_test'
+    save_directory=Path('E:/20210318o/')
+    save_name = 'beads'
 
     # set timepoints
-    timepoints = 1 #unit: number of timepoints
+    timepoints = 2 #unit: number of timepoints
 
     # display data
     display_flag = False

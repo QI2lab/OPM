@@ -25,33 +25,33 @@ def main():
     # 0 -> inactive
     # 1 -> active
     state_405 = 0
-    state_488 = 0
-    state_561 = 1
+    state_488 = 1
+    state_561 = 0
     state_635 = 0
     state_730 = 0
 
     # laser powers (0 -> 100%)
     power_405 = 0
-    power_488 = 0
+    power_488 = 5
     power_561 = 0
     power_635 = 0
     power_730 = 0
 
     # exposure time
-    exposure_ms = 2. #unit: ms
+    exposure_ms = 40.0 #unit: ms
 
     # scan axis range
-    scan_axis_range_um = 10.0 # unit: microns
+    scan_axis_range_um = 100.0 # unit: microns
     
     # voltage start
-    min_volt = -1.75 # unit: volts
+    min_volt = -2.5 # unit: volts
 
     # setup file name
-    save_directory=Path('E:/20210225a/')
-    save_name = 'galvo_skip_test'
+    save_directory=Path('E:/20210321_plant/area_003')
+    save_name = 'test_run'
 
     # set timepoints
-    timepoints = 1 #unit: number of timepoints
+    timepoints = 120 #unit: number of timepoints
 
     # display data
     display_flag = False
@@ -68,8 +68,8 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # give camera time to change modes if necessary
-    core.set_config('Camera-Setup','ScanMode3')
-    core.wait_for_config('Camera-Setup','ScanMode3')
+    #core.set_config('Camera-Setup','ScanMode3')
+    #core.wait_for_config('Camera-Setup','ScanMode3')
 
     # set camera to internal trigger
     core.set_config('Camera-TriggerSource','INTERNAL')
@@ -238,12 +238,11 @@ def main():
         #taskDI.ReadDigitalLines(1, 1e-3, False, len(samps), None, ct.byref(samps), ct.byref(samps_per_ch_read), ct.byref(num_bytes_per_sample))
         return event
 
-    if 0:
-        # run acquisition at this Z plane
-        with Acquisition(directory=save_directory, name=save_name, show_display=display_flag, max_multi_res_index=0, saving_queue_size=5000) as acq:
-            acq.acquire(events)
+    # run acquisition at this Z plane
+    with Acquisition(directory=save_directory, name=save_name, show_display=display_flag, max_multi_res_index=0, saving_queue_size=5000) as acq:
+        acq.acquire(events)
 
-    time.sleep(nvoltage_steps * timepoints * 1)
+    #time.sleep(nvoltage_steps * timepoints * 1)
 
     # stop DAQ
     try:
@@ -280,7 +279,19 @@ def main():
     core.wait_for_config('Trigger-730','CW (constant power)')
 
     # save galvo scan parameters
-    scan_param_data = [{'theta': 30.0, 'scan step': scan_axis_step_um*1000., 'pixel size': pixel_size_um*1000.}]
+    # save galvo scan parameters
+    scan_param_data = [{'theta': 30.0, 
+                        'scan step': scan_axis_step_um*1000., 
+                        'pixel size': pixel_size_um*1000.,
+                        'galvo scan range um': scan_axis_range_um,
+                        'galvo volts per um': scan_axis_calibration, 
+                        'galvo start volt': min_volt,
+                        'time points': timepoints,
+                        'channels': np.sum(channel_states),
+                        'steps per volume': scan_steps,
+                        'y_pixels': 256,
+                        'x_pixels': 2304}]
+    
     df_galvo_scan_params = pd.DataFrame(scan_param_data)
     save_name_galvo_params = save_directory / 'galvo_scan_params.pkl'
     df_galvo_scan_params.to_pickle(save_name_galvo_params)
