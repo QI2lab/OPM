@@ -75,40 +75,40 @@ def main():
     # 0 -> inactive
     # 1 -> active
     state_405 = 1
-    state_488 = 1
+    state_488 = 0
     state_561 = 1
     state_635 = 1
-    state_730 = 0
+    state_730 = 1
 
     # laser powers (0 -> 100%)
-    power_405 = 25
-    power_488 = 50
-    power_561 = 100
-    power_635 = 100
-    power_730 = 0
+    power_405 = 20
+    power_488 = 5
+    power_561 = 1
+    power_635 = 20
+    power_730 = 100
 
     # exposure time
     exposure_ms = 10.0
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 2000. #unit: um
-    scan_axis_end_um = 3000. #unit: um
+    scan_axis_start_um = 14500. #unit: um
+    scan_axis_end_um = 15000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -4000 #unit: um
-    tile_axis_end_um = -3000. #unit: um
+    tile_axis_start_um = -2000 #unit: um
+    tile_axis_end_um = -1500. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = -243. #unit: um
-    height_axis_end_um = -195 #unit:  um
+    height_axis_start_um = 14470. #unit: um
+    height_axis_end_um = 14495 #unit:  um
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1152, 1608, 256] #unit: pixels
+    ROI = [0, 1152, 1828, 508] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210308b/')
-    save_name = 'lung_bDNA_trial'
+    save_directory=Path('E:/20210323b/')
+    save_name = 'flash_test_etx'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -370,6 +370,23 @@ def main():
                             saving_queue_size=5000) as acq:
                 acq.acquire(events)
 
+            # save experimental info after first tile
+            if ((y == 0) and (z==0)):
+                # save stage scan parameters
+                scan_param_data = [{'theta': 30.0, 
+                    'scan step': scan_axis_step_um*1000., 
+                    'pixel size': pixel_size_um*1000.,
+                    'num_y': tile_axis_positions,
+                    'num_z': height_axis_positions,
+                    'num_channels': np.sum(channel_states),
+                    'scan_axis_positions': scan_axis_positions,
+                    'y_pixels:': ROI[3],
+                    'x_pixels:': ROI[2]}]
+
+                df_stage_scan_params = pd.DataFrame(scan_param_data)
+                save_name_stage_params = save_directory / 'stage_scan_params.pkl'
+                df_stage_scan_params.to_pickle(save_name_stage_params)
+
             # save stage scan positions
             save_name_stage_positions = Path(str(y).zfill(4)+'_'+str(z).zfill(4)+'_stage_scan_positions.pkl')
             save_name_stage_positions = save_directory / save_name_stage_positions
@@ -393,17 +410,9 @@ def main():
             # turn off 'transmit repeated commands' for Tiger
             core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
-            # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
+            # clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
             # in the background.
-            # NOTE: This is a bug, the directory is not released until Micromanager is shutdown
-            # https://github.com/micro-manager/pycro-manager/issues/242
             acq = None
-
-    # save stage scan parameters
-    scan_param_data = [{'theta': 30.0, 'scan step': scan_axis_step_um*1000., 'pixel size': pixel_size_um*1000.}]
-    df_stage_scan_params = pd.DataFrame(scan_param_data)
-    save_name_stage_params = save_directory / 'stage_scan_params.pkl'
-    df_stage_scan_params.to_pickle(save_name_stage_params)
 
 #-----------------------------------------------------------------------------
 
