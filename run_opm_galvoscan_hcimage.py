@@ -23,7 +23,7 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [True, True, True, True, True] # true -> active, false -> inactive
+    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
     channel_powers = [0, 0, 50, 0, 0] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
@@ -46,11 +46,11 @@ def main():
     galvo_neutral_volt = -0.075 # unit: volts
 
     # setup file name
-    save_directory=Path('E:/20210328_test/')
-    save_name = 'test'
+    save_directory=Path('E:/20210401f_franky/')
+    save_name = 'DNAnanotube_sucrose_50'
 
     # set total number of frames (from HCimage)
-    total_frames = 10000 # unit: number of frames
+    total_frames = 40000 # unit: number of frames
     
     # display data
     display_flag = False
@@ -93,7 +93,7 @@ def main():
     dataDO[-1, :] = 0
 
     #print("Digital output array:")
-    #print(dataDO)
+    print(dataDO)
 
     # generate voltage steps
     max_volt = min_volt + scan_axis_range_volts  # 2
