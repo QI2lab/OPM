@@ -110,15 +110,14 @@ for vv in range(nvols):
 
         y_offset = (aa - n_overlap) * dstage
 
-        imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_fit_sequence, centers_guess = localize.localize(
-                     imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_filter_small, xy_filter_big,
-                     xy_roi_size, z_roi_size, min_z_dist, min_xy_dist,
-                     sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
+        imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize(
+            imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_roi_size, z_roi_size, 0, 0, min_z_dist,
+            min_xy_dist, sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
 
         centers_unique_all.append(centers_unique)
         fit_params_unique_all.append(fit_params_unique)
         rois_unique_all.append(rois_unique)
-        centers_fit_sequence_all.append(centers_fit_sequence)
+        # centers_fit_sequence_all.append(centers_fit_sequence)
         centers_guess_all.append(centers_guess)
 
         # plot localization fit diagnostic on good points
@@ -148,7 +147,7 @@ for vv in range(nvols):
     centers_unique_all = np.concatenate(centers_unique_all, axis=0)
     fit_params_unique_all = np.concatenate(fit_params_unique_all, axis=0)
     rois_unique_all = np.concatenate(rois_unique_all, axis=0)
-    centers_fit_sequence_all = np.concatenate(centers_fit_sequence_all, axis=0)
+    # centers_fit_sequence_all = np.concatenate(centers_fit_sequence_all, axis=0)
     centers_guess_all = np.concatenate(centers_guess_all, axis=0)
 
     # since left some overlap at the edges, have to again combine results

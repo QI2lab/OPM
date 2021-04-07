@@ -62,7 +62,7 @@ if __name__ == "__main__":
     bg = 100
     gain = 2
     noise = 5
-    imgs_opm, _, _ = localize.simulated_img(imgs_opm, nphotons, gain, bg, noise, use_otf=False)
+    imgs_opm, _, _ = localize.simulate_img_noise(imgs_opm, nphotons, gain, bg, noise, use_otf=False)
     vmin = bg - 2
     vmax = np.percentile(imgs_opm, 99.999)
 
@@ -176,7 +176,7 @@ if __name__ == "__main__":
         params = [1, centers[kk, 2], centers[kk, 1], centers[kk, 0], sigma_xy, sigma_z, 0]
         imgs_square += localize.gaussian3d_pixelated_psf(xi[None, None, :], yi[None, :, None], zi[:, None, None], [dxi, dyi], np.array([0, 0, 1]), params, sf=3)
     # add noise
-    imgs_square, _, _ = localize.simulated_img(imgs_square, nphotons, gain, bg, noise, use_otf=False)
+    imgs_square, _, _ = localize.simulate_img_noise(imgs_square, nphotons, gain, bg, noise, use_otf=False)
     # nan-mask region outside what we get from the OPM
     imgs_square[np.isnan(imgs_unskew)] = np.nan
 

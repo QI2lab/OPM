@@ -101,15 +101,14 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
 
     y_offset = (aa - n_overlap) * dstage
 
-    imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_fit_sequence, centers_guess = localize.localize(
-                 imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_filter_small, xy_filter_big,
-                 xy_roi_size, z_roi_size, min_z_dist, min_xy_dist,
-                 sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
+    imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize(
+        imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_roi_size, z_roi_size, 0, 0, min_z_dist,
+        min_xy_dist, sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
 
     centers_unique_all.append(centers_unique)
     fit_params_unique_all.append(fit_params_unique)
     rois_unique_all.append(rois_unique)
-    centers_fit_sequence_all.append(centers_fit_sequence)
+    # centers_fit_sequence_all.append(centers_fit_sequence)
     centers_guess_all.append(centers_guess)
 
     # plot localization fit diagnostic on good points
@@ -199,8 +198,9 @@ plt.suptitle("Maximum intensity projection, XY\n"
 plt.imshow(np.nanmax(imgs_unskew, axis=0).transpose(), vmin=vmin, vmax=vmax, origin="lower",
            extent=[yi[0] - 0.5 * dyi, yi[-1] + 0.5 * dyi, xi[0] - 0.5 * dxi, xi[-1] + 0.5 * dxi])
 if plot_extra:
+    pass
     # plt.plot(centers_guess[:, 1], centers_guess[:, 2], 'gx')
-    plt.plot(centers_fit_sequence_all[:, :, 1].ravel(), centers_fit_sequence_all[:, :, 2].ravel(), 'gx')
+    # plt.plot(centers_fit_sequence_all[:, :, 1].ravel(), centers_fit_sequence_all[:, :, 2].ravel(), 'gx')
     # plt.plot(centers_fit[:, 1], centers_fit[:, 2], 'mx')
 plt.plot(centers_unique_all[:, 1], centers_unique_all[:, 2], 'rx')
 plt.xlabel("Y (um)")
@@ -216,8 +216,9 @@ plt.suptitle("Maximum intensity projection, XZ\n"
 plt.imshow(np.nanmax(imgs_unskew, axis=1), vmin=vmin, vmax=vmax, origin="lower",
            extent=[xi[0] - 0.5 * dxi, xi[-1] + 0.5 * dxi, zi[0] - 0.5 * dzi, zi[-1] + 0.5 * dzi])
 if plot_extra:
+    pass
     # plt.plot(centers_guess[:, 2], centers_guess[:, 0], 'gx')
-    plt.plot(centers_fit_sequence_all[:, :, 2].ravel(), centers_fit_sequence_all[:, :, 0].ravel(), 'gx')
+    # plt.plot(centers_fit_sequence_all[:, :, 2].ravel(), centers_fit_sequence_all[:, :, 0].ravel(), 'gx')
     # plt.plot(centers_fit[:, 2], centers_fit[:, 0], 'mx')
 plt.plot(centers_unique_all[:, 2], centers_unique_all[:, 0], 'rx')
 plt.xlabel("X (um)")
@@ -232,8 +233,9 @@ plt.suptitle("Maximum intensity projection, YZ\n"
 plt.imshow(np.nanmax(imgs_unskew, axis=2), vmin=vmin, vmax=vmax, origin="lower",
            extent=[yi[0] - 0.5 * dyi, yi[-1] + 0.5 * dyi, zi[0] - 0.5 * dzi, zi[-1] + 0.5 * dzi])
 if plot_extra:
+    pass
     # plt.plot(centers_guess[:, 1], centers_guess[:, 0], 'gx')
-    plt.plot(centers_fit_sequence_all[:, :, 1].ravel(), centers_fit_sequence_all[:, :, 0].ravel(), 'gx')
+    # plt.plot(centers_fit_sequence_all[:, :, 1].ravel(), centers_fit_sequence_all[:, :, 0].ravel(), 'gx')
     # plt.plot(centers_fit[:, 1], centers_fit[:, 0], 'mx')
 plt.plot(centers_unique_all[:, 1], centers_unique_all[:, 0], 'rx')
 plt.xlabel("Y (um)")
