@@ -118,11 +118,11 @@ def main(argv):
     try:
         arguments, values = getopt.getopt(argv,"hi:o:n:c:",["help","ipath=","opath="])
     except getopt.GetoptError:
-        print('Error. stage_recon.py -i <inputdirectory> -o <outputdirectory>')
+        print('Error. galvo_recon.py -i <inputdirectory> -o <outputdirectory>')
         sys.exit(2)
     for current_argument, current_value in arguments:
         if current_argument == '-h':
-            print('Usage. stage_recon.py -i <inputdirectory> -o <outputdirectory>')
+            print('Usage. galvo_recon.py -i <inputdirectory> -o <outputdirectory>')
             sys.exit()
         elif current_argument in ("-i", "--ipath"):
             input_dir_string = current_value

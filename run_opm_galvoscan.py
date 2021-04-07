@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 '''
-OPM galvo scan using Pyromanager.
+OPM galvo scan using Pycromanager.
 
-Shepherd 01/21
+P. Brown 03/21 - multiline digital and analog NI DAQ control using camera as master
+D. Shepherd 01/21 - initial pycromanager work, ported from stage control code
 '''
 
 # imports
@@ -21,38 +22,37 @@ def main():
     #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------
 
-    # lasers to use
-    # 0 -> inactive
-    # 1 -> active
-    state_405 = 0
-    state_488 = 0
-    state_561 = 1
-    state_635 = 0
-    state_730 = 0
+    # set up lasers
+    channel_labels = ["405", "488", "561", "635", "730"]
+    channel_states = [False, True, True, True, True] # true -> active, false -> inactive
+    channel_powers = [0, 20, 50, 20, 100] # (0 -> 100%)
+    do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
-    # laser powers (0 -> 100%)
-    power_405 = 0
-    power_488 = 0
-    power_561 = 0
-    power_635 = 0
-    power_730 = 0
+    # parse which channels are active
+    active_channel_indices = [ind for ind, st in zip(do_ind, channel_states) if st]
+    n_active_channels = len(active_channel_indices)
+    
+    print("%d active channels: " % n_active_channels, end="")
+    for ind in active_channel_indices:
+        print("%s " % channel_labels[ind], end="")
+    print("")
 
     # exposure time
-    exposure_ms = 2. #unit: ms
+    exposure_ms = 20.0 #unit: ms
 
     # scan axis range
-    scan_axis_range_um = 10.0 # unit: microns
+    scan_axis_range_um = 200.0 # unit: microns
     
-    # voltage start
-    min_volt = -1.75 # unit: volts
+    # galvo voltage at neutral
+    galvo_neutral_volt = -0.075 # unit: volts
+
+    # timepoints
+    timepoints = 1
 
     # setup file name
-    save_directory=Path('E:/20210225a/')
-    save_name = 'galvo_skip_test'
-
-    # set timepoints
-    timepoints = 1 #unit: number of timepoints
-
+    save_directory=Path('E:/20210406ae/')
+    save_name = 'etx2_shield_antigen'
+ 
     # display data
     display_flag = False
 
@@ -63,13 +63,9 @@ def main():
     bridge = Bridge()
     core = bridge.get_core()
 
-    # turn off lasers
-    core.set_config('Laser','Off')
-    core.wait_for_config('Laser','Off')
-
     # give camera time to change modes if necessary
-    core.set_config('Camera-Setup','ScanMode3')
-    core.wait_for_config('Camera-Setup','ScanMode3')
+    core.set_config('Camera-Setup','ScanMode2')
+    core.wait_for_config('Camera-Setup','ScanMode2')
 
     # set camera to internal trigger
     core.set_config('Camera-TriggerSource','INTERNAL')
@@ -83,24 +79,14 @@ def main():
     core.set_property('Camera','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
     core.set_property('Camera','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
     core.set_property('Camera','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
-    
-    # set exposure
+
+    # set exposure time
     core.set_exposure(exposure_ms)
 
-    # camera pixel size
-    pixel_size_um = .115 # unit: um
-
-    # galvo scan setup
-    scan_axis_step_um = 0.4  # unit: um
-    scan_axis_calibration = 0.034 # unit: V / um
-    scan_axis_step_volts = scan_axis_step_um * scan_axis_calibration # unit: V
-    scan_axis_range_volts = scan_axis_range_um * scan_axis_calibration # unit: V
-    scan_steps = np.rint(scan_axis_range_volts / scan_axis_step_volts).astype(np.int16) # galvo steps
-    #print(scan_steps)
-    
-    # construct boolean array for lasers to use
-    channel_states = [state_405,state_488,state_561,state_635,state_730]
-    channel_powers = [power_405,power_488,power_561,power_635,power_730]
+    # determine image size
+    core.snap_image()
+    y_pixels = core.get_image_height()
+    x_pixels = core.get_image_width()
 
     # turn all lasers on
     core.set_config('Laser','Off')
@@ -128,55 +114,72 @@ def main():
     core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
     core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
+    # camera pixel size
+    pixel_size_um = .115 # unit: um
+
+    # galvo scan setup
+    scan_axis_step_um = 0.4  # unit: um
+    scan_axis_calibration = 0.034 # unit: V / um
+    min_volt = -(scan_axis_range_um*scan_axis_calibration/2.) + galvo_neutral_volt # unit: volts
+    scan_axis_step_volts = scan_axis_step_um * scan_axis_calibration # unit: V
+    scan_axis_range_volts = scan_axis_range_um * scan_axis_calibration # unit: V
+    scan_steps = np.rint(scan_axis_range_volts / scan_axis_step_volts).astype(np.int16) # galvo steps
+    
     # output experiment info
-    print('Number of galvo positions: '+str(scan_steps))
-    print('Number of channels: '+str(np.sum(channel_states)))
-    print('Number of timepoints: '+str(timepoints))
+    print('Scan axis range (um): '+str(scan_axis_range_um)+
+    ', Scan axis step (nm): '+str(scan_axis_step_um*1000)+
+    ', Number of galvo positions: '+str(scan_steps))
+    print('Time points:  '+str(timepoints))
+    print('Galvo neutral (Volt): '+str(galvo_neutral_volt)+', Min voltage (volt): '+str(min_volt))
 
     # create events to execute scan
     events = []
+    ch_idx = 0
     
     # Changes to event structure motivated by Henry's notes that pycromanager struggles to read "non-standard" axes. 
     # https://github.com/micro-manager/pycro-manager/issues/220
     for t in range(timepoints):
-        for c in range(len(channel_states)):
-            for x in range(scan_steps):
-                if channel_states[c]==1:
-                    evt = { 'axes': {'t': t, 'x': x, 'channel': c }}
+        for x in range(scan_steps):
+            ch_idx = 0
+            for c in range(len(do_ind)):
+                if channel_states[c]:
+                    evt = { 'axes': {'t': t, 'z': x, 'c': ch_idx }}
+                    ch_idx = ch_idx+1
                     events.append(evt)
     print("Generated %d events" % len(events))
 
     # setup DAQ
     nvoltage_steps = scan_steps
     # 2 time steps per frame, except for first frame plus one final frame to reset voltage
-    samples_per_ch = (nvoltage_steps * 2 - 1) + 1
+    #samples_per_ch = (nvoltage_steps * 2 - 1) + 1
+    samples_per_ch = (nvoltage_steps * 2 * n_active_channels - 1) + 1
     DAQ_sample_rate_Hz = 10000
     #retriggerable = True
     num_DI_channels = 8
 
     # Generate values for DO
-    dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
-    dataDO[::2,:] = 1
+    dataDO = np.zeros((samples_per_ch, num_DI_channels), dtype=np.uint8)
+    for ii, ind in enumerate(active_channel_indices):
+        dataDO[2*ii::2*n_active_channels, ind] = 1
     dataDO[-1, :] = 0
-    print("Digital output array:")
-    print(dataDO[:, 0])
+
+    #print("Digital output array:")
+    #print(dataDO)
 
     # generate voltage steps
     max_volt = min_volt + scan_axis_range_volts  # 2
-    voltage_values = np.linspace(min_volt,max_volt,nvoltage_steps)
+    voltage_values = np.linspace(min_volt, max_volt, nvoltage_steps)
 
     # Generate values for AO
-    wf = np.zeros(samples_per_ch)
-    # one voltage value for first frame
-    wf[0] = voltage_values[0]
-    # two voltage values for all other frames
-    wf[1:-1:2] = voltage_values[1:] # start : end : step
-    wf[2:-1:2] = voltage_values[1:]
+    waveform = np.zeros(samples_per_ch)
+    # one less voltage value for first frame
+    waveform[0:2*n_active_channels - 1] = voltage_values[0]
+    # (2 * # active channels) voltage values for all other frames
+    waveform[2*n_active_channels - 1:-1] = np.kron(voltage_values[1:], np.ones(2 * n_active_channels))
     # set back to right value at end
-    wf[-1] = voltage_values[0]
-    #wf[:] = 0 # for test: galvo is not moved
-    print("Analog output voltage array:")
-    print(wf)
+    waveform[-1] = voltage_values[0]
+    #print("Analog output voltage array:")
+    #print(waveform)
 
     #def read_di_hook(event):
     try:    
@@ -212,15 +215,24 @@ def main():
         print("WriteDigitalLines sample per channel count = %d" % samples_per_ch_ct_digital.value)
 
         # ------- ANALOG output -----------
+
+        # first, set the galvo to the initial point if it is not already
+        taskAO_first = daq.Task()
+        taskAO_first.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+        taskAO_first.WriteAnalogScalarF64(True, -1, waveform[0], None)
+        taskAO_first.StopTask()
+        taskAO_first.ClearTask()
+
+        # now set up the task to ramp the galvo
         taskAO = daq.Task()
         taskAO.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
-        
+
         ## Configure timing (from DI task)
         taskAO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
         
         ## Write the output waveform
         samples_per_ch_ct = ct.c_int32()
-        taskAO.WriteAnalogF64(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByScanNumber,wf,ct.byref(samples_per_ch_ct),None)
+        taskAO.WriteAnalogF64(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByScanNumber,waveform,ct.byref(samples_per_ch_ct),None)
         print("WriteAnalogF64 sample per channel count = %d" % samples_per_ch_ct.value)
 
         ## ------ Start both tasks ----------
@@ -231,19 +243,11 @@ def main():
     except daq.DAQError as err:
         print("DAQmx Error %s"%err)
 
-    def read_di_buffer_hook(event):
-        samps = (ct.c_int8 * 10)()
-        samps_per_ch_read = ct.c_uint32()
-        num_bytes_per_sample = ct.c_uint32()
-        #taskDI.ReadDigitalLines(1, 1e-3, False, len(samps), None, ct.byref(samps), ct.byref(samps_per_ch_read), ct.byref(num_bytes_per_sample))
-        return event
+    # run acquisition
+    with Acquisition(directory=save_directory, name=save_name, show_display=display_flag, max_multi_res_index=0, saving_queue_size=5000) as acq:
+        acq.acquire(events)
 
-    if 0:
-        # run acquisition at this Z plane
-        with Acquisition(directory=save_directory, name=save_name, show_display=display_flag, max_multi_res_index=0, saving_queue_size=5000) as acq:
-            acq.acquire(events)
-
-    time.sleep(nvoltage_steps * timepoints * 1)
+    acq = None
 
     # stop DAQ
     try:
@@ -257,13 +261,32 @@ def main():
     except daq.DAQError as err:
         print("DAQmx Error %s"%err)
 
-    # try to clean up acquisition so that AcqEngJ releases directory. This way we can move it to the network storage
-    # in the background.
-    # NOTE: This is a bug, the directory is not released until Micromanager is shutdown
-    # https://github.com/micro-manager/pycro-manager/issues/218
-    acq = None
+    # save galvo scan parameters
+    scan_param_data = [{'root_name': str(save_name),
+                        'scan type': 'galvo',
+                        'theta': 30.0, 
+                        'scan_step': scan_axis_step_um*1000., 
+                        'pixel_size': pixel_size_um*1000.,
+                        'galvo_scan_range_um': scan_axis_range_um,
+                        'galvo_volts_per_um': scan_axis_calibration, 
+                        'num_t': int(timepoints),
+                        'num_y': 1, # might need to change this eventually
+                        'num_z': 1, # might need to change this eventually
+                        'num_ch': int(n_active_channels),
+                        'scan_axis_positions': int(scan_steps),
+                        'y_pixels': y_pixels, # figure out how to pull from current image
+                        'x_pixels': x_pixels, # figure out how to pull from current image
+                        '405_active': channel_states[0],
+                        '488_active': channel_states[1],
+                        '561_active': channel_states[2],
+                        '635_active': channel_states[3],
+                        '730_active': channel_states[4]}]
+    
+    df_galvo_scan_params = pd.DataFrame(scan_param_data)
+    save_name_galvo_params = save_directory / 'galvo_scan_metadata.csv'
+    df_galvo_scan_params.to_csv(save_name_galvo_params)
 
-    # turn all lasers on
+    # turn all lasers off
     core.set_config('Laser','Off')
     core.wait_for_config('Laser','Off')
 
@@ -279,11 +302,21 @@ def main():
     core.set_config('Trigger-730','CW (constant power)')
     core.wait_for_config('Trigger-730','CW (constant power)')
 
-    # save galvo scan parameters
-    scan_param_data = [{'theta': 30.0, 'scan step': scan_axis_step_um*1000., 'pixel size': pixel_size_um*1000.}]
-    df_galvo_scan_params = pd.DataFrame(scan_param_data)
-    save_name_galvo_params = save_directory / 'galvo_scan_params.pkl'
-    df_galvo_scan_params.to_pickle(save_name_galvo_params)
+    # set all laser to zero power
+    channel_powers=[0,0,0,0,0]
+    core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
+    core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
+    core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
+    core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
+    core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
+
+    # put the galvo back to neutral
+    # first, set the galvo to the initial point if it is not already
+    taskAO_last = daq.Task()
+    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+    taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
+    taskAO_last.StopTask()
+    taskAO_last.ClearTask()
 
 # run
 if __name__ == "__main__":
