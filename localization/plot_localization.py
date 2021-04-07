@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import pickle
 import os
 import tifffile
-import trackpy
 import localize
 
 plot_guesses = True
@@ -25,6 +24,7 @@ scan_data_dir = os.path.join(root_dir, "galvo_scan_params.pkl")
 with open(scan_data_dir, "rb") as f:
     scan_data = pickle.load(f)
 
+# todo: all of these parameters should be read from metadata
 dc = scan_data["pixel size"][0] / 1000
 theta = scan_data["theta"][0] * np.pi/180
 nstage = 25

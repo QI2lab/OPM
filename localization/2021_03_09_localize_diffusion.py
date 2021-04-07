@@ -11,6 +11,8 @@ import tifffile
 import pycromanager
 import localize
 
+tbegin = time.perf_counter()
+
 # basic parameters
 plot_extra = False
 plot_results = False
@@ -167,7 +169,14 @@ for vv in range(nvols):
     hrs = (elapsed_t) // (60 * 60)
     mins = (elapsed_t - hrs * 60 * 60) // 60
     secs = (elapsed_t - hrs * 60 * 60 - mins * 60)
-    print("Found %d centers in %dhrs %dmins and %0.2fs" % (len(centers_unique), hrs, mins, secs))
+    print("Found %d centers in: %dhrs %dmins and %0.2fs" % (len(centers_unique), hrs, mins, secs))
+
+    elapsed_t_total = tend - tbegin
+    days = elapsed_t_total // (24 * 60 * 60)
+    hrs = (elapsed_t_total - days * 24 * 60 * 60) // (60 * 60)
+    mins = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
+    secs = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
+    print("Total elapsed time: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
 
     if vv > 0:
         time_remaining = np.mean(volume_process_times[:vv]) * (nvols - vv - 1)
@@ -175,7 +184,7 @@ for vv in range(nvols):
         hrs = (time_remaining - days * 24 * 60 * 60) // (60 * 60)
         mins = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
         secs = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-        print("Estimated remaining time %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
+        print("Estimated time remaining: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
 
     # save results
     full_results = {"centers": centers_unique, "centers_guess": centers_guess_all,
