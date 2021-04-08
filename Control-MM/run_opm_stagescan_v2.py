@@ -47,25 +47,28 @@ def main():
 
     # laser powers (0 -> 100%)
     power_405 = 0
-    power_488 = 10
-    power_561 = 10
-    power_635 = 20
-    power_730 = 40
+    power_488 = 30
+    power_561 = 50
+    power_635 = 70
+    power_730 = 100
 
     # exposure time
-    exposure_ms = 10.0
+    exposure_ms = 20.0
+
+    # galvo voltage at neutral
+    galvo_neutral_volt = -0.075 # unit: volts
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 12900. #unit: um
-    scan_axis_end_um = 13900. #unit: um
+    scan_axis_start_um = 21500. #unit: um
+    scan_axis_end_um = 22000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -8000 #unit: um
-    tile_axis_end_um = -7000. #unit: um
+    tile_axis_start_um = -6000 #unit: um
+    tile_axis_end_um = -5500. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 14275. #unit: um
-    height_axis_end_um = 14300 #unit:  um
+    height_axis_start_um = 14800. #unit: um
+    height_axis_end_um = 14880 #unit:  um
 
     # number of timepoints to execute
     # TO DO: add in control for rate of experiment
@@ -73,11 +76,11 @@ def main():
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1152, 1700, 256] #unit: pixels
+    ROI = [0, 1152, 2304, 512] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210401d/')
-    save_name = 'shield_antigen'
+    save_directory=Path('E:/20210406a/')
+    save_name = 'etx_shield_antigen'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -311,6 +314,13 @@ def main():
     DAQ_sample_rate_Hz = 10000
     #retriggerable = True
     num_DI_channels = 8
+
+    # set the galvo to neutral
+    taskAO_last = daq.Task()
+    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+    taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
+    taskAO_last.StopTask()
+    taskAO_last.ClearTask()
 
     # output experiment info
     print('Number of X positions: '+str(scan_axis_positions))
