@@ -21,7 +21,7 @@ On the instrument side, we have added galvo scanning, changed the light sheet la
   * Run a single position, timelapse, multicolor galvo mirror scan using our OPM. Push data after acquisition to our NAS for post-processing by server.
   * Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup size of galvo sweep (max 200 micrometers), exposure time (verified to work down to 1.5 ms with OrcaFusion BT, our laser launch, and our galvo), laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Micro-manager 2.0 is work-in-progress and should be completed by 05/21. Once setup, call python script and it will execute scan.
   * Depends on: [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
-* recon_opm_galvocan.py
+* recon_opm_galvoscan.py
   * Reconstruct an OPM acquisition created using 'run_opm_galvoscan.py' and create a BDV H5 file for BDV viewing.
   * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [Microvolution](https://www.microvolution.com/) (commerical software!), [npy2bdv](https://github.com/nvladimus/npy2bdv), [pyimagej](https://github.com/imagej/pyimagej), local FIJI w/ BaSiC plugin JAR, flatfield.py (in this repo), and various standard Python libraries.
   * Currently has option to reconstruct data acquired directly with Hamamatsu HCImage software, due to some debugging we are doing with an OrcaFusion BT. This will be removed once debugging is done.
