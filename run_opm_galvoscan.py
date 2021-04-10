@@ -15,6 +15,10 @@ import time
 import pandas as pd
 import PyDAQmx as daq
 import ctypes as ct
+import subprocess
+from itertools import compress
+import shutil
+from threading import Thread
 
 def main():
 
@@ -24,8 +28,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [False, True, True, True, True] # true -> active, false -> inactive
-    channel_powers = [0, 20, 50, 20, 100] # (0 -> 100%)
+    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
+    channel_powers = [0, 20, 100, 20, 100] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -50,8 +54,8 @@ def main():
     timepoints = 1
 
     # setup file name
-    save_directory=Path('E:/20210406ae/')
-    save_name = 'etx2_shield_antigen'
+    save_directory=Path('E:/20210408p/')
+    save_name = 'beads'
  
     # display data
     display_flag = False
@@ -64,8 +68,8 @@ def main():
     core = bridge.get_core()
 
     # give camera time to change modes if necessary
-    core.set_config('Camera-Setup','ScanMode2')
-    core.wait_for_config('Camera-Setup','ScanMode2')
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
     # set camera to internal trigger
     core.set_config('Camera-TriggerSource','INTERNAL')
@@ -212,7 +216,7 @@ def main():
         ## Write the output waveform
         samples_per_ch_ct_digital = ct.c_int32()
         taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
-        print("WriteDigitalLines sample per channel count = %d" % samples_per_ch_ct_digital.value)
+        #print("WriteDigitalLines sample per channel count = %d" % samples_per_ch_ct_digital.value)
 
         # ------- ANALOG output -----------
 
@@ -233,7 +237,7 @@ def main():
         ## Write the output waveform
         samples_per_ch_ct = ct.c_int32()
         taskAO.WriteAnalogF64(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByScanNumber,waveform,ct.byref(samples_per_ch_ct),None)
-        print("WriteAnalogF64 sample per channel count = %d" % samples_per_ch_ct.value)
+        #print("WriteAnalogF64 sample per channel count = %d" % samples_per_ch_ct.value)
 
         ## ------ Start both tasks ----------
         taskAO.StartTask()    
@@ -274,8 +278,8 @@ def main():
                         'num_z': 1, # might need to change this eventually
                         'num_ch': int(n_active_channels),
                         'scan_axis_positions': int(scan_steps),
-                        'y_pixels': y_pixels, # figure out how to pull from current image
-                        'x_pixels': x_pixels, # figure out how to pull from current image
+                        'y_pixels': y_pixels,
+                        'x_pixels': x_pixels,
                         '405_active': channel_states[0],
                         '488_active': channel_states[1],
                         '561_active': channel_states[2],
@@ -283,7 +287,7 @@ def main():
                         '730_active': channel_states[4]}]
     
     df_galvo_scan_params = pd.DataFrame(scan_param_data)
-    save_name_galvo_params = save_directory / 'galvo_scan_metadata.csv'
+    save_name_galvo_params = save_directory / 'scan_metadata.csv'
     df_galvo_scan_params.to_csv(save_name_galvo_params)
 
     # turn all lasers off
@@ -317,6 +321,31 @@ def main():
     taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
     taskAO_last.StopTask()
     taskAO_last.ClearTask()
+
+    # make parent directory on NAS and start reconstruction script on the server
+    # make home directory on NAS
+    save_directory_path = Path(save_directory)
+    remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
+    cmd='mkdir ' + str(remote_directory)
+    status_mkdir = subprocess.run(cmd, shell=True)
+
+    # copy full experiment metadata to NAS
+    src= Path(save_directory) / Path('scan_metadata.csv') 
+    dst= Path(remote_directory) / Path('scan_metadata.csv') 
+    Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
+
+    # call Python code on server to start reconstruction
+    # TO DO: how to do this using different user name? do we need password?
+    #cmd = '/home/dps/miniconda3/envs/npy2bdvOPM/bin/python /home/dps/Documents/github/opm/opm/Control-MM/recon_stagescan.py -i '+ str(remote_directory)+' -f 0 -d 0'
+    #status_ssh = 'ssh dps@qi2labserver nohup '+ cmd + ' &'
+    #Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
+
+    # copy current tyzc data to NAS
+    save_directory_path = Path(save_directory)
+    remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
+    src= Path(save_directory) / Path(save_name+ '_1') 
+    dst= Path(remote_directory) / Path(save_name+ '_1') 
+    Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
 
 # run
 if __name__ == "__main__":

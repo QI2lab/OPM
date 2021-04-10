@@ -318,7 +318,7 @@ def main(argv):
     # Cannot use a different pixel size in (x,y) in BigStitcher, so calculate here for posterity
     deskewed_x_pixel = np.round(pixel_size*np.cos(theta * np.pi/180.),0) / 1000.
     deskewed_y_pixel = np.round(pixel_size,0) / 1000.
-    deskewed_z_pixel = np.round(pixel_size*np.sin(theta * np.pi/180.),1) / 1000.
+    deskewed_z_pixel = (2*np.round(pixel_size*np.sin(theta * np.pi/180.),1)) / 1000.
     print('Deskewed pixel sizes before downsampling (nm). x='+str(deskewed_x_pixel)+', y='+str(deskewed_y_pixel)+', z='+str(deskewed_z_pixel)+'.')
 
     # set up parameters for deskew parameters
