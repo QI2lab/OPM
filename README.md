@@ -30,4 +30,7 @@ On the instrument side, we have added galvo scanning, changed the light sheet la
   * Usage: python recon_opm_galvoscan.py -i < inputdirectory > -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>
 
 # Contributions / Acknowledgements
-Peter Brown (ASU), Franky Djutanta (ASU), Douglas Shepherd (ASU), Nikita Vladimirov (BIMSB_MDC),  Henry Pinkard (UCB), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Alfred Millett-Sikking (Calico), and Andrew York (Calico).
+Peter Brown (ASU), Franky Djutanta (ASU), Doug Shepherd (ASU), Nikita Vladimirov (BIMSB_MDC),  Henry Pinkard (UCB), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Alfred Millett-Sikking (Calico), and Andrew York (Calico).
+
+# Contact
+For questions, contact Doug Shepherd (douglas.shepherd (at) asu.edu).
