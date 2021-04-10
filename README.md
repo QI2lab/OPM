@@ -8,18 +8,18 @@ On the instrument side, we have added galvo scanning, changed the light sheet la
 
 # Stage scan operation
 * run_opm_stagescan.py
-  * Run a multiposition, multicolor stage scan using our OPM. Push data during acquisition to our NAS for post-processing by server.
+  * Run a multiposition, multicolor stage scan using our OPM. Push data during acquisition to our NAS using 10G fiber connection for post-processing.
   * Depends on: [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
   * Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup stage positions, exposure time, laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Micro-manager 2.0 is work-in-progress and should be completed by 05/21. Once setup, call python script and it will execute scan.
 * recon_opm_stagescan.py
-  * Reconstruct an OPM acquisition created using 'run_opm_stagescan.py' and create a BDV H5 file for BigStitcher.
+  * Reconstruct an OPM acquisition created using 'run_opm_stagescan.py' and create a BDV H5 file for BigStitcher. Can be pointed to directory for an in-progress acquisition or completed acquisition. We push in-progress acquisitions to a NAS via 10G fiber and reconstruct during acquistion using a Linux server with 10G fiber connection to NAS, Dual 12-core Xeon CPUs, 1TB of RAM, and a Titan RTX GPU.
   * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [npy2bdv](https://github.com/nvladimus/npy2bdv), [scikit-image](https://scikit-image.org/), and various standard Python libraries.
   * Optional dependencies for GPU deconvolution and retrospective flatfield correction: [Microvolution](https://www.microvolution.com/) (commerical software! Can replace with [pyCUDAdecon](https://pycudadecon.readthedocs.io/en/latest/) for open-source GPU deconvolution), [pyimagej](https://github.com/imagej/pyimagej), local FIJI w/ BaSiC plugin JAR, and flat_field.py (in this repo).
   * Usage: python recon_opm_stagescan.py -i < inputdirectory > -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>
 
 # Galvo scan operation
 * run_opm_galvoscan.py
-  * Run a single position, timelapse, multicolor galvo mirror scan using our OPM. Push data after acquisition to our NAS for post-processing by server.
+  * Run a single position, timelapse, multicolor galvo mirror scan using our OPM. Push data after acquisition to our NAS using 10G fiber connection for post-processing.
   * Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup size of galvo sweep (max 200 micrometers), exposure time (galvo stability and laser blanking verified to work down to 1.5 ms exposure time in 256x2304 ROI with OrcaFusion BT), laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Micro-manager 2.0 is work-in-progress and should be completed by 05/21. Once setup, call python script and it will execute scan.
   * Depends on: [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
 * recon_opm_galvoscan.py
