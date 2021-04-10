@@ -10,11 +10,10 @@ import scipy.optimize
 import trackpy as tp
 import pandas as pd
 import matplotlib.pyplot as plt
+import load_dataset
 
 figsize = (16, 8)
-frames_per_vol = 25
-raw_frame_period = 2e-3
-frames_per_sec = 1 / (frames_per_vol * raw_frame_period)
+nmin_traj = 5
 
 # root_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\2021_02_21_12;56;10_localization"
 # root_dir = r"\\10.206.26.21\opm2\20210203\beads_0glyc_1000dilution_1\2021_02_23_08;07;45_localization"
@@ -22,24 +21,31 @@ frames_per_sec = 1 / (frames_per_vol * raw_frame_period)
 # load all localization data
 # data_dirs = glob.glob(os.path.join(root_dir, r"vol_*"))
 # inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_dirs])
-#
-# centers = []
-# frame_inds = []
-# for ii, ind in enumerate(inds):
-#     fname = os.path.join(data_dirs[ind], "localization_results.pkl")
-#     if not os.path.exists(fname):
-#         continue
-#
-#     with open(fname, "rb") as f:
-#         dat = pickle.load(f)
-#     centers.append(dat["centers"])
-#     frame_inds.append(np.ones(len(dat["centers"])) * ii)
 
 # root_dir = r"\\10.206.26.21\opm2\20210309\crowders-10x-50glyc\2021_03_10_17;57;53_localization"
 # root_dir = r"\\10.206.26.21\opm2\20210309\crowders-1x-50glyc\2021_03_11_15;50;33_localization"
-root_dir = r"\\10.206.26.21\opm2\20210309\no_crowders\2021_03_14_13;21;57_localization"
+# root_dir = r"\\10.206.26.21\opm2\20210309\no_crowders\2021_03_14_13;21;57_localization"
+# data_files = glob.glob(os.path.join(root_dir, "localization_results*.pkl"))
+# inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
+
+# define dataset
+root_dir = r"\\10.206.26.21\opm2\20210408m\glycerol50x_1\2021_04_09_11;40;36_localization"
 data_files = glob.glob(os.path.join(root_dir, "localization_results*.pkl"))
 inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
+
+scan_data_path = os.path.join(root_dir, "..", "..", "scan_metadata.csv")
+
+# read useful metadata
+scan_data = load_dataset.read_metadata(scan_data_path)
+
+frames_per_vol = scan_data["scan_axis_positions"]
+# frames_per_vol = 25
+raw_frame_period = 2e-3
+frames_per_sec = 1 / (frames_per_vol * raw_frame_period)
+
+vol = (scan_data["pixel_size"] / 1e3 * scan_data["x_pixels"]) * \
+      (scan_data["scan_step"] / 1e3* scan_data["scan_axis_positions"]) * \
+      (scan_data["pixel_size"] / 1e3 * np.sin(scan_data["theta"] * np.pi/180) * scan_data["y_pixels"])
 
 # load all localization data
 centers = []
@@ -57,13 +63,9 @@ data = np.concatenate((frame_inds[:, None], centers, centers), axis=1)
 # put data in dataframe format expected by TrackPy
 df = pd.DataFrame(data, columns=["frame", "z", "y", "x", "zum", "yum", "xum"])
 
-# todo: read this from the data
-density_um3 = len(df[df["frame"] == 0]) / (0.115 * 1600) / (0.4 * 25) / (0.115 * np.sin(30 * np.pi/180) * 256)
-
 # do linking
 linked = tp.link_df(df, search_range=(1.0, 1.0, 1.0), memory=3, pos_columns=["xum", "yum", "zum"])
 # filter trajectories shorter than a certain length
-nmin_traj = 20
 linked = tp.filter_stubs(linked, nmin_traj)
 
 # #######################
@@ -148,6 +150,10 @@ plaw_fit = np.exp(results_plaw["x"][1]) * t_plaw_fit ** results_plaw["x"][0]
 # #######################
 figh = plt.figure(figsize=figsize)
 grid = plt.GridSpec(2, 2, hspace=0.5)
+nparticles_start = len(df[df["frame"] == 0])
+density_um3 = nparticles_start / vol
+plt.suptitle(r"N=%d in first frame, $\rho$~%0.3g particles/$\mu m^3$ = %0.3g particle/ml $\to$ %0.3g $\mu m^3/particle$"
+             % (nparticles_start, density_um3, density_um3 * 1e12, 1/density_um3))
 
 # ensemble average MSD
 ax = plt.subplot(grid[0, 0])
