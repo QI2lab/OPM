@@ -517,12 +517,6 @@ def main():
                         dst= Path(remote_directory) / Path('scan_metadata.csv') 
                         Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
 
-                        # call Python code on server to start reconstruction
-                        # TO DO: how to do this using different user name? do we need password?
-                        #cmd = '/home/dps/miniconda3/envs/npy2bdvOPM/bin/python /home/dps/Documents/github/opm/opm/Control-MM/recon_stagescan.py -i '+ str(remote_directory)+' -f 0 -d 0'
-                        #status_ssh = 'ssh dps@qi2labserver nohup '+ cmd + ' &'
-                        #Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
-
                         setup_processing=False
                     
                     # copy current tyzc metadata to NAS
