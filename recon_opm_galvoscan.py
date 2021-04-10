@@ -16,152 +16,13 @@ import sys
 import getopt
 import re
 from skimage.measure import block_reduce
-from skimage.transform import rescale
 import skimage.io
-from numba import njit, prange
+from image_post_processing import deskew
 import pandas as pd
 import dask.array as da
-import microvolution_py as mv
-import imagej
-import scyjava
-import flat_field
 import glob
 from itertools import compress
 from itertools import product
-
-# function perform deconvolution
-# to do: implement reading known PSF from disk
-# IMPORTANT: This relies on commerical license for Microvolution. If you do not have one, will need to replace with your own decon.
-def mv_decon(image,ch_idx,dr,dz):
-
-    wavelengths = [460.,520.,605.,670.,780.]
-    wavelength=wavelengths[ch_idx]
-
-    params = mv.LightSheetParameters()
-    params.nx = image.shape[2]
-    params.ny = image.shape[1]
-    params.nz = image.shape[0]
-    params.generatePsf = True
-    params.lightSheetNA = 0.24
-    params.blind=False
-    params.NA = 1.2
-    params.RI = 1.4
-    params.ns = 1.4
-    params.psfModel = mv.PSFModel_Vectorial
-    params.psfType = mv.PSFType_LightSheet
-    params.wavelength = wavelength
-    params.dr = dr
-    params.dz = dz
-    params.iterations = 20
-    params.background = 0
-    params.regularizationType=mv.RegularizationType_TV
-    params.scaling = mv.Scaling_U16
-
-    try:
-        launcher = mv.DeconvolutionLauncher()
-        image = image.astype(np.float32)
-
-        launcher.SetParameters(params)
-        for z in range(params.nz):
-            launcher.SetImageSlice(z, image[z,:])
-
-        launcher.Run()
-
-        for z in range(params.nz):
-            launcher.RetrieveImageSlice(z, image[z,:])
-
-    except:
-        err = sys.exc_info()
-        print("Unexpected error:", err[0])
-        print(err[1])
-        print(err[2])
-
-    return image
-
-# perform deskewusing orthogonal interpolation into a uniform pixel size grid.
-# http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-@njit(parallel=True)
-def deskew(data,parameters):
-
-    # unwrap parameters 
-    theta = parameters[0]             # (degrees)
-    distance = parameters[1]          # (nm)
-    pixel_size = parameters[2]        # (nm)
-    [num_images,ny,nx]=data.shape     # (pixels)
-
-    # change step size from physical space (nm) to camera space (pixels)
-    pixel_step = distance/pixel_size    # (pixels)
-
-    # calculate the number of pixels scanned during stage scan 
-    scan_end = num_images * pixel_step  # (pixels)
-
-    # calculate properties for final image
-    final_ny = np.int64(np.ceil(scan_end+ny*np.cos(theta*np.pi/180))) # (pixels)
-    final_nz = np.int64(np.ceil(ny*np.sin(theta*np.pi/180)))          # (pixels)
-    final_nx = np.int64(nx)                                           # (pixels)
-
-    # create final image
-    output = np.zeros((final_nz, final_ny, final_nx),dtype=np.float32)  # (time, pixels,pixels,pixels - data is float32)
-
-    # precalculate trig functions for scan angle
-    tantheta = np.float32(np.tan(theta * np.pi/180)) # (float32)
-    sintheta = np.float32(np.sin(theta * np.pi/180)) # (float32)
-    costheta = np.float32(np.cos(theta * np.pi/180)) # (float32)
-
-    # perform orthogonal interpolation
-
-    # loop through output z planes
-    # defined as parallel loop in numba
-    # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-    for z in prange(0,final_nz):
-        # calculate range of output y pixels to populate
-        y_range_min=np.minimum(0,np.int64(np.floor(np.float32(z)/tantheta)))
-        y_range_max=np.maximum(final_ny,np.int64(np.ceil(scan_end+np.float32(z)/tantheta+1)))
-
-        # loop through final y pixels
-        # defined as parallel loop in numba
-        # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-        for y in prange(y_range_min,y_range_max):
-
-            # find the virtual tilted plane that intersects the interpolated plane 
-            virtual_plane = y - z/tantheta
-
-            # find raw data planes that surround the virtual plane
-            plane_before = np.int64(np.floor(virtual_plane/pixel_step))
-            plane_after = np.int64(plane_before+1)
-
-            # continue if raw data planes are within the data range
-            if ((plane_before>=0) and (plane_after<num_images)):
-                
-                # find distance of a point on the  interpolated plane to plane_before and plane_after
-                l_before = virtual_plane - plane_before * pixel_step
-                l_after = pixel_step - l_before
-                
-                # determine location of a point along the interpolated plane
-                za = z/sintheta
-                virtual_pos_before = za + l_before*costheta
-                virtual_pos_after = za - l_after*costheta
-
-                # determine nearest data points to interpoloated point in raw data
-                pos_before = np.int64(np.floor(virtual_pos_before))
-                pos_after = np.int64(np.floor(virtual_pos_after))
-
-                # continue if within data bounds
-                if ((pos_before>=0) and (pos_after >= 0) and (pos_before<ny-1) and (pos_after<ny-1)):
-                    
-                    # determine points surrounding interpolated point on the virtual plane 
-                    dz_before = virtual_pos_before - pos_before
-                    dz_after = virtual_pos_after - pos_after
-
-                    # compute final image plane using orthogonal interpolation
-                    output[z,y,:] = (l_before * dz_after * data[plane_after,pos_after+1,:] +
-                                    l_before * (1-dz_after) * data[plane_after,pos_after,:] +
-                                    l_after * dz_before * data[plane_before,pos_before+1,:] +
-                                    l_after * (1-dz_before) * data[plane_before,pos_before,:]) /pixel_step
-
-
-    # return output
-    return output
 
 # parse experimental directory, load data, perform orthogonal deskew, and save as BDV H5 file
 def main(argv):
@@ -169,15 +30,18 @@ def main(argv):
     # parse directory name from command line argument 
     input_dir_string = ''
     output_dir_string = ''
+    acq_type = 0
+    decon_flag = 0
+    flatfield_flag = 0
 
     try:
         arguments, values = getopt.getopt(argv,"hi:a:d:f:",["help","ipath=","acq=","decon=","flatfield="])
     except getopt.GetoptError:
-        print('Error. recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
+        print('Error. recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager (DEFAULT), 1: hcimage> -d <0: no deconvolution (DEFAULT), 1: deconvolution> -f <0: no flat-field (DEFAULT), 1: flat-field>')
         sys.exit(2)
     for current_argument, current_value in arguments:
         if current_argument == '-h':
-            print('Usage. recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
+            print('Usage. recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager (DEFAULT), 1: hcimage> -d <0: no deconvolution (DEFAULT), 1: deconvolution> -f <0: no flat-field (DEFAULT), 1: flat-field>')
             sys.exit()
         elif current_argument in ("-i", "--ipath"):
             input_dir_string = str(current_value)
@@ -337,14 +201,24 @@ def main(argv):
                             (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
                             (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
 
-    if flatfield_flag == 1:
-        # open pyimagej in interactive mode because BaSiC flat-fielding plugin cannot run in headless mode
+    # if retrospective flatfield is requested, import and open pyimagej in interactive mode 
+    # because BaSiC flat-fielding plugin cannot run in headless mode
+    if flatfield_flag==1:
+        from image_post_processing import manage_flat_field
+        import imagej
+        import scyjava
+        from scyjava import jimport
+
         scyjava.config.add_option('-Xmx12g')
         plugins_dir = Path('/home/dps/Fiji.app/plugins')
         scyjava.config.add_option(f'-Dplugins.dir={str(plugins_dir)}')
         ij_path = Path('/home/dps/Fiji.app')
         ij = imagej.init(str(ij_path), headless=False)
         ij.ui().showUI()
+
+    # if decon is requested, import microvolution wrapper
+    if decon_flag==1:
+        from image_post_processing import mv_decon
 
     # initialize tile counter
     tile_idx = 0
@@ -375,7 +249,7 @@ def main(argv):
             corrected_stack=sub_stack.compute()
         else:
             print('Flatfield.')
-            corrected_stack = flat_field.manage_flat_field(sub_stack,ij)
+            corrected_stack = manage_flat_field(sub_stack,ij)
         del sub_stack
 
         # deskew
