@@ -14,7 +14,7 @@ On the instrument side, we have added galvo scanning, changed the light sheet la
 * recon_opm_stagescan.py
   * Reconstruct an OPM acquisition created using 'run_opm_stagescan.py' and create a BDV H5 file for BigStitcher.
   * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [Microvolution](https://www.microvolution.com/) (commerical software!), [npy2bdv](https://github.com/nvladimus/npy2bdv), [pyimagej](https://github.com/imagej/pyimagej), local FIJI w/ BaSiC plugin JAR, flatfield.py (in this repo), and various standard Python libraries.
-  * Usage: python recon_opm_stagescan.py -i <inputdirectory> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>
+  * Usage: python recon_opm_stagescan.py -i < inputdirectory > -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>
 
 # Galvo scan operation
 * run_opm_galvoscan.py
@@ -25,7 +25,7 @@ On the instrument side, we have added galvo scanning, changed the light sheet la
   * Reconstruct an OPM acquisition created using 'run_opm_galvoscan.py' and create a BDV H5 file for BDV viewing.
   * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [Microvolution](https://www.microvolution.com/) (commerical software!), [npy2bdv](https://github.com/nvladimus/npy2bdv), [pyimagej](https://github.com/imagej/pyimagej), local FIJI w/ BaSiC plugin JAR, flatfield.py (in this repo), and various standard Python libraries.
   * Currently has option to reconstruct data acquired directly with Hamamatsu HCImage software, due to some debugging we are doing with an OrcaFusion BT. This will be removed once debugging is done.
-  * Usage: python recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>
+  * Usage: python recon_opm_galvoscan.py -i < inputdirectory > -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>
 
 # Contributions / Acknowledgements
 Peter Brown (ASU), Nikita Vladimirov (BIMSB_MDC),  Henry Pinkard (UCB), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Alfred Millett-Sikking (Calico), and Andrew York (Calico).
