@@ -6,9 +6,6 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
-import joblib
-import tifffile
-import pycromanager
 import localize
 import load_dataset
 
@@ -20,33 +17,31 @@ plot_results = False
 figsize = (16, 8)
 
 # paths to image files
-root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210309", "crowders-10x-50glyc")
-# root_dir = os.path.join(r"/mnt", "opm2", "20210309", "crowders-10x-50glyc")
+# root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
+root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 
 fnames = glob.glob(os.path.join(root_dir, "*.tif"))
-img_inds = np.array([int(re.match(".*Image\d+_(\d+).tif", f).group(1)) for f in fnames])
-fnames = [f for _, f in sorted(zip(img_inds, fnames))]
+# gets messy because first file does not have a number label...
+# img_inds = np.array([0 if not re.match(".*_(\d+).tif", f) else int(re.match(".*_(\d+).tif", f).group(1)) for f in fnames])
+# img_inds = np.array([int(re.match(".*Image\d+_(\d+).tif", f).group(1)) for f in fnames])
+# fnames = [f for _, f in sorted(zip(img_inds, fnames))]
 
 # paths to metadata
-scan_data_dir = os.path.join(root_dir, "galvo_scan_params.pkl")
+scan_data_dir = os.path.join(root_dir, "..", "..", "scan_metadata.csv")
 
 # ###############################
 # load/set scan parameters
 # ###############################
-with open(scan_data_dir, "rb") as f:
-    scan_data = pickle.load(f)
+scan_data = load_dataset.read_metadata(scan_data_dir)
 
-nvols = 10000
-nimgs_per_vol = 25
-nyp = 256
-nxp = 1600
-volume_process_times = np.zeros(nvols)
-
-theta = scan_data["theta"][0] * np.pi / 180
+nvols = scan_data["num_t"]
+nimgs_per_vol = scan_data["scan_axis_positions"]
+nyp = scan_data["y_pixels"]
+nxp = scan_data["x_pixels"]
+dc = scan_data["pixel_size"] / 1000
+dstage = scan_data["scan_step"] / 1000
+theta = scan_data["theta"] * np.pi / 180
 normal = np.array([0, -np.sin(theta), np.cos(theta)]) # normal of camera pixel
-
-dc = scan_data["pixel size"][0] / 1000
-dstage = scan_data["scan step"][0] / 1000
 
 volume_um3 = (dstage * nimgs_per_vol) * (dc * nxp) * (dc * np.cos(theta) * nyp)
 
@@ -62,10 +57,10 @@ sigma_z = np.sqrt(6) / np.pi * ni * emission_wavelength / na ** 2
 # build save dir
 # ###############################
 now = datetime.datetime.now()
-# time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-time_stamp = "test"
+time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+# time_stamp = "test"
 
-save_dir = os.path.join(root_dir, "%s_localization" % time_stamp)
+save_dir = os.path.join(root_dir, "..", "%s_localization" % time_stamp)
 if not os.path.exists(save_dir):
     os.mkdir(save_dir)
 
@@ -86,11 +81,13 @@ sigmas_max = (2 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
 
 # don't consider any points outside of this polygon
 # cx, cy
-allowed_camera_region = np.array([[357, 0], [464, 181], [1265, 231], [1387, 0]])
+# allowed_camera_region = np.array([[357, 0], [464, 181], [1265, 231], [1387, 0]])
+allowed_camera_region = None
 
 # ###############################
 # loop over volumes
 # ###############################
+volume_process_times = np.zeros(nvols)
 for vv in range(nvols):
     print("################################\nstarting volume %d/%d" % (vv + 1, nvols))
     tstart = time.perf_counter()
@@ -109,7 +106,7 @@ for vv in range(nvols):
         # load images
         tstart_load = time.process_time()
         imgs, imgs_inds = load_dataset.load_volume(fnames, vv, nimgs_per_vol, chunk_index=chunk_counter,
-                                                   imgs_per_chunk=100, n_chunk_overlap=3)
+                                                   imgs_per_chunk=100, n_chunk_overlap=3, mode="ndtiff")
         # if no images returned, we are done
         if imgs.shape[0] == 0:
             break

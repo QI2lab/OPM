@@ -12,6 +12,7 @@ from matplotlib.path import Path
 import warnings
 import time
 import joblib
+#from numba import njit, prange
 import cupy as cp
 import cupyx.scipy.signal # new in v9, compiled github source
 
@@ -131,7 +132,7 @@ def find_trapezoid_cy(cz, coords):
 
     return cy, ymax, ymin
 
-def interp_opm_data(imgs, dc, ds, theta, mode="row-interp"):
+def interp_opm_data(imgs, dc, ds, theta, mode="ortho-interp"):
     """
     Interpolate OPM stage-scan data to be equally spaced in coverslip frame
 
@@ -458,7 +459,7 @@ def fit_model(img, model_fn, init_params, fixed_params=None, sd=None, bounds=Non
 
 
 # generate synthetic image
-def simulate_img(scan_params, physical_params, ncenters=1, sf=3):
+def simulate_img(scan_params, physical_params, ncenters=1, centers=None, sf=3):
 
     # size and pixel size
     dc = scan_params["dc"]
@@ -484,15 +485,16 @@ def simulate_img(scan_params, physical_params, ncenters=1, sf=3):
     x, y, z = get_lab_coords(nx, ny, dc, theta, stage_pos)
 
     # define centers
-    centers = []
-    while len(centers) < ncenters:
-        xc = np.random.uniform(x.min(), x.max())
-        yc = np.random.uniform(y.min(), y.max())
-        zc = np.random.uniform(z.min(), z.max())
-        c_proposed = np.array([zc, yc, xc])
-        if point_in_trapezoid(c_proposed, x, y, z):
-            centers.append(c_proposed)
-    centers = np.asarray(centers)
+    if centers is None:
+        centers = []
+        while len(centers) < ncenters:
+            xc = np.random.uniform(x.min(), x.max())
+            yc = np.random.uniform(y.min(), y.max())
+            zc = np.random.uniform(z.min(), z.max())
+            c_proposed = np.array([zc, yc, xc])
+            if point_in_trapezoid(c_proposed, x, y, z):
+                centers.append(c_proposed)
+        centers = np.asarray(centers)
 
     img_gt = np.zeros((x+y+z).shape)
     for c in centers:
