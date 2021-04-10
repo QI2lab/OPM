@@ -173,11 +173,11 @@ def main(argv):
     try:
         arguments, values = getopt.getopt(argv,"hi:a:d:f:",["help","ipath=","acq=","decon=","flatfield="])
     except getopt.GetoptError:
-        print('Error. galvo_recon.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
+        print('Error. recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
         sys.exit(2)
     for current_argument, current_value in arguments:
         if current_argument == '-h':
-            print('Usage. galvo_recon.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
+            print('Usage. recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
             sys.exit()
         elif current_argument in ("-i", "--ipath"):
             input_dir_string = str(current_value)
