@@ -153,8 +153,9 @@ def main(argv):
         ij.ui().showUI()
 
     # if decon is requested, import microvolution wrapper
+    # this file is private and does not follow the same license as the rest of our code.
     if decon_flag==1:
-        from image_post_processing import mv_decon
+        from mvdecon import mv_decon
 
     # initialize tile counter
     tile_idx = 0
