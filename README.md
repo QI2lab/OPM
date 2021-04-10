@@ -20,9 +20,9 @@ There have been large-scale, breaking changes since publication to the instrumen
   * Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup size of galvo sweep (max 200 micrometers), exposure time, laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Micromanager 2.0 is work-in-progress and should be completed by 05/21. Once setup, call python script and it will execute scan.
   * Depends on: [Micromanager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
 * recon_opm_galvocan.py
-  * Reconstruct an OPM acquisition created using 'run_opm_stagescan.py' and create a BDV H5 file for BDV viewing.
+  * Reconstruct an OPM acquisition created using 'run_opm_galvoscan.py' and create a BDV H5 file for BDV viewing.
   * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [Microvolution](https://www.microvolution.com/) (commerical software!), [npy2bdv](https://github.com/nvladimus/npy2bdv), [pyimagej](https://github.com/imagej/pyimagej), local FIJI w/ BaSiC plugin JAR, flatfield.py (in this repo), and various standard Python libraries.
-  * Currently has option to reconstruction data acquired directly with Hamamatsu HCImage software, due to some debugging. This will be removed once debugging is done.
+  * Currently has option to reconstruct data acquired directly with Hamamatsu HCImage software, due to some debugging we are doing with an OrcaFusion BT. This will be removed once debugging is done.
   * Usage: python recon_opm_galvoscan.py -i <inputdirectory> -a <0: pycromanager, 1: hcimage> <-d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>
 
 # Contributions / Acknowledgements
