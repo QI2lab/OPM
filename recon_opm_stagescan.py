@@ -174,11 +174,11 @@ def main(argv):
     try:
         arguments, values = getopt.getopt(argv,"hi:d:f:",["help","ipath=","decon=","flatfield="])
     except getopt.GetoptError:
-        print('Error. galvo_recon.py -i <inputdirectory> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
+        print('Error. recon_opm_stagescan.py -i <inputdirectory> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
         sys.exit(2)
     for current_argument, current_value in arguments:
         if current_argument == '-h':
-            print('Usage. galvo_recon.py -i <inputdirectory> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
+            print('Usage. recon_opm_stagescan.py -i <inputdirectory> -d <0: no deconvolution, 1: deconvolution> -f <0: no flat-field 1: flat-field>')
             sys.exit()
         elif current_argument in ("-i", "--ipath"):
             input_dir_string = str(current_value)
