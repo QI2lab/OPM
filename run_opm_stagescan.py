@@ -304,7 +304,6 @@ def main():
     # setup DAQ
     samples_per_ch = 2
     DAQ_sample_rate_Hz = 10000
-    #retriggerable = True
     num_DI_channels = 8
 
     # set the galvo to neutral
@@ -445,6 +444,7 @@ def main():
                         acq.acquire(events)
 
                     # clean up acquisition so that AcqEngJ releases directory.
+                    # NOTE: This currently does not work. 
                     acq = None
 
                     # stop DAQ and make sure it is at zero

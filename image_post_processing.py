@@ -200,3 +200,60 @@ def perform_flat_field(flat_field,dark_field,sub_stack):
     corrected_sub_stack = corrected_sub_stack/flat_field
 
     return corrected_sub_stack.compute()
+
+'''
+Perform deconvolution using Microvolution
+
+to do: implement reading known PSF from disk
+IMPORTANT: This relies on commerical license for Microvolution. If you do not have one, will need to replace with your own decon.
+
+Last updated: 04/21 Shepherd
+'''
+   
+def mv_decon(image,ch_idx,dr,dz):
+
+    import microvolution_py as mv
+
+    wavelengths = [460.,520.,605.,670.,780.]
+    wavelength=wavelengths[ch_idx]
+
+    params = mv.LightSheetParameters()
+    params.nx = image.shape[2]
+    params.ny = image.shape[1]
+    params.nz = image.shape[0]
+    params.generatePsf = True
+    params.lightSheetNA = 0.24
+    params.blind=False
+    params.NA = 1.2
+    params.RI = 1.4
+    params.ns = 1.4
+    params.psfModel = mv.PSFModel_Vectorial
+    params.psfType = mv.PSFType_LightSheet
+    params.wavelength = wavelength
+    params.dr = dr
+    params.dz = dz
+    params.iterations = 20
+    params.background = 0
+    params.regularizationType=mv.RegularizationType_TV
+    params.scaling = mv.Scaling_U16
+
+    try:
+        launcher = mv.DeconvolutionLauncher()
+        image = image.astype(np.float32)
+
+        launcher.SetParameters(params)
+        for z in range(params.nz):
+            launcher.SetImageSlice(z, image[z,:])
+
+        launcher.Run()
+
+        for z in range(params.nz):
+            launcher.RetrieveImageSlice(z, image[z,:])
+
+    except:
+        err = sys.exc_info()
+        print("Unexpected error:", err[0])
+        print(err[1])
+        print(err[2])
+
+    return image
