@@ -14,15 +14,14 @@ from pycromanager import Dataset
 import npy2bdv
 import sys
 import getopt
-import re
 from skimage.measure import block_reduce
 import skimage.io
 from image_post_processing import deskew
-import pandas as pd
 import dask.array as da
 import glob
 from itertools import compress
 from itertools import product
+import data_io
 
 # parse experimental directory, load data, perform orthogonal deskew, and save as BDV H5 file
 def main(argv):
@@ -81,27 +80,46 @@ def main(argv):
     # [timepoints, channels, scan positions, y pixels, x pixels, theta, stage move distance, camera pixel size]
     # units are [degrees,nm,nm]
     if acq_type==0:
-        df_metadata = pd.read_csv(input_dir_path.resolve().parents[0] / 'scan_metadata.csv')
+        # df_metadata = pd.read_csv(input_dir_path.resolve().parents[0] / 'scan_metadata.csv')
+        df_metadata = data_io.read_metadata(input_dir_path.resolve().parents[0] / 'scan_metadata.csv')
     else:
-        df_metadata = pd.read_csv(input_dir_path / 'scan_metadata.csv')
+        # df_metadata = pd.read_csv(input_dir_path / 'scan_metadata.csv')
+        df_metadata = data_io.read_metadata(input_dir_path / 'scan_metadata.csv')
 
-    root_name = str(df_metadata['root_name'][0])
-    scan_type = str(df_metadata['scan_type'][0])
-    theta = float(df_metadata['theta'][0])
-    scan_step = float(df_metadata['scan_step'][0])
-    pixel_size = float(df_metadata['pixel_size'][0])
-    num_t = int(df_metadata['num_t'][0])
-    num_y = int(df_metadata['num_y'][0])
-    num_z  = int(df_metadata['num_z'][0])
-    num_ch = int(df_metadata['num_ch'][0])
-    num_images = int(df_metadata['scan_axis_positions'][0])
-    y_pixels = int(df_metadata['y_pixels'][0])
-    x_pixels = int(df_metadata['x_pixels'][0])
-    chan_405_active = df_metadata['405_active'][0]
-    chan_488_active = df_metadata['488_active'][0]
-    chan_561_active = df_metadata['561_active'][0]
-    chan_635_active = df_metadata['635_active'][0]
-    chan_730_active = df_metadata['730_active'][0]
+    # root_name = str(df_metadata['root_name'][0])
+    # scan_type = str(df_metadata['scan_type'][0])
+    # theta = float(df_metadata['theta'][0])
+    # scan_step = float(df_metadata['scan_step'][0])
+    # pixel_size = float(df_metadata['pixel_size'][0])
+    # num_t = int(df_metadata['num_t'][0])
+    # num_y = int(df_metadata['num_y'][0])
+    # num_z  = int(df_metadata['num_z'][0])
+    # num_ch = int(df_metadata['num_ch'][0])
+    # num_images = int(df_metadata['scan_axis_positions'][0])
+    # y_pixels = int(df_metadata['y_pixels'][0])
+    # x_pixels = int(df_metadata['x_pixels'][0])
+    # chan_405_active = df_metadata['405_active'][0]
+    # chan_488_active = df_metadata['488_active'][0]
+    # chan_561_active = df_metadata['561_active'][0]
+    # chan_635_active = df_metadata['635_active'][0]
+    # chan_730_active = df_metadata['730_active'][0]
+    root_name = df_metadata['root_name']
+    scan_type = df_metadata['scan_type']
+    theta = df_metadata['theta']
+    scan_step = df_metadata['scan_step']
+    pixel_size = df_metadata['pixel_size']
+    num_t = df_metadata['num_t']
+    num_y = df_metadata['num_y']
+    num_z  = df_metadata['num_z']
+    num_ch = df_metadata['num_ch']
+    num_images = df_metadata['scan_axis_positions']
+    y_pixels = df_metadata['y_pixels']
+    x_pixels = df_metadata['x_pixels']
+    chan_405_active = df_metadata['405_active']
+    chan_488_active = df_metadata['488_active']
+    chan_561_active = df_metadata['561_active']
+    chan_635_active = df_metadata['635_active']
+    chan_730_active = df_metadata['730_active']
     active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_635_active,chan_730_active]
     channel_idxs = [0,1,2,3,4]
     channels_in_data = list(compress(channel_idxs, active_channels))

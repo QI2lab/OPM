@@ -20,6 +20,7 @@ import ctypes as ct
 from itertools import compress
 import shutil
 from threading import Thread
+import data_io
 
 def camera_hook_fn(event,bridge,event_queue):
 
@@ -473,21 +474,23 @@ def main():
                             'scan_axis_positions': int(scan_axis_positions),
                             'y_pixels': int(ROI[3]),
                             'x_pixels': int(ROI[2]),
-                            '405_active': active_channels[0],
-                            '488_active': active_channels[1],
-                            '561_active': active_channels[2],
-                            '635_active': active_channels[3],
-                            '730_active': active_channels[4]}]
+                            '405_active': channel_states[0],
+                            '488_active': channel_states[1],
+                            '561_active': channel_states[2],
+                            '635_active': channel_states[3],
+                            '730_active': channel_states[4]}]
 
-                        df_stage_scan_params = pd.DataFrame(scan_param_data)
-                        save_name_stage_params = save_directory / 'scan_metadata.csv'
-                        df_stage_scan_params.to_csv(save_name_stage_params)
+                        # df_stage_scan_params = pd.DataFrame(scan_param_data)
+                        # save_name_stage_params = save_directory / 'scan_metadata.csv'
+                        # df_stage_scan_params.to_csv(save_name_stage_params)
+                        data_io.write_metadata(scan_param_data[0], save_directory / 'scan_metadata.csv')
 
                         setup_metadata=False
 
                     # save stage scan positions after each tile
                     save_name_stage_positions = Path('t'+str(t_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)+'_stage_positions.csv')
                     save_name_stage_positions = save_directory / save_name_stage_positions
+                    # todo: use data_io instead
                     df_current_stage.to_csv(save_name_stage_positions)
 
                     # turn on 'transmit repeated commands' for Tiger
