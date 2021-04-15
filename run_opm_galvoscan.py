@@ -20,6 +20,7 @@ import subprocess
 from itertools import compress
 import shutil
 from threading import Thread
+import data_io
 
 def main():
 
@@ -287,9 +288,10 @@ def main():
                         '635_active': channel_states[3],
                         '730_active': channel_states[4]}]
     
-    df_galvo_scan_params = pd.DataFrame(scan_param_data)
-    save_name_galvo_params = save_directory / 'scan_metadata.csv'
-    df_galvo_scan_params.to_csv(save_name_galvo_params)
+    # df_galvo_scan_params = pd.DataFrame(scan_param_data)
+    # save_name_galvo_params = save_directory / 'scan_metadata.csv'
+    # df_galvo_scan_params.to_csv(save_name_galvo_params)
+    data_io.write_metadata(scan_param_data[0], save_directory / 'scan_metadata.csv')
 
     # turn all lasers off
     core.set_config('Laser','Off')
