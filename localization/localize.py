@@ -12,91 +12,15 @@ from matplotlib.path import Path
 import warnings
 import time
 import joblib
-from numba import njit, prange
+# for Fourier space filtering on GPU
 import cupy as cp
 import cupyx.scipy.signal # new in v9, compiled github source
-
-@njit(parallel=True)
-def deskew(data, parameters):
-    # unwrap parameters
-    theta = parameters[0]  # (degrees)
-    distance = parameters[1]  # (nm)
-    pixel_size = parameters[2]  # (nm)
-    [num_images, ny, nx] = data.shape  # (pixels)
-
-    # change step size from physical space (nm) to camera space (pixels)
-    pixel_step = distance / pixel_size  # (pixels)
-
-    # calculate the number of pixels scanned during stage scan
-    scan_end = num_images * pixel_step  # (pixels)
-
-    # calculate properties for final image
-    final_ny = np.int64(np.ceil(scan_end + ny * np.cos(theta * np.pi / 180)))  # (pixels)
-    final_nz = np.int64(np.ceil(ny * np.sin(theta * np.pi / 180)))  # (pixels)
-    final_nx = np.int64(nx)  # (pixels)
-
-    # create final image
-    output = np.zeros((final_nz, final_ny, final_nx),
-                      dtype=np.float32)  # (time, pixels,pixels,pixels - data is float32)
-
-    # precalculate trig functions for scan angle
-    tantheta = np.float32(np.tan(theta * np.pi / 180))  # (float32)
-    sintheta = np.float32(np.sin(theta * np.pi / 180))  # (float32)
-    costheta = np.float32(np.cos(theta * np.pi / 180))  # (float32)
-
-    # perform orthogonal interpolation
-
-    # loop through output z planes
-    # defined as parallel loop in numba
-    # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-    for z in prange(0, final_nz):
-        # calculate range of output y pixels to populate
-        y_range_min = np.minimum(0, np.int64(np.floor(np.float32(z) / tantheta)))
-        y_range_max = np.maximum(final_ny, np.int64(np.ceil(scan_end + np.float32(z) / tantheta + 1)))
-
-        # loop through final y pixels
-        # defined as parallel loop in numba
-        # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
-        for y in prange(y_range_min, y_range_max):
-
-            # find the virtual tilted plane that intersects the interpolated plane
-            virtual_plane = y - z / tantheta
-
-            # find raw data planes that surround the virtual plane
-            plane_before = np.int64(np.floor(virtual_plane / pixel_step))
-            plane_after = np.int64(plane_before + 1)
-
-            # continue if raw data planes are within the data range
-            if ((plane_before >= 0) and (plane_after < num_images)):
-
-                # find distance of a point on the  interpolated plane to plane_before and plane_after
-                l_before = virtual_plane - plane_before * pixel_step
-                l_after = pixel_step - l_before
-
-                # determine location of a point along the interpolated plane
-                za = z / sintheta
-                virtual_pos_before = za + l_before * costheta
-                virtual_pos_after = za - l_after * costheta
-
-                # determine nearest data points to interpoloated point in raw data
-                pos_before = np.int64(np.floor(virtual_pos_before))
-                pos_after = np.int64(np.floor(virtual_pos_after))
-
-                # continue if within data bounds
-                if ((pos_before >= 0) and (pos_after >= 0) and (pos_before < ny - 1) and (pos_after < ny - 1)):
-                    # determine points surrounding interpolated point on the virtual plane
-                    dz_before = virtual_pos_before - pos_before
-                    dz_after = virtual_pos_after - pos_after
-
-                    # compute final image plane using orthogonal interpolation
-                    output[z, y, :] = (l_before * dz_after * data[plane_after, pos_after + 1, :] + \
-                                       l_before * (1 - dz_after) * data[plane_after, pos_after, :] + \
-                                       l_after * dz_before * data[plane_before, pos_before + 1, :] + \
-                                       l_after * (1 - dz_before) * data[plane_before, pos_before, :]) / pixel_step
-
-    # return output
-    return output
-
+# for fitting on GPU
+try:
+    import pygpufit.gpufit as gf
+    GPUFIT_AVAILABLE = True
+except ImportError:
+    GPUFIT_AVAILABLE = False
 
 # misc helper functions
 def nearest_pt_line(pt, slope, pt_line):
@@ -336,7 +260,11 @@ def gaussian3d_pixelated_psf(x, y, z, ds, normal, p, sf=3):
         raise ValueError("ds = (dx, dy) length as not 2")
 
     # generate new points in pixel
-    pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
+    if sf != 1:
+        pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
+    else:
+        pts = np.array([0])
+
     xp, yp = np.meshgrid(ds[0] * pts, ds[1] * pts)
     zp = np.zeros(xp.shape)
 
@@ -381,7 +309,10 @@ def gaussian3d_pixelated_psf_jac(x, y, z, ds, normal, p, sf):
         raise ValueError("ds = (dx, dy) length as not 2")
 
     # generate new points in pixel
-    pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
+    if sf != 1:
+        pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
+    else:
+        pts = np.array([0])
     xp, yp = np.meshgrid(ds[0] * pts, ds[1] * pts)
     zp = np.zeros(xp.shape)
 
@@ -723,7 +654,7 @@ def get_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     return [n0, n1, n2]
 
 
-def get_tilted_roi(center, x, y, z, sizes, shape):
+def get_tilted_roi(center, x, y, z, sizes, shape, img=None, pad=True):
     """
 
     :param center: [cz, cy, cx]
@@ -1389,8 +1320,8 @@ def localize_radial_symm(img, coords, mode="radial-symmetry"):
     return np.array([amp, xc, yc, zc, sigma_xy, sz, np.nan])
 
 def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_sigma_large,
-             min_sep_allowed, sigma_bounds, y_offset=0, allowed_polygon=None, sf=3,
-             mode="fit"):
+             min_sep_allowed, sigma_bounds, y_offset=0, allowed_polygon=None, sf=3, use_max_filter=True,
+             mode="fit", use_gpu_fit=GPUFIT_AVAILABLE, use_gpu_filter=True):
     """
     :param imgs: raw OPM data
     :param params: {"dc", "dstage", "theta"}
@@ -1420,8 +1351,8 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     # smooth image and remove background with difference of gaussians filter
     tstart = time.process_time()
 
-    imgs_filtered_small, ks = filter_gauss(imgs, filter_sigma_small, dc, theta, stage_step, sigma_cutoff=2)
-    imgs_filtered_large, kl = filter_gauss(imgs, filter_sigma_large, dc, theta, stage_step, sigma_cutoff=2)
+    imgs_filtered_small, ks = filter_gauss(imgs, filter_sigma_small, dc, theta, stage_step, sigma_cutoff=2, use_gpu=use_gpu_filter)
+    imgs_filtered_large, kl = filter_gauss(imgs, filter_sigma_large, dc, theta, stage_step, sigma_cutoff=2, use_gpu=use_gpu_filter)
     imgs_filtered = imgs_filtered_small - imgs_filtered_large
 
     tend = time.process_time()
@@ -1438,15 +1369,15 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
 
     tstart = time.process_time()
     # identify points above threshold (either naively or using max filter)
-    if False:
+    if use_max_filter:
+        centers_guess_inds = skimage.feature.peak_local_max(imgs_filtered * mask, min_distance=1, threshold_abs=abs_threshold,
+                                            exclude_border=False, num_peaks=np.inf)
+    else:
         ispeak = imgs_filtered * mask > abs_threshold
 
         # get indices of points above threshold
         coords = np.meshgrid(*[range(imgs.shape[ii]) for ii in range(imgs.ndim)], indexing="ij")
         centers_guess_inds = np.concatenate([c[ispeak][:, None] for c in coords], axis=1)
-    else:
-        centers_guess_inds = skimage.feature.peak_local_max(imgs_filtered * mask, min_distance=1, threshold_abs=abs_threshold,
-                                            exclude_border=False, num_peaks=np.inf)
 
     # convert to xyz coordinates
     xc = x[0, 0, centers_guess_inds[:, 2]]
@@ -1477,22 +1408,62 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     roi_size_skew = get_roi_size(roi_size, theta, dc, stage_step, ensure_odd=True)
     rois, xrois, yrois, zrois = zip(*[get_tilted_roi(c, x, y, z, roi_size_skew, imgs.shape) for c in centers_guess])
     rois = np.asarray(rois)
+
     # exclude some regions of roi
     roi_masks = [get_roi_mask(c, 0.5 * roi_size[1], np.inf, xrois[ii], yrois[ii], zrois[ii]) for ii, c in enumerate(centers_guess)]
 
     if mode == "fit":
         print("starting fitting for %d rois" % centers_guess.shape[0])
-        results = joblib.Parallel(n_jobs=-1, verbose=1, timeout=None)(
-                  joblib.delayed(fit_roi)(get_roi(rois[ii], imgs_filtered) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
-                                          init_params=[None, centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], None, None, None])
-                  for ii in range(len(centers_guess)))
-        # results = []
-        # for ii in range(len(centers_guess)):
-        #     print(ii)
-        #     results.append(fit_roi(get_roi(rois[ii], imgs) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
-        #     init_params=[None, centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], None, None, None]))
+        tstart = time.perf_counter()
 
-        fit_params = np.asarray([r["fit_params"] for r in results])
+        if use_gpu_fit:
+
+            # exclude rois near edge
+            roi_sizes = np.array([(r[1] - r[0]) * (r[3] - r[2]) * (r[5] - r[4]) for r in rois])
+            to_keep = roi_sizes == roi_sizes.max()
+
+            rois = rois[to_keep]
+            xrois, yrois, zrois, roi_masks = zip(*[(x, y, z, r) for x, y, z, r, k in zip(xrois, yrois, zrois, roi_masks, to_keep) if k])
+            roi_mask = roi_masks[0].astype(np.bool)
+            centers_temp = centers_guess[to_keep]
+
+            print("Kept %d points away from boundary" % np.sum(to_keep))
+
+            print("using parallelization on GPU")
+
+            imgs_roi = [get_roi(r, imgs)[roi_mask].astype(np.float32)[None, :] for r in rois]
+
+            data = np.concatenate(imgs_roi, axis=0)
+            data = data.astype(np.float32)
+
+            coords = [np.broadcast_arrays(x, y, z) for x, y, z in zip(xrois, yrois, zrois)]
+            user_info = np.concatenate([np.concatenate((c[0][roi_mask], c[1][roi_mask], c[2][roi_mask])) for c in coords])
+            user_info = user_info.astype(dtype=np.float32)
+
+            nfits, n_pts_per_fit = data.shape
+            init_params = np.concatenate((100 * np.ones((nfits, 1)), centers_temp[:, 2][:, None],
+                                          centers_temp[:, 1][:, None], centers_temp[:, 0][:, None],
+                                          0.14 * np.ones((nfits, 1)), 0.4 * np.ones((nfits, 1)), 0 * np.ones((nfits, 1))), axis=1)
+            init_params = init_params.astype(np.float32)
+
+            fit_params, fit_states, chi_sqrs, niters, fit_t = gf.fit(data, None, gf.ModelID.GAUSS_3D_ARB, init_params,
+                                                                     max_number_iterations=100,
+                                                                     estimator_id=gf.EstimatorID.LSE,
+                                                                     user_info=user_info)
+        else:
+            print("using multiprocessor parallelization on CPU")
+            results = joblib.Parallel(n_jobs=-1, verbose=1, timeout=None)(
+                      joblib.delayed(fit_roi)(get_roi(rois[ii], imgs_filtered) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
+                                              init_params=[None, centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], None, None, None])
+                      for ii in range(len(centers_guess)))
+            # results = []
+            # for ii in range(len(centers_guess)):
+            #     print(ii)
+            #     results.append(fit_roi(get_roi(rois[ii], imgs) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
+            #     init_params=[None, centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], None, None, None]))
+
+            fit_params = np.asarray([r["fit_params"] for r in results])
+
     elif mode == "radial-symmetry":
         print("starting radial-symmetry localization for %d rois" % len(centers_guess))
 
@@ -1518,6 +1489,8 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
         # print("radial-symmetry localzation for %d rois in %0.2fs" % (centers_guess.shape[0], tend - tstart))
     else:
         raise ValueError
+    tend = time.perf_counter()
+    print("Localization took %0.2fs" % (tend - tstart))
 
     centers_fit = np.concatenate((fit_params[:, 3][:, None], fit_params[:, 2][:, None], fit_params[:, 1][:, None]), axis=1)
 
