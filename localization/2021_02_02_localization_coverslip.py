@@ -95,7 +95,8 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
         os.mkdir(save_dir_sub)
 
     imgs = ds_array[aa - n_overlap:aa + nsingle].compute()
-    imgs = np.flip(imgs, axis=1) # to mach the conventions I have been using
+    # imgs = np.flip(imgs, axis=1) # to mach the conventions I have been using
+    imgs = np.flip(imgs, axis=0)  # to match deskew convention...
     npos, ny, nx = imgs.shape
     gn = np.arange(npos) * dstage
 

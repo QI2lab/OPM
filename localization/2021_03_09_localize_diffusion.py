@@ -114,7 +114,8 @@ for vv in range(nvols):
         if imgs.shape[0] == 0:
             break
 
-        imgs = np.flip(imgs, axis=1) # to match the conventions I have been using
+        # imgs = np.flip(imgs, axis=1) # to match the conventions I have been using
+        imgs = np.flip(imgs, axis=0)  # to match deskew convention...
 
         tend_load = time.process_time()
         print("loaded images in %0.2fs" % (tend_load - tstart_load))

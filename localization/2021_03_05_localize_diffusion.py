@@ -98,7 +98,8 @@ for vv in range(nvols):
         imgs = np.zeros((nimgs_temp, nyp, nxp))
         for kk in range(img_start, img_end):
             imgs[kk] = tifffile.imread(fnames[vv * nimgs + kk])
-        imgs = np.flip(imgs, axis=1) # to mach the conventions I have been using
+        # imgs = np.flip(imgs, axis=1) # to mach the conventions I have been using
+        imgs = np.flip(imgs, axis=0)  # to match deskew convention...
 
         # get image coordinates
         npos, ny, nx = imgs.shape

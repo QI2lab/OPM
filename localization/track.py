@@ -35,6 +35,7 @@ nmin_traj = 5
 # inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
 
 root_dir = r"\\10.206.26.21\opm2\20210408n\glycerol60x_1\2021_04_12_10;37;46_localization"
+# root_dir = r"\\10.206.26.21\opm2\20210408n\glycerol60x_1\2021_04_20_16;15;27_localization"
 data_files = glob.glob(os.path.join(root_dir, "localization_results*.pkl"))
 inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
 

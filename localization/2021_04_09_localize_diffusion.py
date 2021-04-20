@@ -17,9 +17,10 @@ plot_results = False
 figsize = (16, 8)
 
 # paths to image files
-# root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
-root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
+root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
+# root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 # root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
+dset_dir, _ = os.path.split(root_dir)
 
 fnames = glob.glob(os.path.join(root_dir, "*.tif"))
 # gets messy because first file does not have a number label...
@@ -106,13 +107,14 @@ for vv in range(nvols):
 
         # load images
         tstart_load = time.process_time()
-        imgs, imgs_inds = load_dataset.load_volume(fnames, vv, nimgs_per_vol, chunk_index=chunk_counter,
+        imgs, imgs_inds = load_dataset.load_volume(dset_dir, vv, nimgs_per_vol, chunk_index=chunk_counter,
                                                    imgs_per_chunk=100, n_chunk_overlap=3, mode="ndtiff")
         # if no images returned, we are done
         if imgs.shape[0] == 0:
             break
 
-        imgs = np.flip(imgs, axis=1) # to match the conventions I have been using
+        # imgs = np.flip(imgs, axis=1) # to match the conventions I have been using
+        imgs = np.flip(imgs, axis=0) # to match deskew convention...
 
         tend_load = time.process_time()
         print("loaded images in %0.2fs" % (tend_load - tstart_load))

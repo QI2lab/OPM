@@ -70,9 +70,9 @@ def load_volume(fnames, vol_index, imgs_per_vol, chunk_index=0, imgs_per_chunk=1
 
     elif mode == "ndtiff":
         # clearly don't want to load dataset everytime...but for the moment to allow me to switch modes easily...
-        dir_one_up, _ = os.path.split(fnames[0])
-        dir_two_up, _ = os.path.split(dir_one_up)
-        ds = pycromanager.Dataset(dir_two_up)
+        # dir_one_up, _ = os.path.split(fnames[0])
+        # dir_two_up, _ = os.path.split(dir_one_up)
+        ds = pycromanager.Dataset(fnames)
 
         # indices of planes in volume
         img_start = int(np.max([chunk_index * imgs_per_chunk - n_chunk_overlap, 0]))

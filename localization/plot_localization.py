@@ -27,13 +27,13 @@ auto_track_cz = False
 # analysis_dir = glob.glob(os.path.join(root_dir, "..", "2021_04*"))[-1]
 # mode = "ndtiff"
 
-# root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
-# analysis_dir = glob.glob(os.path.join(root_dir, "..", "2021_04*"))[-1]
-# mode = "ndtiff"
-
-root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
+root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 analysis_dir = glob.glob(os.path.join(root_dir, "..", "2021_04*"))[-1]
 mode = "ndtiff"
+
+# root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
+# analysis_dir = glob.glob(os.path.join(root_dir, "..", "2021_04*"))[-1]
+# mode = "ndtiff"
 
 # scan data
 if mode == "hcimage":
