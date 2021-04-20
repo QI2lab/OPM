@@ -269,7 +269,7 @@ def main():
 
     # save galvo scan parameters
     scan_param_data = [{'root_name': str(save_name),
-                        'scan type': 'galvo',
+                        'scan_type': 'galvo',
                         'theta': 30.0, 
                         'scan_step': scan_axis_step_um*1000., 
                         'pixel_size': pixel_size_um*1000.,
@@ -347,3 +347,4 @@ def main():
 # run
 if __name__ == "__main__":
     main()
+    

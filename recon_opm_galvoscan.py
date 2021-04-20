@@ -86,23 +86,6 @@ def main(argv):
         # df_metadata = pd.read_csv(input_dir_path / 'scan_metadata.csv')
         df_metadata = data_io.read_metadata(input_dir_path / 'scan_metadata.csv')
 
-    # root_name = str(df_metadata['root_name'][0])
-    # scan_type = str(df_metadata['scan_type'][0])
-    # theta = float(df_metadata['theta'][0])
-    # scan_step = float(df_metadata['scan_step'][0])
-    # pixel_size = float(df_metadata['pixel_size'][0])
-    # num_t = int(df_metadata['num_t'][0])
-    # num_y = int(df_metadata['num_y'][0])
-    # num_z  = int(df_metadata['num_z'][0])
-    # num_ch = int(df_metadata['num_ch'][0])
-    # num_images = int(df_metadata['scan_axis_positions'][0])
-    # y_pixels = int(df_metadata['y_pixels'][0])
-    # x_pixels = int(df_metadata['x_pixels'][0])
-    # chan_405_active = df_metadata['405_active'][0]
-    # chan_488_active = df_metadata['488_active'][0]
-    # chan_561_active = df_metadata['561_active'][0]
-    # chan_635_active = df_metadata['635_active'][0]
-    # chan_730_active = df_metadata['730_active'][0]
     root_name = df_metadata['root_name']
     scan_type = df_metadata['scan_type']
     theta = df_metadata['theta']
@@ -135,23 +118,28 @@ def main(argv):
         output_dir_path = Path(output_dir_string)
   
     # load data
-    if acq_type==0:
+    if acq_type == 0:
         dataset = Dataset(str(input_dir_path))
         dask_array_raw = dataset.as_array()
         dask_array_raw = np.squeeze(dask_array_raw)
+
         # check which axes match experimental metadata
         dataset_shape = dask_array_raw.shape
         for i in range(len(dataset_shape)):
-            if not(num_t==1) and (dataset_shape[i]==num_t):
+            if not(num_t == 1) and (dataset_shape[i] == num_t):
                 timepoint_axis = i
-            elif not(num_ch==1) and (dataset_shape[i]==num_ch):
+            elif not(num_ch == 1) and (dataset_shape[i] == num_ch):
                 channel_axis = i
-            elif  dataset_shape[i]==num_images:
+            elif dataset_shape[i] == num_images:
                 scan_axis = i
-            elif  dataset_shape[i]==y_pixels:
+            elif dataset_shape[i] == y_pixels:
                 y_axis = i
-            elif  dataset_shape[i]==x_pixels:
+            elif dataset_shape[i] == x_pixels:
                 x_axis = i
+            else:
+                raise ValueError("Could not identify dataset axis %d with size %d" % (i, dataset_shape[i]))
+
+
         # reorder dask array to [time,channel,scan,y,x]
         if len(dataset_shape) == 5:
             dask_array = da.moveaxis(dask_array_raw,[timepoint_axis,channel_axis,scan_axis,y_axis,x_axis],[0,1,2,3,4])
@@ -304,7 +292,8 @@ def main(argv):
 
     # write BDV xml file
     # https://github.com/nvladimus/npy2bdv
-    bdv_writer.write_xml_file(ntimes=num_t)
+    #bdv_writer.write_xml(ntimes=num_t)
+    bdv_writer.write_xml()
     bdv_writer.close()
 
     # shut down pyimagej
@@ -318,3 +307,4 @@ def main(argv):
 # run
 if __name__ == "__main__":
     main(sys.argv[1:])
+    
