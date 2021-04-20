@@ -281,7 +281,8 @@ def main(argv):
 
     # write BDV xml file
     # https://github.com/nvladimus/npy2bdv
-    bdv_writer.write_xml_file(ntimes=num_t)
+    # bdv_writer.write_xml(ntimes=num_t)
+    bdv_writer.write_xml()
     bdv_writer.close()
 
     # call BigStitcher to stitch, ICP for chromatic and tile correction, and save updated XML
@@ -297,3 +298,4 @@ def main(argv):
 # run
 if __name__ == "__main__":
     main(sys.argv[1:])
+    
