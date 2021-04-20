@@ -18,8 +18,8 @@ figsize = (16, 8)
 
 # paths to image files
 # root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
-root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
-# root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
+#root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
+root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 
 fnames = glob.glob(os.path.join(root_dir, "*.tif"))
 # gets messy because first file does not have a number label...
