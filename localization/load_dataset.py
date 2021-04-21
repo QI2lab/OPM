@@ -1,44 +1,9 @@
 """
 Load image data and/or metadata
 """
-import os
-import re
 import numpy as np
 import tifffile
 import pycromanager
-
-def read_metadata(fname):
-    """
-    Read data from CSV file consisting of one line giving titles, and the other giving values
-    :param fname:
-    :return:
-    """
-    scan_data_raw_lines = []
-
-    with open(fname, "r") as f:
-        for line in f:
-            scan_data_raw_lines.append(line.replace("\n", ""))
-
-    titles = scan_data_raw_lines[0].split(",")
-    vals = scan_data_raw_lines[1].split(",")
-    for ii in range(len(vals)):
-        if re.fullmatch("\d+", vals[ii]):
-            vals[ii] = int(vals[ii])
-        elif re.fullmatch("\d+.\d+", vals[ii]):
-            vals[ii] = float(vals[ii])
-        elif vals[ii] == "False":
-            vals[ii] = False
-        elif vals[ii] == "True":
-            vals[ii] = True
-        else:
-            # otherwise, leave as string
-            pass
-
-    metadata = {}
-    for t, v in zip(titles, vals):
-        metadata[t] = v
-
-    return metadata
 
 def load_volume(fnames, vol_index, imgs_per_vol, chunk_index=0, imgs_per_chunk=100, n_chunk_overlap=3, mode="hcimage"):
     """

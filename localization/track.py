@@ -10,7 +10,7 @@ import scipy.optimize
 import trackpy as tp
 import pandas as pd
 import matplotlib.pyplot as plt
-import load_dataset
+import data_io
 
 figsize = (16, 8)
 nmin_traj = 5
@@ -34,8 +34,10 @@ nmin_traj = 5
 # data_files = glob.glob(os.path.join(root_dir, "localization_results*.pkl"))
 # inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
 
-root_dir = r"\\10.206.26.21\opm2\20210408n\glycerol60x_1\2021_04_12_10;37;46_localization"
+# root_dir = r"\\10.206.26.21\opm2\20210408n\glycerol60x_1\2021_04_12_10;37;46_localization"
 # root_dir = r"\\10.206.26.21\opm2\20210408n\glycerol60x_1\2021_04_20_16;15;27_localization"
+# root_dir = r"\\10.206.26.21\opm2\20210408n\glycerol60x_1\2021_04_20_18;15;17_localization"
+root_dir = r"\\10.206.26.21\opm2\20210408m\glycerol50x_1\2021_04_20_17;09;52_localization"
 data_files = glob.glob(os.path.join(root_dir, "localization_results*.pkl"))
 inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
 
@@ -43,7 +45,7 @@ inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
 scan_data_path = os.path.join(root_dir, "..", "..", "scan_metadata.csv")
 
 # read useful metadata
-scan_data = load_dataset.read_metadata(scan_data_path)
+scan_data = data_io.read_metadata(scan_data_path)
 
 frames_per_vol = scan_data["scan_axis_positions"]
 # frames_per_vol = 25

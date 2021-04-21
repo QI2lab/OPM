@@ -9,6 +9,7 @@ import pickle
 import localize
 import load_dataset
 import pycromanager
+import data_io
 
 tbegin = time.perf_counter()
 
@@ -18,9 +19,9 @@ plot_results = False
 figsize = (16, 8)
 
 # paths to image files
-#root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
+root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
 # root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
-root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
+# root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 # root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 dset_dir, _ = os.path.split(root_dir)
 
@@ -36,7 +37,7 @@ scan_data_dir = os.path.join(root_dir, "..", "..", "scan_metadata.csv")
 # ###############################
 # load/set scan parameters
 # ###############################
-scan_data = load_dataset.read_metadata(scan_data_dir)
+scan_data = data_io.read_metadata(scan_data_dir)
 
 nvols = scan_data["num_t"]
 nimgs_per_vol = scan_data["scan_axis_positions"]
@@ -116,7 +117,7 @@ for vv in range(nvols):
     while more_chunks:
 
         # load images
-        tstart_load = time.process_time()
+        tstart_load = time.perf_counter()
         #imgs, imgs_inds = load_dataset.load_volume(dset_dir, vv, nimgs_per_vol, chunk_index=chunk_counter,
         #                                          imgs_per_chunk=100, n_chunk_overlap=3, mode="ndtiff")
         img_start = int(np.max([chunk_counter * imgs_per_chunk - n_chunk_overlap, 0]))
@@ -135,7 +136,7 @@ for vv in range(nvols):
         # imgs = np.flip(imgs, axis=1) # to match the conventions I have been using
         imgs = np.flip(imgs, axis=0) # to match deskew convention...
 
-        tend_load = time.process_time()
+        tend_load = time.perf_counter()
         print("loaded images in %0.2fs" % (tend_load - tstart_load))
 
         # get image coordinates

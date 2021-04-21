@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import pickle
 import os
 import localize
-import load_dataset
+import data_io
 
 plot_guesses = False
 plot_tracks = True
@@ -54,7 +54,7 @@ if mode == "hcimage":
 
 elif mode == "ndtiff":
     scan_data_fname = os.path.join(root_dir, "..", "..", "scan_metadata.csv")
-    scan_data = load_dataset.read_metadata(scan_data_fname)
+    scan_data = data_io.read_metadata(scan_data_fname)
     dc = scan_data["pixel_size"] / 1000
     theta = scan_data["theta"] * np.pi/180
     nstage = scan_data["scan_axis_positions"]

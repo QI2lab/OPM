@@ -15,6 +15,7 @@ import joblib
 # for Fourier space filtering on GPU
 import cupy as cp
 import cupyx.scipy.signal # new in v9, compiled github source
+import cupyx.scipy.ndimage
 # for fitting on GPU
 try:
     import pygpufit.gpufit as gf
@@ -137,6 +138,7 @@ def find_trapezoid_cy(cz, coords):
     cy = 0.5 * (ymax + ymin)
 
     return cy, ymax, ymin
+
 
 def interp_opm_data(imgs, dc, ds, theta, mode="ortho-interp"):
     """
@@ -351,9 +353,7 @@ def gaussian3d_pixelated_psf_jac(x, y, z, ds, normal, p, sf):
 
 def fit_model(img, model_fn, init_params, fixed_params=None, sd=None, bounds=None, model_jacobian=None, **kwargs):
     """
-    # todo: to be fully general, maybe should get rid of the img argument and only take model_fn. Then this function
-    # todo: can be used as a wrapper for least_squares, but adding the ability to fix parameters
-    # todo: added function below fit_least_squares(). This function should now call that one
+
     Fit 2D model function
     :param np.array img: nd array
     :param model_fn: function f(p)
@@ -654,7 +654,7 @@ def get_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     return [n0, n1, n2]
 
 
-def get_tilted_roi(center, x, y, z, sizes, shape, img=None, pad=True):
+def get_tilted_roi(center, x, y, z, sizes, shape):
     """
 
     :param center: [cz, cy, cx]
@@ -762,65 +762,6 @@ def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, s
     results = fit_model(img_roi, model_fn, init_params, bounds=bounds, fixed_params=fixed_params, model_jacobian=jac_fn)
 
     return results
-
-
-def iterative_fit_roi(c_guess, imgs, dc, theta, x, y, z, xy_roi_size, z_roi_size, center_max_dist_good_guess, nmax_try=3):
-    """
-    Fit ROI until center converges
-    :param imgs:
-    :param c_guess:
-    :param x:
-    :param y:
-    :param z:
-    :param xy_roi_size: required xy half distance to be included in ROI
-    :param z_roi_size: required z half distance to be included in ROI
-    :param center_max_dist_good_guess:
-    :param nmax_try:
-    :return:
-    """
-    dstep = y[1, 0, 0] - y[0, 0, 0]
-    nzp, nyp, nxp = get_roi_size([z_roi_size, xy_roi_size, xy_roi_size], theta, dc, dstep, ensure_odd=True)
-
-    centers_sequence = np.zeros((nmax_try, 3)) * np.nan
-    centers_sequence[0] = c_guess
-
-    ntry = 0
-    while 1:
-        # get ROI from center guess
-        roi, x_roi, y_roi, z_roi = get_tilted_roi(centers_sequence[ntry], x, y, z, [nzp, nyp, nxp], imgs.shape)
-        img_roi = np.array(imgs[roi[0]:roi[1], roi[2]:roi[3], roi[4]:roi[5]], dtype=np.float)
-
-        # roi is parallelogram, so still want to cut out points which are too far from center
-        too_far_xy = np.sqrt((x_roi - centers_sequence[ntry, 2]) ** 2 + (y_roi - centers_sequence[ntry, 1]) ** 2) > 0.5 * xy_roi_size
-        img_roi[too_far_xy] = np.nan
-
-        # e.g. if point is outside the image
-        if not point_in_trapezoid(centers_sequence[ntry], x_roi, y_roi, z_roi) and ntry > 1:
-            break
-
-        init_params = [None, centers_sequence[ntry, 2], centers_sequence[ntry, 1], centers_sequence[ntry, 0], None, None, None]
-        # gaussian fitting localization
-        results = fit_roi(img_roi, (z_roi, y_roi, x_roi), init_params=init_params)
-
-        # if fit center is close enough to guess, assume ROI was a good choice and move on
-        # if not, update ROI and try again
-        c_fit = np.array([results["fit_params"][3], results["fit_params"][2], results["fit_params"][1]])
-        c_fit_guess_dist = np.sqrt(np.sum((c_fit - centers_sequence[ntry]) ** 2))
-
-        # if exceeded maximum number of tries or fit is high quality, break out of loop
-        ntry += 1
-        if ntry >= nmax_try or c_fit_guess_dist < center_max_dist_good_guess:
-            break
-        else:
-            # otherwise, update center guess and re-fit
-            centers_sequence[ntry] = c_fit
-    # except:
-    #     results = {"fit_params", np.zeros(7)}
-
-    # store results
-    fit_params = results["fit_params"]
-
-    return fit_params, ntry, roi, centers_sequence
 
 
 def plot_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, figsize=(16, 8),
@@ -1018,51 +959,6 @@ def plot_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, figsize=(
     return figh_interp, figh_raw
 
 # localization functions
-def find_candidate_beads(img, filter_xy_pix=1, filter_z_pix=0.5, min_distance=1, abs_thresh_std=1,
-                         max_thresh=-np.inf, max_num_peaks=np.inf,
-                         mode="max_filter"):
-    """
-    Find candidate beads in image. Based on function from mesoSPIM-PSFanalysis
-
-    :param img: 2D or 3D image
-    :param filter_xy_pix: standard deviation of Gaussian filter applied to image in xy plane before peak finding
-    :param filter_z_pix:
-    :param min_distance: minimum allowable distance between peaks
-    :param abs_thresh_std: absolute threshold for identifying peaks, as a multiple of the image standard deviation
-    :param abs_thresh: absolute threshold, in raw counts. If both abs_thresh_std and abs_thresh are provided, the
-    maximum value will be used
-    :param max_num_peaks: maximum number of peaks to find.
-
-    :return centers: np.array([[cz, cy, cx], ...])
-    """
-
-    # gaussian filter to smooth image before peak finding
-    if img.ndim == 3:
-        filter_sds = [filter_z_pix, filter_xy_pix, filter_xy_pix]
-    elif img.ndim == 2:
-        filter_sds = filter_xy_pix
-    else:
-        raise ValueError("img should be a 2 or 3 dimensional array, but was %d dimensional" % img.ndim)
-
-    smoothed = skimage.filters.gaussian(img, filter_sds, output=None, mode='nearest', cval=0,
-                                        multichannel=None, preserve_range=True)
-
-    # set threshold value
-    abs_threshold = np.max([smoothed.mean() + abs_thresh_std * img.std(), max_thresh])
-
-    if mode == "max_filter":
-        centers = skimage.feature.peak_local_max(smoothed, min_distance=min_distance, threshold_abs=abs_threshold,
-                                                 exclude_border=False, num_peaks=max_num_peaks)
-    elif mode == "threshold":
-        ispeak = smoothed > abs_threshold
-        # get indices of points above threshold
-        coords = np.meshgrid(*[range(img.shape[ii]) for ii in range(img.ndim)], indexing="ij")
-        centers = np.concatenate([c[ispeak][:, None] for c in coords], axis=1)
-    else:
-        raise ValueError("mode must be 'max_filter', or 'threshold', but was '%s'" % mode)
-
-    return centers
-
 
 def filter_gauss(imgs, sigmas, dc, theta, dstage, sigma_cutoff=2, use_gpu=True):
     """
@@ -1098,17 +994,16 @@ def filter_gauss(imgs, sigmas, dc, theta, dstage, sigma_cutoff=2, use_gpu=True):
 
     # convolve, and deal with edges by normalizing
     # todo: is there a wrap around issue, where this blends opposite edges?
-    # todo: can replace this with CuPy
     if use_gpu:
-        kernel_cp = cp.asarray(kernel)
-        imgs_cp = cp.asarray(imgs)
+        kernel_cp = cp.asarray(kernel, dtype=cp.float32)
+        imgs_cp = cp.asarray(imgs, dtype=cp.float32)
         imgs_filtered = cp.asnumpy(cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")/
                                    cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same"))
     else:
         imgs_filtered = scipy.signal.fftconvolve(imgs, kernel, mode="same") / \
              scipy.signal.fftconvolve(np.ones(imgs.shape), kernel, mode="same")
 
-    # this method too slow for large fitler sizes
+    # this method too slow for large filter sizes
     # imgs_filtered = scipy.ndimage.convolve(imgs, kernel, mode="constant", cval=0) / \
     #                 scipy.ndimage.convolve(np.ones(imgs.shape), kernel, mode="constant", cval=0)
 
@@ -1125,6 +1020,8 @@ def combine_nearby_peaks(centers, min_xy_dist, min_z_dist, mode="average", weigh
     :param weights:
     :return:
     """
+    # todo: looks like this might be easier if use some tools from scipy.spatial, scipy.spatial.cKDTree
+
     centers_unique = np.array(centers, copy=True)
     inds = np.arange(len(centers), dtype=np.int)
 
@@ -1205,7 +1102,6 @@ def localize_radial_symm(img, coords, mode="radial-symmetry"):
 
     nstep, ni1, ni2 = img.shape
     z, y, x = coords
-    # x, y, z = get_lab_coords(ni2, ni1, dc, theta, stage_step * np.arange(nstep))
 
     if mode == "centroid":
         w = np.nansum(img)
@@ -1349,35 +1245,58 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     y += y_offset
 
     # smooth image and remove background with difference of gaussians filter
-    tstart = time.process_time()
+    tstart = time.perf_counter()
 
     imgs_filtered_small, ks = filter_gauss(imgs, filter_sigma_small, dc, theta, stage_step, sigma_cutoff=2, use_gpu=use_gpu_filter)
     imgs_filtered_large, kl = filter_gauss(imgs, filter_sigma_large, dc, theta, stage_step, sigma_cutoff=2, use_gpu=use_gpu_filter)
     imgs_filtered = imgs_filtered_small - imgs_filtered_large
 
-    tend = time.process_time()
+    tend = time.perf_counter()
     print("Filtered images in %0.2fs" % (tend - tstart))
 
+    tstart = time.perf_counter()
     # mask will filter out some points
     if allowed_polygon is None:
-        mask = np.expand_dims(np.ones(imgs_filtered[0].shape), axis=0)
+        mask = np.expand_dims(np.ones(imgs_filtered[0].shape, dtype=np.bool), axis=0)
     else:
         p = Path(allowed_polygon)
         xx, yy = np.meshgrid(range(imgs.shape[2]), range(imgs.shape[1]))
         rs = np.concatenate((xx.ravel()[:, None], yy.ravel()[:, None]), axis=1)
         mask = p.contains_points(rs).reshape([1, imgs.shape[1], imgs.shape[2]])
+    tend = time.perf_counter()
+    print("Masked region in %0.2fs" % (tend - tstart))
 
-    tstart = time.process_time()
+    tstart = time.perf_counter()
     # identify points above threshold (either naively or using max filter)
-    if use_max_filter:
+    if False:
         centers_guess_inds = skimage.feature.peak_local_max(imgs_filtered * mask, min_distance=1, threshold_abs=abs_threshold,
                                             exclude_border=False, num_peaks=np.inf)
-    else:
+    elif False:
         ispeak = imgs_filtered * mask > abs_threshold
 
         # get indices of points above threshold
         coords = np.meshgrid(*[range(imgs.shape[ii]) for ii in range(imgs.ndim)], indexing="ij")
         centers_guess_inds = np.concatenate([c[ispeak][:, None] for c in coords], axis=1)
+    else:
+
+        footprint_roi_size = get_roi_size(min_sep_allowed, theta, dc, stage_step, ensure_odd=True)
+        footprint_form = np.ones(footprint_roi_size, dtype=np.bool)
+        xf, yf, zf = get_lab_coords(footprint_form.shape[2], footprint_form.shape[1], dc, theta, stage_step * np.arange(footprint_form.shape[0]))
+        xf = xf - xf.mean()
+        yf = yf - yf.mean()
+        zf = zf - zf.mean()
+        footprint_mask = get_roi_mask((0, 0, 0), min_sep_allowed[1], min_sep_allowed[0], xf, yf, zf)
+        footprint_mask[np.isnan(footprint_mask)] = 0
+        footprint_mask = footprint_mask.astype(np.bool)
+        if use_gpu_filter:
+            imgs_filtered = imgs_filtered.astype(np.float32)
+            img_max_filtered = cp.asnumpy(cupyx.scipy.ndimage.maximum_filter(cp.asarray(imgs_filtered * mask, dtype=cp.float32),
+                                                                             footprint=cp.asarray(footprint_form * footprint_mask)))
+        else:
+            img_max_filtered = cupyx.scipy.ndimage.maximum_filter(imgs_filtered * mask, footprint=footprint_form * footprint_mask)
+
+        centers_guess_inds = np.argwhere(np.logical_and(imgs_filtered == img_max_filtered, imgs_filtered > abs_threshold))
+
 
     # convert to xyz coordinates
     xc = x[0, 0, centers_guess_inds[:, 2]]
@@ -1385,12 +1304,12 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     zc = z[0, centers_guess_inds[:, 1], 0]  # z-position is determined by the y'-index in OPM image
     centers_guess = np.concatenate((zc[:, None], yc[:, None], xc[:, None]), axis=1)
 
-    tend = time.process_time()
+    tend = time.perf_counter()
     print("Found %d points above threshold in %0.2fs" % (len(centers_guess), tend - tstart))
 
     # average multiple points too close together. Necessary bc if naive threshold, may identify several points
     # from same spot. Particularly important if spots have very different brightness levels.
-    tstart = time.process_time()
+    tstart = time.perf_counter()
 
     inds = np.ravel_multi_index(centers_guess_inds.transpose(), imgs_filtered.shape)
     weights = imgs_filtered.ravel()[inds]
@@ -1400,10 +1319,11 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     in_region = point_in_trapezoid(centers_guess, x, y, z)
     centers_guess = centers_guess[in_region]
 
-    tend = time.process_time()
+    tend = time.perf_counter()
     print("Found %d points separated by dxy > %0.5g and dz > %0.5g and in allowed region in %0.1fs" %
           (len(centers_guess), min_sep_allowed[1], min_sep_allowed[0], tend - tstart))
 
+    tstart = time.perf_counter()
     # get rois and coordinates for each center
     roi_size_skew = get_roi_size(roi_size, theta, dc, stage_step, ensure_odd=True)
     rois, xrois, yrois, zrois = zip(*[get_tilted_roi(c, x, y, z, roi_size_skew, imgs.shape) for c in centers_guess])
@@ -1411,6 +1331,8 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
 
     # exclude some regions of roi
     roi_masks = [get_roi_mask(c, 0.5 * roi_size[1], np.inf, xrois[ii], yrois[ii], zrois[ii]) for ii, c in enumerate(centers_guess)]
+    tend = time.perf_counter()
+    print("Prepared %d rois in %0.2fs" % (len(rois), tend - tstart))
 
     if mode == "fit":
         print("starting fitting for %d rois" % centers_guess.shape[0])
@@ -1492,6 +1414,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     tend = time.perf_counter()
     print("Localization took %0.2fs" % (tend - tstart))
 
+    tstart = time.perf_counter()
     centers_fit = np.concatenate((fit_params[:, 3][:, None], fit_params[:, 2][:, None], fit_params[:, 1][:, None]), axis=1)
 
     # only keep points if size and position were reasonable
@@ -1505,17 +1428,20 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
                                     fit_params[:, 5] <= sigmas_max_keep[0],
                                     fit_params[:, 5] >= sigmas_min_keep[0]))
 
+    tend = time.perf_counter()
     print("identified %d valid localizations with centers in bounds,"
-          " %0.5g <= sx <= %0.5g, %0.5g <= sy <= %0.5g and %0.5g <= sz <= %0.5g " %
+          " %0.5g <= sx <= %0.5g, %0.5g <= sy <= %0.5g and %0.5g <= sz <= %0.5g in %0.3f" %
           (np.sum(to_keep), sigmas_min_keep[2], sigmas_max_keep[2], sigmas_min_keep[1], sigmas_max_keep[1],
-           sigmas_min_keep[0], sigmas_max_keep[0]))
+           sigmas_min_keep[0], sigmas_max_keep[0], tend - tstart))
 
+    tstart = time.perf_counter()
     # only keep unique center if close enough
     centers_unique, unique_inds = combine_nearby_peaks(centers_fit[to_keep], min_sep_allowed[1], min_sep_allowed[0], mode="keep-one")
     fit_params_unique = fit_params[to_keep][unique_inds]
     rois_unique = rois[to_keep][unique_inds]
-    print("identified %d unique points, dxy > %0.5g, and dz > %0.5g" %
-          (len(centers_unique), min_sep_allowed[1], min_sep_allowed[0]))
+    tend = time.perf_counter()
+    print("identified %d unique points, dxy > %0.5g, and dz > %0.5g in %0.3f" %
+          (len(centers_unique), min_sep_allowed[1], min_sep_allowed[0], tend - tstart))
 
     return imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess
 

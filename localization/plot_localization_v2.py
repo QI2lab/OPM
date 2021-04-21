@@ -14,14 +14,16 @@ import data_io
 import tifffile
 import os
 
-root_dir = r"\\10.206.26.21\opm2\20210408n"
-data_dir = os.path.join(root_dir, "glycerol60x_1")
-loc_data_dir = os.path.join(data_dir, "2021_04_20_16;15;27_localization")
+loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_20_18;15;17_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408m", "glycerol50x_1", "2021_04_20_17;09;52_localization")
+data_dir, _ = os.path.split(loc_data_dir)
+root_dir, _ = os.path.split(data_dir)
 loc_data_str = "localization_results_vol_%d.pkl"
 deskew_fname = os.path.join(root_dir, "full_deskew_only.h5")
 md_fname = os.path.join(root_dir, "scan_metadata.csv")
 track_fname = os.path.join(loc_data_dir, "tracks.pkl")
 plot_tracks = True
+plot_centers_guess = True
 
 # reader for deskewed dataset
 reader = npy2bdv.BdvEditor(deskew_fname)
@@ -38,6 +40,7 @@ pix_sizes = [md["pixel_size"] / 1000] * 3
 
 # load all localizations and convert to pixel coordinates
 centers = []
+centers_guess = []
 for ii in range(ntimes):
     data_fname = os.path.join(loc_data_dir, loc_data_str % ii)
 
@@ -51,28 +54,38 @@ for ii in range(ntimes):
                                    dat["centers"][:, 0][:, None] / pix_sizes[0],
                                    dat["centers"][:, 1][:, None] / pix_sizes[1],
                                    dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
+    centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
+                                   dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
+                                   dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
+                                   dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
 centers = np.concatenate(centers, axis=0)
+centers_guess = np.concatenate(centers_guess, axis=0)
 
 # load tracks
-with open(track_fname, "rb") as f:
-    track_data_pd = pickle.load(f)
+if os.path.exists(track_fname):
+    with open(track_fname, "rb") as f:
+        track_data_pd = pickle.load(f)
 
-pns_unq, inv = np.unique(track_data_pd["particle"], return_inverse=True)
-track_data_pd["particles unique"] = inv
-frames = np.unique(track_data_pd["frame"])
+    pns_unq, inv = np.unique(track_data_pd["particle"], return_inverse=True)
+    track_data_pd["particles unique"] = inv
+    frames = np.unique(track_data_pd["frame"])
 
-# track_data = np.zeros((len(pns_unq), len(frames), 3)) * np.nan
-# f = track_data_pd["frame"].values
-# p = track_data_pd["particles unique"].values
-# track_data[p, f, 2] = track_data_pd["xum"].values
-# track_data[p, f, 1] = track_data_pd["yum"].values
-# track_data[p, f, 0] = track_data_pd["zum"].values
-track_data = np.concatenate((np.expand_dims(track_data_pd["particles unique"].values, axis=1),
-                             np.expand_dims(track_data_pd["frame"].values, axis=1),
-                             np.expand_dims(track_data_pd["zum"].values / pix_sizes[0], axis=1),
-                             np.expand_dims(track_data_pd["yum"].values / pix_sizes[1], axis=1),
-                             np.expand_dims(track_data_pd["xum"].values / pix_sizes[2], axis=1)), axis=1)
-track_data = np.round(track_data).astype(np.int)
+    # track_data = np.zeros((len(pns_unq), len(frames), 3)) * np.nan
+    # f = track_data_pd["frame"].values
+    # p = track_data_pd["particles unique"].values
+    # track_data[p, f, 2] = track_data_pd["xum"].values
+    # track_data[p, f, 1] = track_data_pd["yum"].values
+    # track_data[p, f, 0] = track_data_pd["zum"].values
+    track_data = np.concatenate((np.expand_dims(track_data_pd["particles unique"].values, axis=1),
+                                 np.expand_dims(track_data_pd["frame"].values, axis=1),
+                                 np.expand_dims(track_data_pd["zum"].values / pix_sizes[0], axis=1),
+                                 np.expand_dims(track_data_pd["yum"].values / pix_sizes[1], axis=1),
+                                 np.expand_dims(track_data_pd["xum"].values / pix_sizes[2], axis=1)), axis=1)
+    track_data = np.round(track_data).astype(np.int)
+
+else:
+    plot_tracks = False
+
 
 # create lazy dask array of deskewed data
 # with npy2bdv
@@ -98,6 +111,9 @@ stack = da.stack(arr, axis=0)
 # plot with napari
 with napari.gui_qt():
     # specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
-    viewer = napari.view_image(stack, colormap="bone", contrast_limits=[0, 750], multiscale=False)
-    viewer.add_points(centers, size=1, face_color="red", opacity=0.5, n_dimensional=True)
-    viewer.add_tracks(track_data, opacity=1, blending="opaque", tail_length=20, tail_width=2)
+    viewer = napari.view_image(stack, colormap="bone", contrast_limits=[0, 750], multiscale=False, title=loc_data_dir)
+    viewer.add_points(centers, size=2, face_color="red", opacity=0.75, n_dimensional=True)
+    if plot_centers_guess:
+        viewer.add_points(centers_guess, size=2, face_color="green", opacity=0.5, n_dimensional=True)
+    if plot_tracks:
+        viewer.add_tracks(track_data, opacity=1, blending="opaque", tail_length=20, tail_width=2)
