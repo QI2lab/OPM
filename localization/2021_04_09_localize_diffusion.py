@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import pickle
 import localize
 import load_dataset
+import pycromanager
 
 tbegin = time.perf_counter()
 
@@ -17,9 +18,9 @@ plot_results = False
 figsize = (16, 8)
 
 # paths to image files
-root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
+#root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")
 # root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
-# root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
+root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 # root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
 dset_dir, _ = os.path.split(root_dir)
 
@@ -88,8 +89,16 @@ sigmas_max = (2 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
 allowed_camera_region = None
 
 # ###############################
+# load dataset
+# ###############################
+dset = pycromanager.Dataset(dset_dir)
+
+# ###############################
 # loop over volumes
 # ###############################
+
+imgs_per_chunk = 100
+n_chunk_overlap = 3
 volume_process_times = np.zeros(nvols)
 for vv in range(nvols):
     print("################################\nstarting volume %d/%d" % (vv + 1, nvols))
@@ -108,8 +117,17 @@ for vv in range(nvols):
 
         # load images
         tstart_load = time.process_time()
-        imgs, imgs_inds = load_dataset.load_volume(dset_dir, vv, nimgs_per_vol, chunk_index=chunk_counter,
-                                                   imgs_per_chunk=100, n_chunk_overlap=3, mode="ndtiff")
+        #imgs, imgs_inds = load_dataset.load_volume(dset_dir, vv, nimgs_per_vol, chunk_index=chunk_counter,
+        #                                          imgs_per_chunk=100, n_chunk_overlap=3, mode="ndtiff")
+        img_start = int(np.max([chunk_counter * imgs_per_chunk - n_chunk_overlap, 0]))
+        img_end = int(np.min([img_start + imgs_per_chunk, nimgs_per_vol]))
+
+        imgs = []
+        for kk in range(img_start, img_end):
+            imgs.append(dset.read_image(z=kk, t=vv, c=0))
+        imgs = np.asarray(imgs)
+        
+
         # if no images returned, we are done
         if imgs.shape[0] == 0:
             break
@@ -123,7 +141,7 @@ for vv in range(nvols):
         # get image coordinates
         npos, ny, nx = imgs.shape
         gn = np.arange(npos) * dstage
-        y_offset = imgs_inds[0] * dstage
+        y_offset = img_start * dstage
 
         # do localization
         imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize(
@@ -182,10 +200,9 @@ for vv in range(nvols):
     secs = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
     print("Total elapsed time: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
 
-    if vv > 0:
-        time_remaining = np.mean(volume_process_times[:vv]) * (nvols - vv - 1)
-        days = time_remaining // (24 * 60 * 60)
-        hrs = (time_remaining - days * 24 * 60 * 60) // (60 * 60)
-        mins = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
-        secs = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-        print("Estimated time remaining: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
+    time_remaining = np.mean(volume_process_times[:vv + 1]) * (nvols - vv - 1)
+    days = time_remaining // (24 * 60 * 60)
+    hrs = (time_remaining - days * 24 * 60 * 60) // (60 * 60)
+    mins = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
+    secs = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
+    print("Estimated time remaining: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
