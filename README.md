@@ -4,7 +4,7 @@ Control and analysis code for the qi2lab @ ASU OPM using a solid immersion terti
 # Important changes (04/21)
 There have been large-scale, breaking changes and bug fixes since publication to the instrument design, control code, and reconstruction code. There will be additional refactors in the common weeks to modularize the code for shared functions and streamline acquisition setup in Micro-manager 2.0. Ongoing work on fast 3D single-molecule tracking and iterative imaging with fluidics will continue to live in separate branches in this repo for now.
 
-On the instrument side, we have added galvo scanning, changed the light sheet launcher to use an ETL for low NA remote focusing, returned to a cylindrical lens instead of DSLM, and integrated an NI DAQ card for high-speed triggering. In all our our experiments, the camera acts as the master clock. Laser blanking and galvo movements are synchronized to avoid motion blur due to sCMOS rolling shutters.
+On the instrument side, we have added galvo scanning, changed the light sheet launcher to use an ETL for low NA remote focusing, returned to a cylindrical lens instead of DSLM, and swapped out the Triggerscope 3B for an NI DAQ card for more reliable high-speed triggering. In all our our experiments, the camera acts as the master clock. Laser blanking and galvo movements are synchronized to avoid motion blur due to sCMOS rolling shutters.
 
 A new parts lists is in-progress.
 
