@@ -40,7 +40,7 @@ def main():
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
     channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 20, 100, 20, 100] # (0 -> 100%)
+    channel_powers = [0, 0, 0.5, 0, 0] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -53,22 +53,22 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 20.0
+    exposure_ms = 2.0
 
     # galvo voltage at neutral
-    galvo_neutral_volt = -0.075 # unit: volts
+    galvo_neutral_volt = 0.0 # unit: volts
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 21500. #unit: um
-    scan_axis_end_um = 22000. #unit: um
+    scan_axis_start_um = 5500. #unit: um
+    scan_axis_end_um = 6000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -6000 #unit: um
-    tile_axis_end_um = -5500. #unit: um
+    tile_axis_start_um = -4750 #unit: um
+    tile_axis_end_um = -4745. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 14800. #unit: um
-    height_axis_end_um = 14880 #unit:  um
+    height_axis_start_um = 14253. #unit: um
+    height_axis_end_um = 14255 #unit:  um
 
     # number of timepoints to execute
     # TO DO: add in control for rate of experiment
@@ -76,11 +76,11 @@ def main():
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1152, 2304, 512] #unit: pixels
+    # ROI = [0, 1152, 2304, 512] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210406a/')
-    save_name = 'etx_shield_antigen'
+    save_directory=Path('E:/20210506a/')
+    save_name = '605nm_bead_test'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -95,8 +95,8 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set camera to fast readout mode
-    core.set_config('Camera-Setup','ScanMode2')
-    core.wait_for_config('Camera-Setup','ScanMode2')
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
     # set camera to START mode upon input trigger
     core.set_config('Camera-TriggerType','START')
@@ -107,8 +107,8 @@ def main():
     core.wait_for_config('Camera-TriggerPolarity','POSITIVE')
 
     # set camera to internal control
-    core.set_config('Camera-TriggerSource','EXTERNAL')
-    core.wait_for_config('Camera-TriggerSource','EXTERNAL')
+    core.set_config('Camera-TriggerSource','INTERNAL')
+    core.wait_for_config('Camera-TriggerSource','INTERNAL')
 
     # set camera to output positive triggers on all lines for exposure
     core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
@@ -124,6 +124,11 @@ def main():
 
     # set exposure
     core.set_exposure(exposure_ms)
+
+    # determine image size
+    core.snap_image()
+    y_pixels = core.get_image_height()
+    x_pixels = core.get_image_width()
 
     # grab exposure
     true_exposure = core.get_exposure()
@@ -149,7 +154,7 @@ def main():
     tile_axis_overlap=0.3 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
-    tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
+    tile_axis_ROI = x_pixels*pixel_size_um  #unit: um
     tile_axis_step_um = np.round((tile_axis_ROI) * (1-tile_axis_overlap),2) #unit: um
     tile_axis_step_mm = tile_axis_step_um / 1000 #unit: mm
     tile_axis_positions = np.rint(tile_axis_range_mm / tile_axis_step_mm).astype(int)+1  #unit: number of positions
@@ -161,7 +166,7 @@ def main():
     height_axis_overlap=0.3 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
-    height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
+    height_axis_ROI = y_pixels*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
     height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
     height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
     height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int)+1 #unit: number of positions
@@ -295,7 +300,6 @@ def main():
     core.wait_for_config('Laser','AllOn')
 
     # set lasers to user defined power
-    channel_powers = [power_405,power_488,power_561,power_635,power_730]
     core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
     core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
     core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
@@ -347,7 +351,7 @@ def main():
                 core.set_position(height_position_um)
                 core.wait_for_device(z_stage)
 
-                for ch_idx in channels_in_experiment:
+                for ch_idx in active_channel_indices:
 
                     # create DAQ pattern for laser strobing controlled via rolling shutter
                     dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
@@ -472,8 +476,8 @@ def main():
                             'num_z': int(height_axis_positions),
                             'num_ch': int(n_active_channels),
                             'scan_axis_positions': int(scan_axis_positions),
-                            'y_pixels': int(ROI[3]),
-                            'x_pixels': int(ROI[2]),
+                            'y_pixels': int(y_pixels),
+                            'x_pixels': int(x_pixels),
                             '405_active': channel_states[0],
                             '488_active': channel_states[1],
                             '561_active': channel_states[2],

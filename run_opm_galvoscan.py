@@ -31,7 +31,7 @@ def main():
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
     channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 20, 100, 20, 100] # (0 -> 100%)
+    channel_powers = [0, 10, 20, 20, 100] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -50,14 +50,14 @@ def main():
     scan_axis_range_um = 200.0 # unit: microns
     
     # galvo voltage at neutral
-    galvo_neutral_volt = -0.075 # unit: volts
+    galvo_neutral_volt = 0 # unit: volts
 
     # timepoints
     timepoints = 1
 
     # setup file name
-    save_directory=Path('E:/20210408p/')
-    save_name = 'beads'
+    save_directory=Path('E:/20210504b/')
+    save_name = 'bead_test'
  
     # display data
     display_flag = False
