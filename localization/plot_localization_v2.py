@@ -18,14 +18,17 @@ import os
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_21_10;22;43_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408m", "glycerol50x_1", "2021_04_21_10;17;23_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430i", "glycerol_60_1", "2021_05_02_15;17;29_localization")
-loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430a", "beads_1", "dummy")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430a", "beads_1", "dummy")
+loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430f", "glycerol_40_1", "2021_05_06_15;36;09_localization")
+
+
 data_dir, _ = os.path.split(loc_data_dir)
 root_dir, _ = os.path.split(data_dir)
 loc_data_str = "localization_results_vol_%d.pkl"
 deskew_fname = os.path.join(root_dir, "full_deskew_only.h5")
 md_fname = os.path.join(root_dir, "scan_metadata.csv")
 track_fname = os.path.join(loc_data_dir, "tracks.pkl")
-plot_centers = False
+plot_centers = True
 plot_tracks = True
 plot_centers_guess = True
 
@@ -44,27 +47,30 @@ pix_sizes = [md["pixel_size"] / 1000] * 3
 
 if plot_centers:
     # load all localizations and convert to pixel coordinates
-    centers = []
-    centers_guess = []
-    for ii in range(ntimes):
-        data_fname = os.path.join(loc_data_dir, loc_data_str % ii)
+    try:
+        centers = []
+        centers_guess = []
+        for ii in range(ntimes):
+            data_fname = os.path.join(loc_data_dir, loc_data_str % ii)
 
-        # in case not all images have been analyzed
-        if not os.path.exists(data_fname):
-            break
+            # in case not all images have been analyzed
+            if not os.path.exists(data_fname):
+                break
 
-        with open(data_fname, "rb") as f:
-            dat = pickle.load(f)
-        centers.append(np.concatenate((ii * np.ones((len(dat["centers"]), 1)),
-                                       dat["centers"][:, 0][:, None] / pix_sizes[0],
-                                       dat["centers"][:, 1][:, None] / pix_sizes[1],
-                                       dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
-        centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
-                                       dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
-                                       dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
-                                       dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
-    centers = np.concatenate(centers, axis=0)
-    centers_guess = np.concatenate(centers_guess, axis=0)
+            with open(data_fname, "rb") as f:
+                dat = pickle.load(f)
+            centers.append(np.concatenate((ii * np.ones((len(dat["centers"]), 1)),
+                                           dat["centers"][:, 0][:, None] / pix_sizes[0],
+                                           dat["centers"][:, 1][:, None] / pix_sizes[1],
+                                           dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
+            centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
+                                           dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
+                                           dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
+                                           dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
+        centers = np.concatenate(centers, axis=0)
+        centers_guess = np.concatenate(centers_guess, axis=0)
+    except:
+        plot_centers = False
 
 # load tracks
 if os.path.exists(track_fname):

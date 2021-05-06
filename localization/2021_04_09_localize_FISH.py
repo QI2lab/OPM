@@ -136,21 +136,11 @@ for vv in range(nvols):
         rois = np.asarray(rois)
 
         # fit
-        # exclude rois near edge
         roi_sizes = np.array([(r[1] - r[0]) * (r[3] - r[2]) * (r[5] - r[4]) for r in rois])
         nmax = roi_sizes.max()
-        # to_keep = roi_sizes == roi_sizes.max()
-        #
-        # rois = rois[to_keep]
-        # xrois = [xr for xr, tk in zip(xrois, to_keep) if tk]
-        # yrois = [yr for yr, tk in zip(yrois, to_keep) if tk]
-        # zrois = [zr for zr, tk in zip(zrois, to_keep) if tk]
-        # centers_temp = centers_guess[to_keep]
         centers_temp = centers_guess
-        # print("Kept %d points away from boundary" % np.sum(to_keep))
 
         print("using parallelization on GPU")
-
         imgs_roi = [np.expand_dims(localize.cut_roi(r, imgs).ravel(), axis=0) for r in rois]
         # pad to make sure all rois same size
         imgs_roi = [np.pad(ir, ((0, 0), (0, nmax - ir.size)), mode="constant") for ir in imgs_roi]

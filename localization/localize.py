@@ -1460,8 +1460,9 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     :param offsets: offset to apply to y-coordinates. Useful for analyzing datasets in chunks
     :return:
     """
-
+    # ###################################################
     # set up geometry
+    # ###################################################
     npos, ny, nx = imgs.shape
 
     dc = params["dc"]
@@ -1473,7 +1474,9 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     y += offsets[1]
     z += offsets[0]
 
+    # ###################################################
     # smooth image and remove background with difference of gaussians filter
+    # ###################################################
     tstart = time.perf_counter()
 
     ks = get_filter_kernel_skewed(filter_sigma_small, dc, theta, stage_step, sigma_cutoff=2)
@@ -1485,7 +1488,9 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     tend = time.perf_counter()
     print("Filtered images in %0.2fs" % (tend - tstart))
 
-    # mask off region of image
+    # ###################################################
+    # mask off region of each camera frame
+    # ###################################################
     tstart = time.perf_counter()
 
     if allowed_polygon is None:
@@ -1498,8 +1503,10 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     tend = time.perf_counter()
     print("Masked region in %0.2fs" % (tend - tstart))
 
+    # ###################################################
+    # identify candidate beads
+    # ###################################################
     tstart = time.perf_counter()
-    # identify points above threshold (either naively or using max filter)
     if False:
         centers_guess_inds = skimage.feature.peak_local_max(imgs_filtered * mask, min_distance=1, threshold_abs=abs_threshold,
                                             exclude_border=False, num_peaks=np.inf)
@@ -1510,24 +1517,26 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
         coords = np.meshgrid(*[range(imgs.shape[ii]) for ii in range(imgs.ndim)], indexing="ij")
         centers_guess_inds = np.concatenate([c[ispeak][:, None] for c in coords], axis=1)
     else:
+        footprint = get_skewed_footprint(min_sep_allowed, dc, stage_step, theta)
+        centers_guess_inds = find_peak_candidates(imgs_filtered * mask, footprint, abs_threshold, use_gpu_filter=use_gpu_filter)
 
-        footprint_roi_size = get_skewed_roi_size(min_sep_allowed, theta, dc, stage_step, ensure_odd=True)
-        footprint_form = np.ones(footprint_roi_size, dtype=np.bool)
-        xf, yf, zf = get_skewed_coords(footprint_form.shape, dc, stage_step, theta)
-        xf = xf - xf.mean()
-        yf = yf - yf.mean()
-        zf = zf - zf.mean()
-        footprint_mask = get_roi_mask((0, 0, 0), min_sep_allowed, (zf, yf, xf))
-        footprint_mask[np.isnan(footprint_mask)] = 0
-        footprint_mask = footprint_mask.astype(np.bool)
-        if use_gpu_filter:
-            imgs_filtered = imgs_filtered.astype(np.float32)
-            img_max_filtered = cp.asnumpy(cupyx.scipy.ndimage.maximum_filter(cp.asarray(imgs_filtered * mask, dtype=cp.float32),
-                                                                             footprint=cp.asarray(footprint_form * footprint_mask)))
-        else:
-            img_max_filtered = scipy.ndimage.maximum_filter(imgs_filtered * mask, footprint=footprint_form * footprint_mask)
-
-        centers_guess_inds = np.argwhere(np.logical_and(imgs_filtered == img_max_filtered, imgs_filtered > abs_threshold))
+        # footprint_roi_size = get_skewed_roi_size(min_sep_allowed, theta, dc, stage_step, ensure_odd=True)
+        # footprint_form = np.ones(footprint_roi_size, dtype=np.bool)
+        # xf, yf, zf = get_skewed_coords(footprint_form.shape, dc, stage_step, theta)
+        # xf = xf - xf.mean()
+        # yf = yf - yf.mean()
+        # zf = zf - zf.mean()
+        # footprint_mask = get_roi_mask((0, 0, 0), min_sep_allowed, (zf, yf, xf))
+        # footprint_mask[np.isnan(footprint_mask)] = 0
+        # footprint_mask = footprint_mask.astype(np.bool)
+        # if use_gpu_filter:
+        #     imgs_filtered = imgs_filtered.astype(np.float32)
+        #     img_max_filtered = cp.asnumpy(cupyx.scipy.ndimage.maximum_filter(cp.asarray(imgs_filtered * mask, dtype=cp.float32),
+        #                                                                      footprint=cp.asarray(footprint_form * footprint_mask)))
+        # else:
+        #     img_max_filtered = scipy.ndimage.maximum_filter(imgs_filtered * mask, footprint=footprint_form * footprint_mask)
+        #
+        # centers_guess_inds = np.argwhere(np.logical_and(imgs_filtered == img_max_filtered, imgs_filtered > abs_threshold))
 
 
     # convert to xyz coordinates
@@ -1539,8 +1548,10 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     tend = time.perf_counter()
     print("Found %d points above threshold in %0.2fs" % (len(centers_guess), tend - tstart))
 
+    # ###################################################
     # average multiple points too close together. Necessary bc if naive threshold, may identify several points
     # from same spot. Particularly important if spots have very different brightness levels.
+    # ###################################################
     tstart = time.perf_counter()
 
     inds = np.ravel_multi_index(centers_guess_inds.transpose(), imgs_filtered.shape)
@@ -1566,6 +1577,9 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     tend = time.perf_counter()
     print("Prepared %d rois in %0.2fs" % (len(rois), tend - tstart))
 
+    # ###################################################
+    # localization
+    # ###################################################
     if mode == "fit":
         print("starting fitting for %d rois" % centers_guess.shape[0])
         tstart = time.perf_counter()
@@ -1574,29 +1588,29 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
 
             # exclude rois near edge
             roi_sizes = np.array([(r[1] - r[0]) * (r[3] - r[2]) * (r[5] - r[4]) for r in rois])
-            to_keep = roi_sizes == roi_sizes.max()
-
-            rois = rois[to_keep]
-            xrois, yrois, zrois, roi_masks = zip(*[(x, y, z, r) for x, y, z, r, k in zip(xrois, yrois, zrois, roi_masks, to_keep) if k])
-            roi_mask = roi_masks[0].astype(np.bool)
-            centers_temp = centers_guess[to_keep]
-
-            print("Kept %d points away from boundary" % np.sum(to_keep))
+            roi_masks = [r.astype(np.bool) for r in roi_masks]
+            roi_mask_sizes = np.array([np.sum(r) for r in roi_masks])
+            nmax = np.max(roi_mask_sizes)
 
             print("starting fitting in parallel on GPU")
-
-            imgs_roi = [cut_roi(r, imgs)[roi_mask].astype(np.float32)[None, :] for r in rois]
+            imgs_roi = [cut_roi(r, imgs)[rm].astype(np.float32)[None, :] for r, rm in zip(rois, roi_masks)]
+            imgs_roi = [np.pad(im, ((0, 0), (0, nmax - im.size)), mode="constant") for im in imgs_roi]
 
             data = np.concatenate(imgs_roi, axis=0)
             data = data.astype(np.float32)
 
             coords = [np.broadcast_arrays(x, y, z) for x, y, z in zip(xrois, yrois, zrois)]
-            user_info = np.concatenate([np.concatenate((c[0][roi_mask], c[1][roi_mask], c[2][roi_mask])) for c in coords])
-            user_info = user_info.astype(np.float32)
+            user_info = [(c[0][rm], c[1][rm], c[2][rm]) for c, rm in zip(coords, roi_masks)]
+            user_info = [np.concatenate((np.pad(c[0], (0, nmax - c[0].size), mode="constant"),
+                                         np.pad(c[1], (0, nmax - c[1].size), mode="constant"),
+                                         np.pad(c[2], (0, nmax - c[1].size), mode="constant"))) for c in user_info]
+            user_info = np.concatenate(user_info).astype(np.float32)
+
+            user_info = np.concatenate((user_info, roi_mask_sizes.astype(np.float32)))
 
             nfits, n_pts_per_fit = data.shape
-            init_params = np.concatenate((100 * np.ones((nfits, 1)), centers_temp[:, 2][:, None],
-                                          centers_temp[:, 1][:, None], centers_temp[:, 0][:, None],
+            init_params = np.concatenate((100 * np.ones((nfits, 1)), centers_guess[:, 2][:, None],
+                                          centers_guess[:, 1][:, None], centers_guess[:, 0][:, None],
                                           0.14 * np.ones((nfits, 1)), 0.4 * np.ones((nfits, 1)), 0 * np.ones((nfits, 1))), axis=1)
             init_params = init_params.astype(np.float32)
 
@@ -1604,7 +1618,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
                 raise ValueError
             if init_params.ndim != 2 or init_params.shape != (nfits, 7):
                 raise ValueError
-            if user_info.ndim != 1 or user_info.size != 3 * nfits * n_pts_per_fit:
+            if user_info.ndim != 1 or user_info.size != (3 * nfits * n_pts_per_fit + nfits):
                 raise ValueError
 
             fit_params, fit_states, chi_sqrs, niters, fit_t = gf.fit(data, None, gf.ModelID.GAUSS_3D_ARB, init_params,
@@ -1656,30 +1670,41 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     tstart = time.perf_counter()
     centers_fit = np.concatenate((fit_params[:, 3][:, None], fit_params[:, 2][:, None], fit_params[:, 1][:, None]), axis=1)
 
+    # ###################################################
     # only keep points if size and position were reasonable
+    # ###################################################
+    amp_min = 0.1 * abs_threshold
     sigmas_min_keep = sigma_bounds[0]
     sigmas_max_keep = sigma_bounds[1]
     to_keep = np.logical_and.reduce((point_in_trapezoid(centers_fit, x, y, z),
-                                    fit_params[:, 4] <= sigmas_max_keep[2],
-                                    fit_params[:, 4] >= sigmas_min_keep[2],
-                                    fit_params[:, 4] <= sigmas_max_keep[1],
-                                    fit_params[:, 4] >= sigmas_min_keep[1],
-                                    fit_params[:, 5] <= sigmas_max_keep[0],
-                                    fit_params[:, 5] >= sigmas_min_keep[0]))
+                                     fit_params[:, 0] >= amp_min,
+                                     fit_params[:, 4] <= sigmas_max_keep[2],
+                                     fit_params[:, 4] >= sigmas_min_keep[2],
+                                     fit_params[:, 4] <= sigmas_max_keep[1],
+                                     fit_params[:, 4] >= sigmas_min_keep[1],
+                                     fit_params[:, 5] <= sigmas_max_keep[0],
+                                     fit_params[:, 5] >= sigmas_min_keep[0]))
 
     tend = time.perf_counter()
-    print("identified %d valid localizations with centers in bounds,"
-          " %0.5g <= sx <= %0.5g, %0.5g <= sy <= %0.5g and %0.5g <= sz <= %0.5g in %0.3f" %
-          (np.sum(to_keep), sigmas_min_keep[2], sigmas_max_keep[2], sigmas_min_keep[1], sigmas_max_keep[1],
+    print("identified %d valid localizations with:\n"
+          "centers in bounds, amp >= %.5g\n"
+          "%0.5g <= sx <= %0.5g, %0.5g <= sy <= %0.5g and %0.5g <= sz <= %0.5g in %0.3f" %
+          (np.sum(to_keep), amp_min, sigmas_min_keep[2], sigmas_max_keep[2],
+           sigmas_min_keep[1], sigmas_max_keep[1],
            sigmas_min_keep[0], sigmas_max_keep[0], tend - tstart))
 
-    tstart = time.perf_counter()
-    # only keep unique center if close enough
-    centers_unique, unique_inds = combine_nearby_peaks(centers_fit[to_keep], min_sep_allowed[1], min_sep_allowed[0], mode="keep-one")
-    fit_params_unique = fit_params[to_keep][unique_inds]
-    rois_unique = rois[to_keep][unique_inds]
-    tend = time.perf_counter()
-    print("identified %d unique points, dxy > %0.5g, and dz > %0.5g in %0.3f" %
-          (len(centers_unique), min_sep_allowed[1], min_sep_allowed[0], tend - tstart))
+    if np.sum(to_keep) > 0:
+        tstart = time.perf_counter()
+        # only keep unique center if close enough
+        centers_unique, unique_inds = combine_nearby_peaks(centers_fit[to_keep], min_sep_allowed[1], min_sep_allowed[0], mode="keep-one")
+        fit_params_unique = fit_params[to_keep][unique_inds]
+        rois_unique = rois[to_keep][unique_inds]
+        tend = time.perf_counter()
+        print("identified %d unique points, dxy > %0.5g, and dz > %0.5g in %0.3f" %
+              (len(centers_unique), min_sep_allowed[1], min_sep_allowed[0], tend - tstart))
+    else:
+        centers_unique = np.zeros((0, 3))
+        fit_params_unique = np.zeros((0, 7))
+        rois_unique = np.zeros((0, 6))
 
     return imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess

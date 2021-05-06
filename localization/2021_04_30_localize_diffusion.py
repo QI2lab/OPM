@@ -18,9 +18,11 @@ sys.path.append(fdir)
 import data_io
 
 # paths to image files
-root_dirs = [os.path.join(r"/mnt", "opm2", "20210430f", "glycerol_40_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210430h", "glycerol_50_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210430i", "glycerol_60_1", "Full resolution")]
+# root_dirs = [os.path.join(r"/mnt", "opm2", "20210430f", "glycerol_40_1", "Full resolution"),
+#              os.path.join(r"/mnt", "opm2", "20210430h", "glycerol_50_1", "Full resolution"),
+#              os.path.join(r"/mnt", "opm2", "20210430i", "glycerol_60_1", "Full resolution")]
+root_dirs = [os.path.join(r"\\10.206.26.21", "opm2", "20210430f", "glycerol_40_1", "Full resolution")]
+
 
 tbegin = time.perf_counter()
 for root_dir in root_dirs:
@@ -67,7 +69,7 @@ for root_dir in root_dirs:
     # identify candidate points in opm data
     # ###############################
     absolute_threshold = 50
-    # difference of gaussian filer
+    # difference of gaussian filter parameters
     filter_sigma_small = (0.5 * sigma_z, 0.25 * sigma_xy, 0.25 * sigma_xy)
     filter_sigma_large = (5 * sigma_z, 20 * sigma_xy, 20 * sigma_xy)
     # fit roi size
@@ -76,7 +78,7 @@ for root_dir in root_dirs:
     min_dists = (3 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
     # exclude points with sigmas outside these ranges
     sigmas_min = (0.25 * sigma_z, 0.25 * sigma_xy, 0.25 * sigma_xy)
-    sigmas_max = (2 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
+    sigmas_max = (2 * sigma_z, 3 * sigma_xy, 3 * sigma_xy)
 
     # don't consider any points outside of this polygon
     # cx, cy
