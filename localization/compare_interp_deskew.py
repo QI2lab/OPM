@@ -26,7 +26,8 @@ sxy = 0.22 * emission_wavelength / na
 sz = np.sqrt(6) / np.pi * ni * emission_wavelength / na ** 2
 
 # coordinates
-x, y, z = localize.get_lab_coords(nx, ny, dc, theta, stage_pos)
+# x, y, z = localize.get_lab_coords(nx, ny, dc, theta, stage_pos)
+x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
 
 # simulated image
 center = np.expand_dims(np.array([z.mean(), y.mean(), x.mean()]), axis=0)

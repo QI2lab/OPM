@@ -67,7 +67,8 @@ elif mode == "ndtiff":
 else:
     raise ValueError("mode must be 'hcimage' or 'ndtiff'")
 
-x, y, z = localize.get_lab_coords(ni2, ni1, dc, theta, dstage * np.arange(nstage))
+# x, y, z = localize.get_lab_coords(ni2, ni1, dc, theta, dstage * np.arange(nstage))
+x, y, z = localize.get_skewed_coords((nstage, ni1, ni2), dc, dstage, theta)
 
 # initial roi values to plot
 # z, y, x # these are not literal sizes, rather the computed ROI contains this cube
@@ -150,7 +151,7 @@ button_dec_cy = Button(ax_dec_cy, '<', color="w", hovercolor='b')
 button_adv_cy = Button(ax_adv_cy, '>', color="w", hovercolor='b')
 
 # cz
-cz_start, _, _ = localize.find_trapezoid_cz(centers_roi[0], (z, y, x))
+cz_start, _, _ = localize.trapezoid_cz(centers_roi[0], (z, y, x))
 
 ax_cz = plt.axes([hpos_center - 0.5 * slider_hsize, 1 - 7 * vsep, slider_hsize, slider_vsize])
 cz_slider = matplotlib.widgets.Slider(ax_cz, "cz", z.min(), z.max(), valinit=float(cz_start),
@@ -218,7 +219,7 @@ cbar = plt.colorbar(plt.cm.ScalarMappable(norm=Normalize(vmin=0, vmax=z.max()), 
 initialized = False
 
 def load_volume(sizes, centers, vol_index):
-    roi_sizes = localize.get_roi_size(sizes, theta, dc, dstage, ensure_odd=False)
+    roi_sizes = localize.get_skewed_roi_size(sizes, theta, dc, dstage, ensure_odd=False)
 
     zc, yc, xc = centers
     ind = np.unravel_index(np.argmin((xc - x)**2 + (yc - y)**2 + (zc - z)**2), (x+y+z).shape)
@@ -247,7 +248,7 @@ def update(val):
     cx = float(cx_slider.val)
     cy = float(cy_slider.val)
     if auto_track_cz:
-        cz, _, _ = localize.find_trapezoid_cz(cy, (z, y, x))
+        cz, _, _ = localize.trapezoid_cz(cy, (z, y, x))
     else:
         cz = float(cz_slider.val)
     wx = float(wx_slider.val)

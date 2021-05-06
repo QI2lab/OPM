@@ -14,14 +14,18 @@ import data_io
 import tifffile
 import os
 
-loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_20_18;15;17_localization")
-# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408m", "glycerol50x_1", "2021_04_20_17;09;52_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_20_18;15;17_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_21_10;22;43_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408m", "glycerol50x_1", "2021_04_21_10;17;23_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430i", "glycerol_60_1", "2021_05_02_15;17;29_localization")
+loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430a", "beads_1", "dummy")
 data_dir, _ = os.path.split(loc_data_dir)
 root_dir, _ = os.path.split(data_dir)
 loc_data_str = "localization_results_vol_%d.pkl"
 deskew_fname = os.path.join(root_dir, "full_deskew_only.h5")
 md_fname = os.path.join(root_dir, "scan_metadata.csv")
 track_fname = os.path.join(loc_data_dir, "tracks.pkl")
+plot_centers = False
 plot_tracks = True
 plot_centers_guess = True
 
@@ -38,28 +42,29 @@ md = data_io.read_metadata(md_fname)
 pix_sizes = [md["pixel_size"] / 1000] * 3
 # pix_sizes = [md["pixel_size"] * np.sin(md["theta"] * np.pi / 180) / 1000, md["pixel_size"] * np.cos(md["theta"] * np.pi / 180) / 1000, md["pixel_size"] / 1000]
 
-# load all localizations and convert to pixel coordinates
-centers = []
-centers_guess = []
-for ii in range(ntimes):
-    data_fname = os.path.join(loc_data_dir, loc_data_str % ii)
+if plot_centers:
+    # load all localizations and convert to pixel coordinates
+    centers = []
+    centers_guess = []
+    for ii in range(ntimes):
+        data_fname = os.path.join(loc_data_dir, loc_data_str % ii)
 
-    # in case not all images have been analyzed
-    if not os.path.exists(data_fname):
-        break
+        # in case not all images have been analyzed
+        if not os.path.exists(data_fname):
+            break
 
-    with open(data_fname, "rb") as f:
-        dat = pickle.load(f)
-    centers.append(np.concatenate((ii * np.ones((len(dat["centers"]), 1)),
-                                   dat["centers"][:, 0][:, None] / pix_sizes[0],
-                                   dat["centers"][:, 1][:, None] / pix_sizes[1],
-                                   dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
-    centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
-                                   dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
-                                   dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
-                                   dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
-centers = np.concatenate(centers, axis=0)
-centers_guess = np.concatenate(centers_guess, axis=0)
+        with open(data_fname, "rb") as f:
+            dat = pickle.load(f)
+        centers.append(np.concatenate((ii * np.ones((len(dat["centers"]), 1)),
+                                       dat["centers"][:, 0][:, None] / pix_sizes[0],
+                                       dat["centers"][:, 1][:, None] / pix_sizes[1],
+                                       dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
+        centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
+                                       dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
+                                       dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
+                                       dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
+    centers = np.concatenate(centers, axis=0)
+    centers_guess = np.concatenate(centers_guess, axis=0)
 
 # load tracks
 if os.path.exists(track_fname):
@@ -112,7 +117,8 @@ stack = da.stack(arr, axis=0)
 with napari.gui_qt():
     # specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
     viewer = napari.view_image(stack, colormap="bone", contrast_limits=[0, 750], multiscale=False, title=loc_data_dir)
-    viewer.add_points(centers, size=2, face_color="red", opacity=0.75, n_dimensional=True)
+    if plot_centers:
+        viewer.add_points(centers, size=2, face_color="red", opacity=0.75, n_dimensional=True)
     if plot_centers_guess:
         viewer.add_points(centers_guess, size=2, face_color="green", opacity=0.5, n_dimensional=True)
     if plot_tracks:

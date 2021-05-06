@@ -112,7 +112,7 @@ for vv in range(nvols):
         imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize(
             imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_roi_size, z_roi_size, 0, 0, min_z_dist,
             min_xy_dist, sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_fit_tries,
-            y_offset=y_offset)
+            offsets=(0, y_offset, 0))
 
         centers_unique_all.append(centers_unique)
         fit_params_unique_all.append(fit_params_unique)
@@ -122,7 +122,7 @@ for vv in range(nvols):
 
         # plot localization fit diagnostic on good points
         # picture coordinates in coverslip frame
-        x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
+        x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
         y += y_offset
 
         # max projections

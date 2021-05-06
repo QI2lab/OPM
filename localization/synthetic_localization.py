@@ -33,7 +33,8 @@ if __name__ == "__main__":
     # get coordinates
     # ###############################
     # picture coordinates in coverslip frame
-    x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
+    # x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
+    x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dy, theta)
 
     # picture coordinates
     xp = dc * np.arange(nx)

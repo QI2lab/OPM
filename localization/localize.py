@@ -12,10 +12,16 @@ from matplotlib.path import Path
 import warnings
 import time
 import joblib
-# for Fourier space filtering on GPU
-import cupy as cp
-import cupyx.scipy.signal # new in v9, compiled github source
-import cupyx.scipy.ndimage
+
+# for filtering on GPU
+try:
+    import cupy as cp
+    import cupyx.scipy.signal # new in v9, compiled github source
+    import cupyx.scipy.ndimage
+    CUPY_AVAILABLE = True
+except ImportError:
+    CUPY_AVAILABLE = False
+
 # for fitting on GPU
 try:
     import pygpufit.gpufit as gf
@@ -23,11 +29,11 @@ try:
 except ImportError:
     GPUFIT_AVAILABLE = False
 
-# misc helper functions
+# geometry functions
 def nearest_pt_line(pt, slope, pt_line):
     """
     Get shortest distance between a point and a line.
-    :param pt: (xo, yo), point of itnerest
+    :param pt: (xo, yo), point of interest
     :param slope: slope of line
     :param pt_line: (xl, yl), point the line passes through
 
@@ -45,8 +51,44 @@ def nearest_pt_line(pt, slope, pt_line):
     return (x_int, y_int), d
 
 
+def point_in_trapezoid(pts, x, y, z):
+    """
+    Test if a point is in the trapzoidal region described by x,y,z
+    :param pts: np.array([[cz0, cy0, cx0], [cz1, cy1, cx1], ...[czn, cyn, cxn]])
+    :param x:
+    :param y:
+    :param z:
+    :return:
+    """
+    if pts.ndim == 1:
+        pts = pts[None, :]
+
+    # get theta
+    dc = x[0, 0, 1] - x[0, 0, 0]
+    dz = z[0, 1, 0] - z[0, 0, 0]
+    theta = np.arcsin(dz / dc)
+
+    # get edges
+    zstart = z.min()
+    ystart = y[0, 0, 0]
+    yend = y[-1, 0, 0]
+
+    # need to round near machine precision, or can get strange results when points right on boundary
+    decimals = 10
+    not_in_region_x = np.logical_or(np.round(pts[:, 2], decimals) < np.round(x.min(), decimals),
+                                    np.round(pts[:, 2], decimals) > np.round(x.max(), decimals))
+    not_in_region_z = np.logical_or(np.round(pts[:, 0], decimals) < np.round(z.min(), decimals),
+                                    np.round(pts[:, 0], decimals) > np.round(z.max(), decimals))
+    # tilted lines describing ends
+    not_in_region_yz = np.logical_or(np.round(pts[:, 0] - zstart, decimals) > np.round((pts[:, 1] - ystart) * np.tan(theta), decimals),
+                                     np.round(pts[:, 0] - zstart, decimals) < np.round((pts[:, 1] - yend) * np.tan(theta), decimals))
+
+    in_region = np.logical_not(np.logical_or(not_in_region_yz, np.logical_or(not_in_region_x, not_in_region_z)))
+
+    return in_region
+
 # coordinate transformations between OPM and coverslip frames
-def get_lab_coords(nx_cam, ny_cam, dc, theta, stage_pos):
+def get_skewed_coords(sizes, dc, ds, theta):
     """
     Get laboratory coordinates (i.e. coverslip coordinates) for a stage-scanning OPM set
     :param nx_cam:
@@ -56,11 +98,38 @@ def get_lab_coords(nx_cam, ny_cam, dc, theta, stage_pos):
     :param stage_pos: list of y-displacements for each scan position
     :return:
     """
+    nimgs, ny_cam, nx_cam = sizes
     x = dc * np.arange(nx_cam)[None, None, :]
-    y = stage_pos[:, None, None] + dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
+    # y = stage_pos[:, None, None] + dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
+    y = ds * np.arange(nimgs)[:, None, None] + dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
     z = dc * np.sin(theta) * np.arange(ny_cam)[None, :, None]
 
     return x, y, z
+
+
+def get_skewed_coords_deriv(sizes, dc, ds, theta):
+    """
+    derivative with respect to theta
+    :param sizes:
+    :param dc:
+    :param ds:
+    :param theta:
+    :return:
+    """
+    nimgs, ny_cam, nx_cam = sizes
+    dxdt = 0 * dc * np.arange(nx_cam)[None, None, :]
+    dydt = 0 * ds * np.arange(nimgs)[:, None, None] - dc * np.sin(theta) * np.arange(ny_cam)[None, :, None]
+    dzdt = dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
+
+    dxds = 0 * dc * np.arange(nx_cam)[None, None, :]
+    dyds = np.arange(nimgs)[:, None, None] + 0 * dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
+    dzds = 0 * dc * np.sin(theta) * np.arange(ny_cam)[None, :, None]
+
+    dxdc = np.arange(nx_cam)[None, None, :]
+    dydc = 0 * ds * np.arange(nimgs)[:, None, None] + np.cos(theta) * np.arange(ny_cam)[None, :, None]
+    dzdc = np.sin(theta) * np.arange(ny_cam)[None, :, None]
+
+    return [dxdt, dydt, dzdt], [dxds, dyds, dzds], [dxdc, dydc, dzdc]
 
 
 def lab2cam(x, y, z, theta):
@@ -98,7 +167,7 @@ def xy_lab2cam(x, y, stage_pos, theta):
     return xp, yp
 
 
-def find_trapezoid_cz(cy, coords):
+def trapezoid_cz(cy, coords):
     """
     Find z-range of trapezoid for given center position cy
     :param cy:
@@ -123,7 +192,7 @@ def find_trapezoid_cz(cy, coords):
     return cz, zmax, zmin
 
 
-def find_trapezoid_cy(cz, coords):
+def trapezoid_cy(cz, coords):
     """
     Find y-range of trapezoid for given center position cz
     :param cz:
@@ -140,6 +209,21 @@ def find_trapezoid_cy(cz, coords):
     return cy, ymax, ymin
 
 
+def get_coords(sizes, dc, dz):
+    """
+    Non-tilted coordinates
+    :param sizes: (sz, sy, sx)
+    :param dc:
+    :param dz:
+    :return:
+    """
+    x = np.expand_dims(np.arange(sizes[2]) * dc, axis=(0, 1))
+    y = np.expand_dims(np.arange(sizes[1]) * dc, axis=(0, 2))
+    z = np.expand_dims(np.arange(sizes[0]) * dz, axis=(1, 2))
+    return x, y, z
+
+
+# deskew
 def interp_opm_data(imgs, dc, ds, theta, mode="ortho-interp"):
     """
     Interpolate OPM stage-scan data to be equally spaced in coverslip frame
@@ -259,7 +343,7 @@ def gaussian3d_pixelated_psf(x, y, z, ds, normal, p, sf=3):
     :return:
     """
     if len(ds) != 2:
-        raise ValueError("ds = (dx, dy) length as not 2")
+        raise ValueError("ds = [dx, dy] must have length was not 2")
 
     # generate new points in pixel
     if sf != 1:
@@ -351,10 +435,50 @@ def gaussian3d_pixelated_psf_jac(x, y, z, ds, normal, p, sf):
     return jac
 
 
-def fit_model(img, model_fn, init_params, fixed_params=None, sd=None, bounds=None, model_jacobian=None, **kwargs):
+def gaussian3d_angle(shape, dc, p):
+    """
+    
+    :param shape: 
+    :param dc:
+    :param p: [A, cx, cy, cz, sxy, sz, bg, theta, ds]
+    :return: 
     """
 
-    Fit 2D model function
+    x, y, z = get_skewed_coords(shape, dc, p[8], p[7])
+
+    val = p[0] * np.exp(-(x - p[1])**2 / 2 / p[4]**2 - (y - p[2])**2 / 2 / p[4]**2 - (z - p[3])**2 / 2 / p[5]**2) + p[6]
+
+    return val
+
+
+def gaussian3d_angle_jacobian(shape, dc, p):
+    x, y, z = get_skewed_coords(shape, dc, p[8], p[7])
+    [dxdt, dydt, dzdt], [dxds, dyds, dzds], _ = get_skewed_coords_deriv(shape, dc, p[8], p[7])
+
+    exp = np.exp(-(x - p[1])**2 / 2 / p[4]**2 - (y - p[2])**2 / 2 / p[4]**2 - (z - p[3])**2 / 2 / p[5]**2)
+
+    jac = [exp,
+           p[0] * exp * (x - p[1]) / p[4]**2,
+           p[0] * exp * (y - p[2]) / p[4]**2,
+           p[0] * exp * (z - p[3]) / p[5]**2,
+           p[0] * exp * ((x - p[1])**2 + (y - p[2])**2) / p[4]**3,
+           p[0] * exp * (z - p[3])**2 / p[5]**3,
+           np.ones(shape),
+           p[0] * exp * ((-1) * (x - p[1]) / p[4]**2 * dxdt +
+                         (-1) * (y - p[2]) / p[4]**2 * dydt +
+                         (-1) * (z - p[3]) / p[5]**2 * dzdt),
+           p[0] * exp * ((-1) * (x - p[1]) / p[4] ** 2 * dxds +
+                         (-1) * (y - p[2]) / p[4] ** 2 * dyds +
+                         (-1) * (z - p[3]) / p[5] ** 2 * dzds)
+           ]
+
+    return jac
+
+
+def fit_model(img, model_fn, init_params, fixed_params=None, sd=None, bounds=None, model_jacobian=None, **kwargs):
+    """
+    Fit 2D model function with capability of fixing some parameters
+
     :param np.array img: nd array
     :param model_fn: function f(p)
     :param list[float] init_params: p = [p1, p2, ..., pn]
@@ -481,7 +605,6 @@ def simulate_img(scan_params, physical_params, ncenters=1, centers=None, sf=3):
     npos, ny, nx = scan_params["shape"]
 
     normal = np.array([0, -np.sin(theta), np.cos(theta)])  # normal of camera pixel
-    stage_pos = dstep * np.arange(npos)
 
     # physical data
     na = physical_params["na"]
@@ -495,7 +618,7 @@ def simulate_img(scan_params, physical_params, ncenters=1, centers=None, sf=3):
     bg = physical_params["background"]
 
     # coordinates
-    x, y, z = get_lab_coords(nx, ny, dc, theta, stage_pos)
+    x, y, z = get_skewed_coords((npos, ny, nx), dc, dstep, theta)
 
     # define centers
     if centers is None:
@@ -566,9 +689,11 @@ def simulate_img_noise(ground_truth, max_photons, cam_gains=2, cam_offsets=100, 
 
     return img, snr, max_photons_real
 
+
 # ROI tools
-def get_roi(roi, img):
+def cut_roi(roi, img):
     return img[roi[0]:roi[1], roi[2]:roi[3], roi[4]:roi[5]]
+
 
 def get_centered_roi(centers, sizes, min_vals=None, max_vals=None):
     """
@@ -620,16 +745,53 @@ def get_centered_roi(centers, sizes, min_vals=None, max_vals=None):
     return roi
 
 
-def get_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
+def get_roi_size(sizes, dc, dz, ensure_odd=True):
+    n0 = int(np.ceil(sizes[0] / dz))
+    n1 = int(np.ceil(sizes[1] / dc))
+    n2 = int(np.ceil(sizes[2] / dc))
+
+    if ensure_odd:
+        n0 += (1 - np.mod(n0, 2))
+        n1 += (1 - np.mod(n1, 2))
+        n2 += (1 - np.mod(n2, 2))
+
+    return [n0, n1, n2]
+
+def get_roi(center, x, y, z, sizes, shape):
+    """
+
+    :param center: [cz, cy, cx] in same units as x, y, z.
+    :param x:
+    :param y:
+    :param z:
+    :param sizes: [i0, i1, i2] integers
+    :param shape: shape of full array ... todo: should be able to infer from x,y,z
+    :return:
+    """
+    i0 = np.argmin(np.abs(z.ravel() - center[0]))
+    i1 = np.argmin(np.abs(y.ravel() - center[1]))
+    i2 = np.argmin(np.abs(x.ravel() - center[2]))
+
+    roi = np.array(get_centered_roi([i0, i1, i2], sizes, min_vals=[0, 0, 0], max_vals=np.array(shape)))
+
+    z_roi = z[roi[0]:roi[1]]
+    y_roi = y[:, roi[2]:roi[3], :]
+    x_roi = x[:, :, roi[4]:roi[5]]
+
+    return roi, x_roi, y_roi, z_roi
+
+
+def get_skewed_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     """
     Get ROI size in OPM matrix that includes sufficient xy and z points
 
-    :param sizes: [z-size, y-size, x-size]
-    :param theta:
-    :param dc:
-    :param dstep:
+    :param sizes: [z-size, y-size, x-size] in same units as dc, dstep
+    :param theta: angle in radians
+    :param dc: camera pixel size
+    :param dstep: step size
     :param bool ensure_odd:
-    :return:
+
+    :return [no, n1, n2]: integer size of roi in skewed coordinates
     """
 
     # x-size determines n2 size
@@ -654,15 +816,15 @@ def get_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     return [n0, n1, n2]
 
 
-def get_tilted_roi(center, x, y, z, sizes, shape):
+def get_skewed_roi(center, x, y, z, sizes, shape):
     """
 
-    :param center: [cz, cy, cx]
+    :param float center: [cz, cy, cx] in same units as x, y, z
     :param x:
     :param y:
     :param z:
-    :param sizes: [n0, n1, n2]
-    :param shape: shape of full image
+    :param int sizes: [n0, n1, n2]
+    :param shape: shape of full image ... todo: should infer from x, y, z
     :return:
     """
     i2 = np.argmin(np.abs(x.ravel() - center[2]))
@@ -676,32 +838,354 @@ def get_tilted_roi(center, x, y, z, sizes, shape):
     return roi, x_roi, y_roi, z_roi
 
 
-def get_roi_mask(center, xy_size, z_size, x_roi, y_roi, z_roi):
+def get_roi_mask(center, max_seps, coords):
     """
     Get mask to exclude points in the ROI that are far from the center. We do not want to include regions at the edges
     of the trapezoidal ROI in processing.
 
-    :param center:
-    :param xy_size:
-    :param z_size:
-    :param x_roi:
-    :param y_roi:
-    :param z_roi:
-    :return:
+    :param center: (cz, cy, cx)
+    :param max_seps: (dz, dxy)
+    :param coords: (z, y, x) sizes must be broadcastable
+    :return mask: same size as roi, 1 where point is allowed and nan otherwise
     """
+    z_roi, y_roi, x_roi = coords
     x_roi_full, y_roi_full, z_roi_full = np.broadcast_arrays(x_roi, y_roi, z_roi)
     mask = np.ones(x_roi_full.shape)
 
     # roi is parallelogram, so still want to cut out points which are too far from center
-    too_far_xy = np.sqrt((x_roi - center[2]) ** 2 + (y_roi - center[1]) ** 2) > xy_size
-    too_far_z = np.abs(z_roi - center[0]) > z_size
+    too_far_xy = np.sqrt((x_roi - center[2]) ** 2 + (y_roi - center[1]) ** 2) > max_seps[1]
+    too_far_z = np.abs(z_roi - center[0]) > max_seps[0]
     too_far = np.logical_or(too_far_xy, too_far_z)
 
     mask[too_far] = np.nan
 
     return mask
 
-# fitting ROI
+
+# filtering
+def get_filter_kernel_skewed(sigmas, dc, theta, dstage, sigma_cutoff=2):
+    # normalize everything to camera pixel size
+    sigma_x_pix = sigmas[2] / dc
+    sigma_y_pix = sigmas[2] / dc
+    sigma_z_pix = sigmas[0] / dc
+    nk_x = 2 * int(np.round(sigmas[2] * sigma_cutoff)) + 1
+    nk_y = 2 * int(np.round(sigma_y_pix * sigma_cutoff)) + 1
+    nk_z = 2 * int(np.round(sigma_z_pix * sigma_cutoff)) + 1
+    # determine how large the OPM geometry ROI needs to be to fit the desired filter
+    roi_sizes = get_skewed_roi_size([nk_z, nk_y, nk_x], theta, 1, dstage / dc, ensure_odd=True)
+
+    # get coordinates to evaluate kernel at
+    xk, yk, zk = get_skewed_coords(roi_sizes, 1, dstage / dc, theta)
+    xk = xk - np.mean(xk)
+    yk = yk - np.mean(yk)
+    zk = zk - np.mean(zk)
+
+    kernel = np.exp(-xk ** 2 / 2 / sigma_x_pix ** 2 - yk ** 2 / 2 / sigma_y_pix ** 2 - zk ** 2 / 2 / sigma_z_pix ** 2)
+    kernel = kernel / np.sum(kernel)
+
+    return kernel
+
+
+def get_filter_kernel(sigmas, dc, dz, sigma_cutoff=2):
+    # compute kernel size
+    nk_x = 2 * int(np.round(sigmas[2] / dc * sigma_cutoff)) + 1
+    nk_y = 2 * int(np.round(sigmas[1] / dc * sigma_cutoff)) + 1
+    nk_z = 2 * int(np.round(sigmas[0] / dz * sigma_cutoff)) + 1
+
+    # get coordinates to evaluate kernel at
+    xk = np.expand_dims(np.arange(nk_x) * dc, axis=(0, 1))
+    yk = np.expand_dims(np.arange(nk_y) * dc, axis=(0, 2))
+    zk = np.expand_dims(np.arange(nk_z) * dz, axis=(1, 2))
+
+    xk = xk - np.mean(xk)
+    yk = yk - np.mean(yk)
+    zk = zk - np.mean(zk)
+
+    kernel = np.exp(-xk ** 2 / 2 / sigmas[2] ** 2 - yk ** 2 / 2 / sigmas[1] ** 2 - zk ** 2 / 2 / sigmas[0] ** 2)
+    kernel = kernel / np.sum(kernel)
+
+    return kernel
+
+
+def filter_convolve(imgs, kernel, use_gpu=True):
+    """
+    Gaussian filter accounting for OPM geometry
+
+    :param imgs:
+    :param sigmas: (sigma_z, sigma_y, sigma_x)
+    :param dc:
+    :param theta:
+    :param dstage:
+    :param sigma_cutoff: number of sigmas to cutoff the kernel at # todo: allow different in different directions...
+    :return:
+    """
+
+    # convolve, and deal with edges by normalizing
+    # todo: is there a wrap around issue, where this blends opposite edges?
+    if use_gpu:
+        kernel_cp = cp.asarray(kernel, dtype=cp.float32)
+        imgs_cp = cp.asarray(imgs, dtype=cp.float32)
+        imgs_filtered = cp.asnumpy(cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")/
+                                   cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same"))
+    else:
+        imgs_filtered = scipy.signal.fftconvolve(imgs, kernel, mode="same") / \
+             scipy.signal.fftconvolve(np.ones(imgs.shape), kernel, mode="same")
+
+    # this method too slow for large filter sizes
+    # imgs_filtered = scipy.ndimage.convolve(imgs, kernel, mode="constant", cval=0) / \
+    #                 scipy.ndimage.convolve(np.ones(imgs.shape), kernel, mode="constant", cval=0)
+
+    return imgs_filtered
+
+
+# identify peaks
+def get_skewed_footprint(min_sep_allowed, dc, ds, theta):
+    """
+    Get footprint for maximum filter
+    :param min_sep_allowed: (dz, dy, dx)
+    :param dc:
+    :param ds:
+    :param theta:
+    :return:
+    """
+    footprint_roi_size = get_skewed_roi_size(min_sep_allowed, theta, dc, ds, ensure_odd=True)
+    footprint_form = np.ones(footprint_roi_size, dtype=np.bool)
+    xf, yf, zf = get_skewed_coords(footprint_form.shape, dc, ds, theta)
+    xf = xf - xf.mean()
+    yf = yf - yf.mean()
+    zf = zf - zf.mean()
+    footprint_mask = get_roi_mask((0, 0, 0), min_sep_allowed, (zf, yf, xf))
+    footprint_mask[np.isnan(footprint_mask)] = 0
+    footprint_mask = footprint_mask.astype(np.bool)
+
+    return footprint_form * footprint_mask
+
+
+def get_footprint(min_sep_allowed, dc, dz):
+    """
+    Get footprint for maximum filter
+    :param min_sep_allowed: (sz, sy, sx)
+    :param dc:
+    :param dz:
+    :return:
+    """
+
+    sz, sy, sx = min_sep_allowed
+
+    nz = int(np.ceil(sz / dz))
+    if np.mod(nz, 2) == 0:
+        nz += 1
+
+    ny = int(np.ceil(sy / dc))
+    if np.mod(ny, 2) == 0:
+        ny += 1
+
+    nx = int(np.ceil(sx / dc))
+    if np.mod(nx, 2) == 0:
+        nx += 1
+
+    footprint = np.ones((nz, ny, nx), dtype=np.bool)
+
+    return footprint
+
+
+def find_peak_candidates(imgs, footprint, threshold, use_gpu_filter=CUPY_AVAILABLE):
+    """
+    Find peak candidates using maximum filter
+
+    :param imgs:
+    :param footprint: footprint to use for maximum filter
+    :param threshold: only pixels with values greater than or equal to the threshold will be considered
+    :param use_gpu_filter:
+    :return centers_guess_inds: np.array([[i0, i1, i2], ...]) array indices of local maxima
+    """
+
+    if use_gpu_filter:
+        img_max_filtered = cp.asnumpy(
+            cupyx.scipy.ndimage.maximum_filter(cp.asarray(imgs, dtype=cp.float32), footprint=cp.asarray(footprint)))
+        # need to compare imgs as float32 because img_max_filtered will be ...
+        centers_guess_inds = np.argwhere(np.logical_and(imgs.astype(np.float32) == img_max_filtered, imgs >= threshold))
+    else:
+        img_max_filtered = scipy.ndimage.maximum_filter(imgs, footprint=footprint)
+        centers_guess_inds = np.argwhere(np.logical_and(imgs == img_max_filtered, imgs >= threshold))
+
+    return centers_guess_inds
+
+
+#
+def combine_nearby_peaks(centers, min_xy_dist, min_z_dist, mode="average", weights=None):
+    """
+    Combine multiple peaks above threshold into reduced set, where assume all peaks separated by no more than
+    min_xy_dist and min_z_dist come from the same feature.
+    :param centers:
+    :param min_xy_dist:
+    :param min_z_dist:
+    :param mode:
+    :param weights:
+    :return:
+    """
+    # todo: looks like this might be easier if use some tools from scipy.spatial, scipy.spatial.cKDTree
+
+    centers_unique = np.array(centers, copy=True)
+    inds = np.arange(len(centers), dtype=np.int)
+
+    if weights is None:
+        weights = np.ones(len(centers_unique))
+
+    counter = 0
+    while 1:
+        # compute distances to all other beads
+        z_dists = np.abs(centers_unique[counter][0] - centers_unique[:, 0])
+        xy_dists = np.sqrt((centers_unique[counter][1] - centers_unique[:, 1]) ** 2 +
+                           (centers_unique[counter][2] - centers_unique[:, 2]) ** 2)
+
+        # beads which are close enough we will combine
+        combine = np.logical_and(z_dists < min_z_dist, xy_dists < min_xy_dist)
+        if mode == "average":
+            denom = np.nansum(np.logical_not(np.isnan(np.sum(centers_unique[combine], axis=1))) * weights[combine])
+            centers_unique[counter] = np.nansum(centers_unique[combine] * weights[combine][:, None], axis=0, dtype=np.float) / denom
+            weights[counter] = denom
+        elif mode == "keep-one":
+            pass
+        else:
+            raise ValueError("mode must be 'average' or 'keep-one', but was '%s'" % mode)
+
+        # remove all points from list except for one representative
+        combine[counter] = False
+
+        inds = inds[np.logical_not(combine)]
+        centers_unique = centers_unique[np.logical_not(combine)]
+        weights = weights[np.logical_not(combine)]
+
+        counter += 1
+        if counter >= len(centers_unique):
+            break
+
+    return centers_unique, inds
+
+
+# localization functions
+def localize_radial_symm(img, coords, mode="radial-symmetry"):
+    # todo: check quality of localizations
+    if img.ndim != 3:
+        raise ValueError("img must be a 3D array, but was %dD" % img.ndim)
+
+    nstep, ni1, ni2 = img.shape
+    z, y, x = coords
+
+    if mode == "centroid":
+        w = np.nansum(img)
+        xc = np.nansum(img * x) / w
+        yc = np.nansum(img * y) / w
+        zc = np.nansum(img * z) / w
+    elif mode == "radial-symmetry":
+        yk = 0.5 * (y[:-1, :-1, :] + y[1:, 1:, :])
+        xk = 0.5 * (x[:, :, :-1] + x[:, :, 1:])
+        zk = 0.5 * (z[:, :-1] + z[:, 1:])
+        coords = (zk, yk, xk)
+
+        # take a cube of 8 voxels, and compute gradients at the center, using the four pixel diagonals that pass
+        # through the center
+        grad_n1 = img[1:, 1:, 1:] - img[:-1, :-1, :-1]
+        # vectors go [nz, ny, nx]
+        n1 = np.array([zk[0, 1, 0] - zk[0, 0, 0], yk[1, 1, 0] - yk[0, 0, 0], xk[0, 0, 1] - xk[0, 0, 0]])
+        n1 = n1 / np.linalg.norm(n1)
+
+        grad_n2 = img[1:, :-1, 1:] - img[:-1, 1:, :-1]
+        n2 = np.array([zk[0, 0, 0] - zk[0, 1, 0], yk[1, 0, 0] - yk[0, 1, 0], xk[0, 0, 1]- xk[0, 0, 0]])
+        n2 = n2 / np.linalg.norm(n2)
+
+        grad_n3 = img[1:, :-1, :-1] - img[:-1, 1:, 1:]
+        n3 = np.array([zk[0, 0, 0] - zk[0, 1, 0], yk[1, 0, 0] - yk[0, 1, 0], xk[0, 0, 0] - xk[0, 0, 1]])
+        n3 = n3 / np.linalg.norm(n3)
+
+        grad_n4 = img[1:, 1:, :-1] - img[:-1, :-1, 1:]
+        n4 = np.array([zk[0, 1, 0] - zk[0, 0, 0], yk[1, 1, 0] - yk[0, 0, 0], xk[0, 0, 0] - xk[0, 0, 1]])
+        n4 = n4 / np.linalg.norm(n4)
+
+        # compute the gradient xyz components
+        # 3 unknowns and 4 eqns, so use pseudo-inverse to optimize overdetermined system
+        uvec_mat = np.concatenate((n1[None, :], n2[None, :], n3[None, :], n4[None, :]), axis=0)
+        dat_mat = np.concatenate((grad_n1.ravel()[None, :], grad_n2.ravel()[None, :],
+                                  grad_n3.ravel()[None, :], grad_n4.ravel()[None, :]), axis=0)
+        gradk = np.linalg.pinv(uvec_mat).dot(dat_mat)
+        gradk = np.reshape(gradk, [3, nstep - 1, ni1 - 1, ni2 - 1])
+
+        # compute weights by (1) increasing weight where gradient is large and (2) decreasing weight for points far away
+        # from the centroid (as small slope errors can become large as the line is extended to the centroi)
+        # approximate distance between (xk, yk) and (xc, yc) by assuming (xc, yc) is centroid of the gradient
+        grad_norm = np.sqrt(np.sum(gradk ** 2, axis=0))
+        centroid_gns = np.array([np.nansum(zk * grad_norm), np.nansum(yk * grad_norm), np.nansum(xk * grad_norm)]) / \
+                       np.nansum(grad_norm)
+        dk_centroid = np.sqrt((zk - centroid_gns[0]) ** 2 + (yk - centroid_gns[1]) ** 2 + (xk - centroid_gns[2]) ** 2)
+        # weights
+        wk = grad_norm ** 2 / dk_centroid
+
+        # in 3D, parameterize a line passing through point Po along normal n by
+        # V(t) = Pk + n * t
+        # distance between line and point Pc minimized at
+        # tmin = -\sum_{i=1}^3 (Pk_i - Pc_i) / \sum_i n_i^2
+        # dk^2 = \sum_k \sum_i (Pk + n * tmin - Pc)^2
+        # again, we want to minimize the quantity
+        # chi^2 = \sum_k dk^2 * wk
+        # so we take the derivatives of chi^2 with respect to Pc_x, Pc_y, and Pc_z, which gives a system of linear
+        # equations, which we can recast into a matrix equation
+        # np.array([[A, B, C], [D, E, F], [G, H, I]]) * np.array([[Pc_z], [Pc_y], [Pc_x]]) = np.array([[J], [K], [L]])
+        with np.errstate(invalid="ignore"):
+            nk = gradk / np.linalg.norm(gradk, axis=0)
+
+        # def chi_sqr(xc, yc, zc):
+        #     cs = (zc, yc, xc)
+        #     chi = 0
+        #     for ii in range(3):
+        #         chi += np.sum((coords[ii] + nk[ii] * (cs[jj] - coords[jj]) - cs[ii]) ** 2 * wk)
+        #     return chi
+
+        # build 3x3 matrix from above
+        mat = np.zeros((3, 3))
+        for ll in range(3):  # rows of matrix
+            for ii in range(3):  # columns of matrix
+                if ii == ll:
+                    mat[ll, ii] += np.nansum(-wk * (nk[ii] * nk[ll] - 1))
+                else:
+                    mat[ll, ii] += np.nansum(-wk * nk[ii] * nk[ll])
+
+                for jj in range(3):  # internal sum
+                    if jj == ll:
+                        mat[ll, ii] += np.nansum(wk * nk[ii] * nk[jj] * (nk[jj] * nk[ll] - 1))
+                    else:
+                        mat[ll, ii] += np.nansum(wk * nk[ii] * nk[jj] * nk[jj] * nk[ll])
+
+        # build vector from above
+        vec = np.zeros((3, 1))
+        coord_sum = zk * nk[0] + yk * nk[1] + xk * nk[2]
+        for ll in range(3):  # sum over J, K, L
+            for ii in range(3):  # internal sum
+                if ii == ll:
+                    vec[ll] += -np.nansum((coords[ii] - nk[ii] * coord_sum) * (nk[ii] * nk[ll] - 1) * wk)
+                else:
+                    vec[ll] += -np.nansum((coords[ii] - nk[ii] * coord_sum) * nk[ii] * nk[ll] * wk)
+
+        # invert matrix
+        zc, yc, xc = np.linalg.inv(mat).dot(vec)
+        zc, yc, xc = np.float(zc), np.float(yc), np.float(xc)
+    else:
+        raise ValueError("mode must be 'centroid' or 'radial-symmetry', but was '%s'" % mode)
+
+    # compute useful parameters
+    # amplitude
+    amp = np.nanmax(img)
+
+    # compute standard devs to estimate sizes
+    w = np.nansum(img)
+    sx = np.sqrt(np.nansum((x - xc) ** 2 * img) / w)
+    sy = np.sqrt(np.nansum((y - yc) ** 2 * img) / w)
+    sigma_xy = np.sqrt(sx * sy)
+    sz = np.sqrt(np.nansum((z - zc) ** 2 * img) / w)
+
+    return np.array([amp, xc, yc, zc, sigma_xy, sz, np.nan])
+
+
 def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, sf=3):
     """
     Fit single ROI
@@ -958,266 +1442,11 @@ def plot_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, figsize=(
 
     return figh_interp, figh_raw
 
-# localization functions
 
-def filter_gauss(imgs, sigmas, dc, theta, dstage, sigma_cutoff=2, use_gpu=True):
-    """
-    Gaussian filter accounting for OPM geometry
-
-    :param imgs:
-    :param sigmas: (sigma_z, sigma_y, sigma_x)
-    :param dc:
-    :param theta:
-    :param dstage:
-    :param sigma_cutoff: number of sigmas to cutoff the kernel at # todo: allow different in different directions...
-    :return:
-    """
-
-    # normalize everything to camera pixel size
-    sigma_x_pix = sigmas[2] / dc
-    sigma_y_pix = sigmas[2] / dc
-    sigma_z_pix = sigmas[0] / dc
-    nk_x = 2 * int(np.round(sigma_x_pix * sigma_cutoff)) + 1
-    nk_y = 2 * int(np.round(sigma_y_pix * sigma_cutoff)) + 1
-    nk_z = 2 * int(np.round(sigma_z_pix * sigma_cutoff)) + 1
-    # determine how large the OPM geometry ROI needs to be to fit the desired filter
-    roi_sizes = get_roi_size([nk_z, nk_y, nk_x], theta, 1, dstage / dc, ensure_odd=True)
-
-    # get coordinates to evaluate kernel at
-    xk, yk, zk = get_lab_coords(roi_sizes[2], roi_sizes[1], 1, theta, dstage / dc * np.arange(roi_sizes[0]))
-    xk = xk - np.mean(xk)
-    yk = yk - np.mean(yk)
-    zk = zk - np.mean(zk)
-
-    kernel = np.exp(-xk ** 2 / 2 / sigma_x_pix ** 2 - yk ** 2 / 2 / sigma_y_pix ** 2 - zk ** 2 / 2 / sigma_z_pix ** 2)
-    kernel = kernel / np.sum(kernel)
-
-    # convolve, and deal with edges by normalizing
-    # todo: is there a wrap around issue, where this blends opposite edges?
-    if use_gpu:
-        kernel_cp = cp.asarray(kernel, dtype=cp.float32)
-        imgs_cp = cp.asarray(imgs, dtype=cp.float32)
-        imgs_filtered = cp.asnumpy(cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")/
-                                   cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same"))
-    else:
-        imgs_filtered = scipy.signal.fftconvolve(imgs, kernel, mode="same") / \
-             scipy.signal.fftconvolve(np.ones(imgs.shape), kernel, mode="same")
-
-    # this method too slow for large filter sizes
-    # imgs_filtered = scipy.ndimage.convolve(imgs, kernel, mode="constant", cval=0) / \
-    #                 scipy.ndimage.convolve(np.ones(imgs.shape), kernel, mode="constant", cval=0)
-
-    return imgs_filtered, kernel
-
-def combine_nearby_peaks(centers, min_xy_dist, min_z_dist, mode="average", weights=None):
-    """
-    Combine multiple peaks above threshold into reduced set, where assume all peaks separated by no more than
-    min_xy_dist and min_z_dist come from the same feature.
-    :param centers:
-    :param min_xy_dist:
-    :param min_z_dist:
-    :param mode:
-    :param weights:
-    :return:
-    """
-    # todo: looks like this might be easier if use some tools from scipy.spatial, scipy.spatial.cKDTree
-
-    centers_unique = np.array(centers, copy=True)
-    inds = np.arange(len(centers), dtype=np.int)
-
-    if weights is None:
-        weights = np.ones(len(centers_unique))
-
-    counter = 0
-    while 1:
-        # compute distances to all other beads
-        z_dists = np.abs(centers_unique[counter][0] - centers_unique[:, 0])
-        xy_dists = np.sqrt((centers_unique[counter][1] - centers_unique[:, 1]) ** 2 +
-                           (centers_unique[counter][2] - centers_unique[:, 2]) ** 2)
-
-        # beads which are close enough we will combine
-        combine = np.logical_and(z_dists < min_z_dist, xy_dists < min_xy_dist)
-        if mode == "average":
-            denom = np.nansum(np.logical_not(np.isnan(np.sum(centers_unique[combine], axis=1))) * weights[combine])
-            centers_unique[counter] = np.nansum(centers_unique[combine] * weights[combine][:, None], axis=0, dtype=np.float) / denom
-            weights[counter] = denom
-        elif mode == "keep-one":
-            pass
-        else:
-            raise ValueError("mode must be 'average' or 'keep-one', but was '%s'" % mode)
-
-        # remove all points from list except for one representative
-        combine[counter] = False
-
-        inds = inds[np.logical_not(combine)]
-        centers_unique = centers_unique[np.logical_not(combine)]
-        weights = weights[np.logical_not(combine)]
-
-        counter += 1
-        if counter >= len(centers_unique):
-            break
-
-    return centers_unique, inds
-
-def point_in_trapezoid(pts, x, y, z):
-    """
-    Test if a point is in the trapzoidal region described by x,y,z
-    :param pts:
-    :param x:
-    :param y:
-    :param z:
-    :return:
-    """
-    if pts.ndim == 1:
-        pts = pts[None, :]
-
-    # get theta
-    dc = x[0, 0, 1] - x[0, 0, 0]
-    dz = z[0, 1, 0] - z[0, 0, 0]
-    theta = np.arcsin(dz / dc)
-
-    # get edges
-    zstart = z.min()
-    ystart = y[0, 0, 0]
-    yend = y[-1, 0, 0]
-
-    # need to round near machine precision, or can get strange results when points right on boundary
-    decimals = 10
-    not_in_region_x = np.logical_or(np.round(pts[:, 2], decimals) < np.round(x.min(), decimals),
-                                    np.round(pts[:, 2], decimals) > np.round(x.max(), decimals))
-    not_in_region_z = np.logical_or(np.round(pts[:, 0], decimals) < np.round(z.min(), decimals),
-                                    np.round(pts[:, 0], decimals) > np.round(z.max(), decimals))
-    # tilted lines describing ends
-    not_in_region_yz = np.logical_or(np.round(pts[:, 0] - zstart, decimals) > np.round((pts[:, 1] - ystart) * np.tan(theta), decimals),
-                                     np.round(pts[:, 0] - zstart, decimals) < np.round((pts[:, 1] - yend) * np.tan(theta), decimals))
-
-    in_region = np.logical_not(np.logical_or(not_in_region_yz, np.logical_or(not_in_region_x, not_in_region_z)))
-
-    return in_region
-
-def localize_radial_symm(img, coords, mode="radial-symmetry"):
-    # todo: check quality of localizations
-    if img.ndim != 3:
-        raise ValueError("img must be a 3D array, but was %dD" % img.ndim)
-
-    nstep, ni1, ni2 = img.shape
-    z, y, x = coords
-
-    if mode == "centroid":
-        w = np.nansum(img)
-        xc = np.nansum(img * x) / w
-        yc = np.nansum(img * y) / w
-        zc = np.nansum(img * z) / w
-    elif mode == "radial-symmetry":
-        yk = 0.5 * (y[:-1, :-1, :] + y[1:, 1:, :])
-        xk = 0.5 * (x[:, :, :-1] + x[:, :, 1:])
-        zk = 0.5 * (z[:, :-1] + z[:, 1:])
-        coords = (zk, yk, xk)
-
-        # take a cube of 8 voxels, and compute gradients at the center, using the four pixel diagonals that pass
-        # through the center
-        grad_n1 = img[1:, 1:, 1:] - img[:-1, :-1, :-1]
-        # vectors go [nz, ny, nx]
-        n1 = np.array([zk[0, 1, 0] - zk[0, 0, 0], yk[1, 1, 0] - yk[0, 0, 0], xk[0, 0, 1] - xk[0, 0, 0]])
-        n1 = n1 / np.linalg.norm(n1)
-
-        grad_n2 = img[1:, :-1, 1:] - img[:-1, 1:, :-1]
-        n2 = np.array([zk[0, 0, 0] - zk[0, 1, 0], yk[1, 0, 0] - yk[0, 1, 0], xk[0, 0, 1]- xk[0, 0, 0]])
-        n2 = n2 / np.linalg.norm(n2)
-
-        grad_n3 = img[1:, :-1, :-1] - img[:-1, 1:, 1:]
-        n3 = np.array([zk[0, 0, 0] - zk[0, 1, 0], yk[1, 0, 0] - yk[0, 1, 0], xk[0, 0, 0] - xk[0, 0, 1]])
-        n3 = n3 / np.linalg.norm(n3)
-
-        grad_n4 = img[1:, 1:, :-1] - img[:-1, :-1, 1:]
-        n4 = np.array([zk[0, 1, 0] - zk[0, 0, 0], yk[1, 1, 0] - yk[0, 0, 0], xk[0, 0, 0] - xk[0, 0, 1]])
-        n4 = n4 / np.linalg.norm(n4)
-
-        # compute the gradient xyz components
-        # 3 unknowns and 4 eqns, so use pseudo-inverse to optimize overdetermined system
-        uvec_mat = np.concatenate((n1[None, :], n2[None, :], n3[None, :], n4[None, :]), axis=0)
-        dat_mat = np.concatenate((grad_n1.ravel()[None, :], grad_n2.ravel()[None, :],
-                                  grad_n3.ravel()[None, :], grad_n4.ravel()[None, :]), axis=0)
-        gradk = np.linalg.pinv(uvec_mat).dot(dat_mat)
-        gradk = np.reshape(gradk, [3, nstep - 1, ni1 - 1, ni2 - 1])
-
-        # compute weights by (1) increasing weight where gradient is large and (2) decreasing weight for points far away
-        # from the centroid (as small slope errors can become large as the line is extended to the centroi)
-        # approximate distance between (xk, yk) and (xc, yc) by assuming (xc, yc) is centroid of the gradient
-        grad_norm = np.sqrt(np.sum(gradk ** 2, axis=0))
-        centroid_gns = np.array([np.nansum(zk * grad_norm), np.nansum(yk * grad_norm), np.nansum(xk * grad_norm)]) / \
-                       np.nansum(grad_norm)
-        dk_centroid = np.sqrt((zk - centroid_gns[0]) ** 2 + (yk - centroid_gns[1]) ** 2 + (xk - centroid_gns[2]) ** 2)
-        # weights
-        wk = grad_norm ** 2 / dk_centroid
-
-        # in 3D, parameterize a line passing through point Po along normal n by
-        # V(t) = Pk + n * t
-        # distance between line and point Pc minimized at
-        # tmin = -\sum_{i=1}^3 (Pk_i - Pc_i) / \sum_i n_i^2
-        # dk^2 = \sum_k \sum_i (Pk + n * tmin - Pc)^2
-        # again, we want to minimize the quantity
-        # chi^2 = \sum_k dk^2 * wk
-        # so we take the derivatives of chi^2 with respect to Pc_x, Pc_y, and Pc_z, which gives a system of linear
-        # equations, which we can recast into a matrix equation
-        # np.array([[A, B, C], [D, E, F], [G, H, I]]) * np.array([[Pc_z], [Pc_y], [Pc_x]]) = np.array([[J], [K], [L]])
-        with np.errstate(invalid="ignore"):
-            nk = gradk / np.linalg.norm(gradk, axis=0)
-
-        # def chi_sqr(xc, yc, zc):
-        #     cs = (zc, yc, xc)
-        #     chi = 0
-        #     for ii in range(3):
-        #         chi += np.sum((coords[ii] + nk[ii] * (cs[jj] - coords[jj]) - cs[ii]) ** 2 * wk)
-        #     return chi
-
-        # build 3x3 matrix from above
-        mat = np.zeros((3, 3))
-        for ll in range(3):  # rows of matrix
-            for ii in range(3):  # columns of matrix
-                if ii == ll:
-                    mat[ll, ii] += np.nansum(-wk * (nk[ii] * nk[ll] - 1))
-                else:
-                    mat[ll, ii] += np.nansum(-wk * nk[ii] * nk[ll])
-
-                for jj in range(3):  # internal sum
-                    if jj == ll:
-                        mat[ll, ii] += np.nansum(wk * nk[ii] * nk[jj] * (nk[jj] * nk[ll] - 1))
-                    else:
-                        mat[ll, ii] += np.nansum(wk * nk[ii] * nk[jj] * nk[jj] * nk[ll])
-
-        # build vector from above
-        vec = np.zeros((3, 1))
-        coord_sum = zk * nk[0] + yk * nk[1] + xk * nk[2]
-        for ll in range(3):  # sum over J, K, L
-            for ii in range(3):  # internal sum
-                if ii == ll:
-                    vec[ll] += -np.nansum((coords[ii] - nk[ii] * coord_sum) * (nk[ii] * nk[ll] - 1) * wk)
-                else:
-                    vec[ll] += -np.nansum((coords[ii] - nk[ii] * coord_sum) * nk[ii] * nk[ll] * wk)
-
-        # invert matrix
-        zc, yc, xc = np.linalg.inv(mat).dot(vec)
-        zc, yc, xc = np.float(zc), np.float(yc), np.float(xc)
-    else:
-        raise ValueError("mode must be 'centroid' or 'radial-symmetry', but was '%s'" % mode)
-
-    # compute useful parameters
-    # amplitude
-    amp = np.nanmax(img)
-
-    # compute standard devs to estimate sizes
-    w = np.nansum(img)
-    sx = np.sqrt(np.nansum((x - xc) ** 2 * img) / w)
-    sy = np.sqrt(np.nansum((y - yc) ** 2 * img) / w)
-    sigma_xy = np.sqrt(sx * sy)
-    sz = np.sqrt(np.nansum((z - zc) ** 2 * img) / w)
-
-    return np.array([amp, xc, yc, zc, sigma_xy, sz, np.nan])
-
+# orchestration functions
 def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_sigma_large,
-             min_sep_allowed, sigma_bounds, y_offset=0, allowed_polygon=None, sf=3, use_max_filter=True,
-             mode="fit", use_gpu_fit=GPUFIT_AVAILABLE, use_gpu_filter=True):
+             min_sep_allowed, sigma_bounds, offsets=(0, 0, 0), allowed_polygon=None, sf=3, use_max_filter=True,
+             mode="fit", use_gpu_fit=GPUFIT_AVAILABLE, use_gpu_filter=CUPY_AVAILABLE):
     """
     :param imgs: raw OPM data
     :param params: {"dc", "dstage", "theta"}
@@ -1228,8 +1457,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     :param min_sep_allowed: (dz, dy, dx) assume points separated by less than this distance come from one spot
     :param sigma_bounds: ((sz_min, sy_min, sx_min), (sz_max, sy_max, sx_max)) exclude fits with sigmas that fall outside
     these ranges
-    :param nmax_try: maximum number of times to try fitting a single ROI # todo: git rid of this...
-    :param y_offset: offset to apply to y-coordinates. Useful for analyzing datasets in chunks
+    :param offsets: offset to apply to y-coordinates. Useful for analyzing datasets in chunks
     :return:
     """
 
@@ -1239,23 +1467,27 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     dc = params["dc"]
     theta = params["theta"]
     stage_step = params["dstep"]
-    stage_pos = stage_step * np.arange(npos)
 
-    x, y, z = get_lab_coords(nx, ny, dc, theta, stage_pos)
-    y += y_offset
+    x, y, z = get_skewed_coords((npos, ny, nx), dc, stage_step, theta)
+    x += offsets[2]
+    y += offsets[1]
+    z += offsets[0]
 
     # smooth image and remove background with difference of gaussians filter
     tstart = time.perf_counter()
 
-    imgs_filtered_small, ks = filter_gauss(imgs, filter_sigma_small, dc, theta, stage_step, sigma_cutoff=2, use_gpu=use_gpu_filter)
-    imgs_filtered_large, kl = filter_gauss(imgs, filter_sigma_large, dc, theta, stage_step, sigma_cutoff=2, use_gpu=use_gpu_filter)
-    imgs_filtered = imgs_filtered_small - imgs_filtered_large
+    ks = get_filter_kernel_skewed(filter_sigma_small, dc, theta, stage_step, sigma_cutoff=2)
+    kl = get_filter_kernel_skewed(filter_sigma_large, dc, theta, stage_step, sigma_cutoff=2)
+    imgs_hp = filter_convolve(imgs, ks, use_gpu=use_gpu_filter)
+    imgs_lp = filter_convolve(imgs, kl, use_gpu=use_gpu_filter)
+    imgs_filtered = imgs_hp - imgs_lp
 
     tend = time.perf_counter()
     print("Filtered images in %0.2fs" % (tend - tstart))
 
+    # mask off region of image
     tstart = time.perf_counter()
-    # mask will filter out some points
+
     if allowed_polygon is None:
         mask = np.expand_dims(np.ones(imgs_filtered[0].shape, dtype=np.bool), axis=0)
     else:
@@ -1279,13 +1511,13 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
         centers_guess_inds = np.concatenate([c[ispeak][:, None] for c in coords], axis=1)
     else:
 
-        footprint_roi_size = get_roi_size(min_sep_allowed, theta, dc, stage_step, ensure_odd=True)
+        footprint_roi_size = get_skewed_roi_size(min_sep_allowed, theta, dc, stage_step, ensure_odd=True)
         footprint_form = np.ones(footprint_roi_size, dtype=np.bool)
-        xf, yf, zf = get_lab_coords(footprint_form.shape[2], footprint_form.shape[1], dc, theta, stage_step * np.arange(footprint_form.shape[0]))
+        xf, yf, zf = get_skewed_coords(footprint_form.shape, dc, stage_step, theta)
         xf = xf - xf.mean()
         yf = yf - yf.mean()
         zf = zf - zf.mean()
-        footprint_mask = get_roi_mask((0, 0, 0), min_sep_allowed[1], min_sep_allowed[0], xf, yf, zf)
+        footprint_mask = get_roi_mask((0, 0, 0), min_sep_allowed, (zf, yf, xf))
         footprint_mask[np.isnan(footprint_mask)] = 0
         footprint_mask = footprint_mask.astype(np.bool)
         if use_gpu_filter:
@@ -1293,7 +1525,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
             img_max_filtered = cp.asnumpy(cupyx.scipy.ndimage.maximum_filter(cp.asarray(imgs_filtered * mask, dtype=cp.float32),
                                                                              footprint=cp.asarray(footprint_form * footprint_mask)))
         else:
-            img_max_filtered = cupyx.scipy.ndimage.maximum_filter(imgs_filtered * mask, footprint=footprint_form * footprint_mask)
+            img_max_filtered = scipy.ndimage.maximum_filter(imgs_filtered * mask, footprint=footprint_form * footprint_mask)
 
         centers_guess_inds = np.argwhere(np.logical_and(imgs_filtered == img_max_filtered, imgs_filtered > abs_threshold))
 
@@ -1325,12 +1557,12 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
 
     tstart = time.perf_counter()
     # get rois and coordinates for each center
-    roi_size_skew = get_roi_size(roi_size, theta, dc, stage_step, ensure_odd=True)
-    rois, xrois, yrois, zrois = zip(*[get_tilted_roi(c, x, y, z, roi_size_skew, imgs.shape) for c in centers_guess])
+    roi_size_skew = get_skewed_roi_size(roi_size, theta, dc, stage_step, ensure_odd=True)
+    rois, xrois, yrois, zrois = zip(*[get_skewed_roi(c, x, y, z, roi_size_skew, imgs.shape) for c in centers_guess])
     rois = np.asarray(rois)
 
     # exclude some regions of roi
-    roi_masks = [get_roi_mask(c, 0.5 * roi_size[1], np.inf, xrois[ii], yrois[ii], zrois[ii]) for ii, c in enumerate(centers_guess)]
+    roi_masks = [get_roi_mask(c, (np.inf, 0.5 * roi_size[1]), (zrois[ii], yrois[ii], xrois[ii])) for ii, c in enumerate(centers_guess)]
     tend = time.perf_counter()
     print("Prepared %d rois in %0.2fs" % (len(rois), tend - tstart))
 
@@ -1351,22 +1583,29 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
 
             print("Kept %d points away from boundary" % np.sum(to_keep))
 
-            print("using parallelization on GPU")
+            print("starting fitting in parallel on GPU")
 
-            imgs_roi = [get_roi(r, imgs)[roi_mask].astype(np.float32)[None, :] for r in rois]
+            imgs_roi = [cut_roi(r, imgs)[roi_mask].astype(np.float32)[None, :] for r in rois]
 
             data = np.concatenate(imgs_roi, axis=0)
             data = data.astype(np.float32)
 
             coords = [np.broadcast_arrays(x, y, z) for x, y, z in zip(xrois, yrois, zrois)]
             user_info = np.concatenate([np.concatenate((c[0][roi_mask], c[1][roi_mask], c[2][roi_mask])) for c in coords])
-            user_info = user_info.astype(dtype=np.float32)
+            user_info = user_info.astype(np.float32)
 
             nfits, n_pts_per_fit = data.shape
             init_params = np.concatenate((100 * np.ones((nfits, 1)), centers_temp[:, 2][:, None],
                                           centers_temp[:, 1][:, None], centers_temp[:, 0][:, None],
                                           0.14 * np.ones((nfits, 1)), 0.4 * np.ones((nfits, 1)), 0 * np.ones((nfits, 1))), axis=1)
             init_params = init_params.astype(np.float32)
+
+            if data.ndim != 2:
+                raise ValueError
+            if init_params.ndim != 2 or init_params.shape != (nfits, 7):
+                raise ValueError
+            if user_info.ndim != 1 or user_info.size != 3 * nfits * n_pts_per_fit:
+                raise ValueError
 
             fit_params, fit_states, chi_sqrs, niters, fit_t = gf.fit(data, None, gf.ModelID.GAUSS_3D_ARB, init_params,
                                                                      max_number_iterations=100,
@@ -1375,7 +1614,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
         else:
             print("using multiprocessor parallelization on CPU")
             results = joblib.Parallel(n_jobs=-1, verbose=1, timeout=None)(
-                      joblib.delayed(fit_roi)(get_roi(rois[ii], imgs_filtered) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
+                      joblib.delayed(fit_roi)(cut_roi(rois[ii], imgs_filtered) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
                                               init_params=[None, centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], None, None, None])
                       for ii in range(len(centers_guess)))
             # results = []
@@ -1389,7 +1628,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     elif mode == "radial-symmetry":
         print("starting radial-symmetry localization for %d rois" % len(centers_guess))
 
-        img_roi_masked = [get_roi(rois[ii], imgs_filtered) * roi_masks[ii] for ii in range(len(centers_guess))]
+        img_roi_masked = [cut_roi(rois[ii], imgs_filtered) * roi_masks[ii] for ii in range(len(centers_guess))]
         for ii in range(len(img_roi_masked)):
             img_roi_masked[ii][img_roi_masked[ii] < 0] = 0
 
@@ -1444,4 +1683,3 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
           (len(centers_unique), min_sep_allowed[1], min_sep_allowed[0], tend - tstart))
 
     return imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess
-

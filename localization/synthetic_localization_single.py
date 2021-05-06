@@ -25,7 +25,7 @@ sxy = 0.22 * emission_wavelength / na
 sz = np.sqrt(6) / np.pi * ni * emission_wavelength / na ** 2
 
 # coordinates
-x, y, z = localize.get_lab_coords(nx, ny, dc, theta, stage_pos)
+x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
 
 # simulated image
 gt, c_gt = localize.simulate_img({"dc": dc, "dstep": dstep, "theta": theta, "shape": (npos, ny, nx)},

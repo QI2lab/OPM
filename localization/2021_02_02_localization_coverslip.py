@@ -114,7 +114,8 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
 
     # plot localization fit diagnostic on good points
     # picture coordinates in coverslip frame
-    x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
+    # x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
+    x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
     y += y_offset
 
     if plot_results:
@@ -166,7 +167,7 @@ with open(fname, "wb") as f:
 imgs_all = np.flip(ds_array.compute(), axis=1)
 nstep, ny, nx = imgs_all.shape
 gn = np.arange(nstep) * dstage
-x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
+x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
 
 xi, yi, zi, imgs_unskew = localize.interp_opm_data(imgs_all, dc, dstage, theta, mode="ortho-interp")
 # xi, yi, zi, imgs_unskew = localize.interp_opm_data(imgs_all, dc, dstage, theta, mode="row-interp")

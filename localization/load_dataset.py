@@ -1,5 +1,7 @@
 """
 Load image data and/or metadata
+
+todo: get rid of this file
 """
 import numpy as np
 import tifffile

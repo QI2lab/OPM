@@ -3,7 +3,6 @@ import localize
 import numpy as np
 import matplotlib.pyplot as plt
 
-
 # set scan parameters
 theta = 30 * np.pi/180
 normal = np.array([0, -np.sin(theta), np.cos(theta)]) # normal of camera pixel
@@ -23,7 +22,7 @@ sxy = 0.22 * emission_wavelength / na
 sz = np.sqrt(6) / np.pi * ni * emission_wavelength / na ** 2
 
 # coordinates
-x, y, z = localize.get_lab_coords(nx, ny, dc, theta, stage_pos)
+x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
 x, y, z = np.broadcast_arrays(x, y, z)
 
 # simulated image

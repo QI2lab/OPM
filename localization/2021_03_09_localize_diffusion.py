@@ -129,7 +129,7 @@ for vv in range(nvols):
         imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize(
             imgs, {"dc": dc, "dstep": dstage, "theta": theta}, absolute_threshold, roi_size,
             filter_sigma_small, filter_sigma_large, min_dists, (sigmas_min, sigmas_max),
-            y_offset=y_offset, allowed_polygon=allowed_camera_region, mode="fit")
+            offsets=(0, y_offset, 0), allowed_polygon=allowed_camera_region, mode="fit")
 
         # store results
         centers_vol.append(centers_unique)
