@@ -1,22 +1,23 @@
 #!/usr/bin/env python
-
-'''
-Image post-processing routines used in OPM reconstruction
-
-Last updated: Shepherd 04/21
-'''
 import numpy as np
 from numba import njit, prange
-
-'''
-Perform orthogonal interpolation into a uniform pixel size grid.
-
-Last updated: Shepherd 04/21
-'''
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
 def deskew(data,parameters):
+    """
+    Perform parallelized orthogonal interpolation into a uniform pixel size grid.
+    
+    :param data: ndarray
+        image stack of uniformly spaced OPM planes
+    :param parameters: dict
+        theta - tilt angle above coverslip
+        distance - step between image planes in OPM coordinates
+        pizel_size - in-plane pixel size
+
+    :return output: ndarray
+        image stack of deskewed OPM planes on uniform grid
+    """
 
     # unwrap parameters 
     theta = parameters[0]             # (degrees)
@@ -98,16 +99,21 @@ def deskew(data,parameters):
     # return output
     return output
 
-'''
-Calculate flat-field using BaSiC algorithm via pyimagej
-https://doi.org/10.1038/ncomms14836
-
-The use of pyimagej can likely be improved, but this works for now.
-
-Last updated: Shepherd 04/21
-'''
-
 def manage_flat_field(stack,ij):
+    """
+    Manage performing flat and dark-field using BaSiC algorithm via pyimagej. 
+    The use of pyimagej can likely be improved, but this works for now.
+    https://doi.org/10.1038/ncomms14836
+
+    Returns flat- and darkfield corrected image
+    
+    :param stack: dask.array
+        matrix of OPM planes
+    :param ij: imagej
+        imagej object
+
+    :return corrected_stack: ndarray of deskewed OPM planes on uniform grid
+    """
 
     print('Calculating flat-field correction using ImageJ and BaSiC plugin.')
     flat_field, dark_field = calculate_flat_field(stack,ij)
@@ -117,13 +123,27 @@ def manage_flat_field(stack,ij):
 
     return corrected_stack
 
-def calculate_flat_field(sub_stack,ij):
+def calculate_flat_field(stack,ij):
+    """
+    Calculate flat- and darkfield using BaSiC algorithm via pyimagej. Returns flat- and darkfield images.
+    
+    :param stack: dask.array
+        matrix of OPM planes
+    :param ij: imagej
+        imagej object
+
+    :return flat_field: ndarray
+        retrospective flat field 
+    :return dark_field: ndarray
+        retrospective dark field 
+    """
+
     # convert dataset from numpy -> java
-    if sub_stack.shape[0] >= 200:
-        sub_stack_for_flat_field = sub_stack[np.random.choice(sub_stack.shape[0], 50, replace=False)]
+    if stack.shape[0] >= 200:
+        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 50, replace=False)]
     else:
-        sub_stack_for_flat_field = sub_stack
-    sub_stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(sub_stack_for_flat_field.compute()))
+        stack_for_flat_field = stack
+    stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(stack_for_flat_field.compute()))
 
     # show image in imagej since BaSiC plugin cannot be run headless
     ij.ui().show(sub_stack_iterable)
@@ -193,24 +213,43 @@ def calculate_flat_field(sub_stack,ij):
 
     return flat_field, dark_field
 
-def perform_flat_field(flat_field,dark_field,sub_stack):
+def perform_flat_field(flat_field,dark_field,stack):
+    """
+    Calculate flat- and darkfield corrected image. Returns corrected image.
+    
+    :param flat_field: ndarray
+        flatfield correction
+    :param dark_field: ndarray
+        darkfield correction
+    :param stack: dask.array
+        matrix of OPM planes
 
-    corrected_sub_stack = sub_stack.astype(np.float32) - dark_field
-    corrected_sub_stack[corrected_sub_stack<0] = 0 
-    corrected_sub_stack = corrected_sub_stack/flat_field
+    :return corrected_stack: ndarray
+        corrected OPM image planes 
+    """
 
-    return corrected_sub_stack.compute()
+    corrected_stack = stack.astype(np.float32) - dark_field
+    corrected_stack[corrected_stack<0] = 0 
+    corrected_stack = corrected_stack/flat_field
 
-'''
-Perform deconvolution using Microvolution
+    return corrected_stack.compute()
 
-to do: implement reading known PSF from disk
-IMPORTANT: This relies on commerical license for Microvolution. If you do not have one, will need to replace with your own decon.
+   def mv_decon(image,ch_idx,dr,dz):
+    '''
+    Perform deconvolution using Microvolution API. To do: implement reading known PSF from disk. Return deconvolved image.
 
-Last updated: 04/21 Shepherd
-'''
-   
-def mv_decon(image,ch_idx,dr,dz):
+    :param image: ndarray
+        raw image
+    :param ch_idx: int
+        wavelength index
+    :param dr: float
+        xy pixel size
+    :param dz: float
+        z pixel size
+
+    :return image: ndarray
+        deconvolved image 
+    '''
 
     import microvolution_py as mv
 
