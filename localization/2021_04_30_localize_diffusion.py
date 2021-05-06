@@ -10,6 +10,7 @@ import localize
 import load_dataset
 import pycromanager
 import sys
+
 # add path for data_io.py
 fdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
 sys.path.append(fdir)
@@ -17,10 +18,9 @@ sys.path.append(fdir)
 import data_io
 
 # paths to image files
-root_dirs = [os.path.join(r"\\10.206.26.21", "opm2", "20210408n", "glycerol60x_1", "Full resolution")]
-# root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
-# root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
-# root_dir = os.path.join(r"/mnt", "opm2", "20210408m", "glycerol50x_1", "Full resolution")
+root_dirs = [os.path.join(r"/mnt", "opm2", "20210430f", "glycerol_40_1", "Full resolution"),
+             os.path.join(r"/mnt", "opm2", "20210430h", "glycerol_50_1", "Full resolution"),
+             os.path.join(r"/mnt", "opm2", "20210430i", "glycerol_60_1", "Full resolution")]
 
 tbegin = time.perf_counter()
 for root_dir in root_dirs:
