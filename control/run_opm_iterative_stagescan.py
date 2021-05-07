@@ -8,6 +8,8 @@ Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading t
 
 # imports
 from pycromanager import Bridge, Acquisition
+from hardware.APump import APump
+from hardware.HamiltonMVP import HamiltonMVP
 from pathlib import Path
 import numpy as np
 import time
@@ -54,7 +56,8 @@ def run_fluidic_program(r, df_program, mvp_controller, pump_controller):
         source_name = str(row['source'])
 
         # extract pump rate
-        pump_rate = float(row['rate'])
+        pump_amount_ml = float(row['volume'])
+        pump_time_min  = float(row['time'])
 
         if source_name == 'RUN':
             pump_controller.stopFlow()
@@ -107,6 +110,8 @@ def run_fluidic_program(r, df_program, mvp_controller, pump_controller):
                 pump_rate = 9.0
             elif np.round((pump_amount_ml/pump_time_min),2) == 0.22:
                 pump_rate = 5.0
+            elif np.round((pump_amount_ml/pump_time_min),2) == 0.2:
+                pump_rate = 4.0
 
             print('Pump setting: '+str(pump_rate))
 
@@ -129,8 +134,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 0, 0.5, 0, 0] # (0 -> 100%)
+    channel_states = [False, True, True, True, False] # true -> active, false -> inactive
+    channel_powers = [0, 75, 75, 75, 0] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -143,34 +148,30 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 2.0
+    exposure_ms = 10.0
 
     # galvo voltage at neutral
     galvo_neutral_volt = 0.0 # unit: volts
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 5500. #unit: um
-    scan_axis_end_um = 6000. #unit: um
+    scan_axis_start_um = 4000. #unit: um
+    scan_axis_end_um = 5000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -4750 #unit: um
-    tile_axis_end_um = -4745. #unit: um
+    tile_axis_start_um = -8000 #unit: um
+    tile_axis_end_um = -7000. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 14253. #unit: um
-    height_axis_end_um = 14255 #unit:  um
-
-    # number of timepoints to execute
-    # TO DO: add in control for rate of experiment
-    timepoints = 1
-
-    # FOV parameters
-    # ONLY MODIFY IF NECESSARY
-    # ROI = [0, 1152, 2304, 512] #unit: pixels
+    height_axis_start_um = 15977. #unit: um
+    height_axis_end_um = 15978. #unit:  um
 
     # setup file name
-    save_directory=Path('E:/20210506a/')
-    save_name = '605nm_bead_test'
+    save_directory=Path('E:/20210506lung/')
+    program_name = Path('D:/20210506_afterfive.csv')
+    save_name = '16gene_lung_10micron'
+
+    run_fluidics = True
+    run_scope = True
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -241,7 +242,7 @@ def main():
     scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
 
     # tile axis setup
-    tile_axis_overlap=0.3 #unit: percentage
+    tile_axis_overlap=0.2 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
     tile_axis_ROI = x_pixels*pixel_size_um  #unit: um
@@ -253,7 +254,7 @@ def main():
         tile_axis_positions=1
 
     # height axis setup
-    height_axis_overlap=0.3 #unit: percentage
+    height_axis_overlap=0.2 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
     height_axis_ROI = y_pixels*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
@@ -267,9 +268,6 @@ def main():
     # get handle to xy and z stages
     xy_stage = core.get_xy_stage_device()
     z_stage = core.get_focus_device()
-
-    # galvo voltage at neutral
-    galvo_neutral_volt = -0.075 # unit: volts
 
     # set the galvo to the neutral position if it is not already
     try: 
@@ -322,12 +320,6 @@ def main():
 
     # turn off 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
-
-    # move scan scan stage to initial position
-    core.set_xy_position(scan_axis_start_um,tile_axis_start_um)
-    core.wait_for_device(xy_stage)
-    core.set_position(height_axis_start_um)
-    core.wait_for_device(z_stage)
 
     # turn on 'transmit repeated commands' for Tiger
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
@@ -421,7 +413,7 @@ def main():
 
         # initialize valves
         valve_controller.autoAddress()
-        valve_controller.autoDetectValves()
+        #valve_controller.autoDetectValves()
 
         df_program = pd.read_csv(program_name)
         iterative_rounds = df_program['round'].max()
@@ -430,8 +422,8 @@ def main():
         iterative_rounds = 1
 
     # flags for metadata and processing
-    setup_processing=True
-    setup_metadata=True
+    setup_processing=False
+    setup_metadata=False
 
     
     # output experiment info
@@ -447,16 +439,22 @@ def main():
         evt = { 'axes': {'z': x}}
         events.append(evt)
 
-    for r_idx in range(iterative_rounds):
+    for r_idx in range(5,6):
 
         if run_fluidics == True:
             success_fluidics = False
-            success_fluidics = run_fluidic_program(r, df_program, valve_controller, pump_controller)
+            success_fluidics = run_fluidic_program(r_idx, df_program, valve_controller, pump_controller)
             if not(success_fluidics):
                 print('Error in fluidics! Stopping scan.')
                 sys.exit()
 
         if run_scope == True:
+            # move scan scan stage to initial position
+            core.set_xy_position(scan_axis_start_um,tile_axis_start_um)
+            core.wait_for_device(xy_stage)
+            core.set_position(height_axis_start_um)
+            core.wait_for_device(z_stage)
+
             for y_idx in range(tile_axis_positions):
                 # calculate tile axis position
                 tile_position_um = tile_axis_start_um+(tile_axis_step_um*y_idx)
@@ -482,7 +480,7 @@ def main():
                         #print(dataDO)
                     
                         # update save_name with current tile information
-                        save_name_tyzc = save_name +'_t'+str(t_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)
+                        save_name_ryzc = save_name +'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)
 
                         # turn on 'transmit repeated commands' for Tiger
                         core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
@@ -562,12 +560,10 @@ def main():
                             trigger_state = core.get_property('Camera','TRIGGER SOURCE')
 
                         
-                        print('T: '+str(t_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx)+' C: '+str(ch_idx))
+                        print('R: '+str(r_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx)+' C: '+str(ch_idx))
                         # run acquisition for this tyzc combination
-                        with Acquisition(directory=save_directory, name=save_name_tyzc,
-                                        post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0, 
-                                        saving_queue_size=5000) as acq:
-
+                        with Acquisition(directory=save_directory, name=save_name_ryzc, saving_queue_size=5000,
+                                        post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
                             acq.acquire(events)
 
                         # clean up acquisition so that AcqEngJ releases directory.
@@ -658,10 +654,10 @@ def main():
                         # copy current tyzc data to NAS
                         save_directory_path = Path(save_directory)
                         remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
-                        src= Path(save_directory) / Path(save_name_tyzc+ '_1') 
-                        dst= Path(remote_directory) / Path(save_name_tyzc+ '_1') 
+                        src= Path(save_directory) / Path(save_name_ryzc+ '_1') 
+                        dst= Path(remote_directory) / Path(save_name_ryzc+ '_1') 
                         Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
-                    
+                        
     # set lasers to zero power
     channel_powers = [0.,0.,0.,0.,0.]
     core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
@@ -694,4 +690,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
