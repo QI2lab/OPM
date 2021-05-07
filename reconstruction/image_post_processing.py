@@ -234,7 +234,7 @@ def perform_flat_field(flat_field,dark_field,stack):
 
     return corrected_stack.compute()
 
-   def mv_decon(image,ch_idx,dr,dz):
+def mv_decon(image,ch_idx,dr,dz):
     '''
     Perform deconvolution using Microvolution API. To do: implement reading known PSF from disk. Return deconvolved image.
 

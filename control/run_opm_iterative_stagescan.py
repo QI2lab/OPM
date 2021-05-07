@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
 '''
-OPM stage control without fluidics.
+OPM stage control with fluidics.
 
+Shepherd 05/21 - add in fluidics control. Will refactor once it works into separate files.
 Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading to server for simultaneous reconstruction
 '''
 
