@@ -26,46 +26,50 @@ def main():
     #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------
 
-    # set up lasers
-    channel_labels = ["488", "561", "635"]
-    channel_powers = [0, 10, 75, 75, 0 ] # (0 -> 100%)
-    channel_exposures_ms [100, 100, 100]
-    do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
-
-    x = []
-    y = []
-    z = []
-    xy = np.hstack([x[:, None], y[:, None], z[:, None]])
-
     # setup file name
     save_directory=Path('E:/20210507cells/')
-    program_name = Path('D:/20210507_afterfive.csv')
+    program_name = Path('D:/20210507_dapi.csv')
     save_name = 'sina_cellculture_trial002'
 
-    run_fluidics = True
+    run_fluidics = False
     run_scope = True
+
+    if run_scope == True:
+        # set up lasers
+        channel_labels = ["405","488"]
+        channel_powers = [5, 50, 90, 90, 0 ] # (0 -> 100%)
+        channel_exposures_ms = [10, 100]
+        
+        xy = np.empty([9,2]).astype(float)
+        xy[0:3,0]=9500
+        xy[3:6,0]=9650
+        xy[6:9,0]=9800
+        xy[[0,5,6],1]=-4700
+        xy[[1,4,7],1]=-4850
+        xy[[2,3,8],1]=-5000
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------
 
-    # connect to Micromanager instance
-    bridge = Bridge()
-    core = bridge.get_core()
+    if run_scope == True:
+        # connect to Micromanager instance
+        bridge = Bridge()
+        core = bridge.get_core()
 
-    # turn off lasers
-    core.set_config('Laser','Off')
-    core.wait_for_config('Laser','Off')
+        # turn off lasers
+        core.set_config('Laser','Off')
+        core.wait_for_config('Laser','Off')
 
-    # change core timeout for long stage moves
-    core.set_property('Core','TimeoutMs',100000)
-    time.sleep(1)
-    # set lasers to user defined power
-    core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
-    core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
-    core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
-    core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
-    core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
+        # change core timeout for long stage moves
+        core.set_property('Core','TimeoutMs',100000)
+        time.sleep(1)
+        # set lasers to user defined power
+        core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
+        core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
+        core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
+        core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
+        core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
     if run_fluidics == True:
         # setup pump parameters
@@ -95,21 +99,19 @@ def main():
     else:
         iterative_rounds = 1
 
-    # output experiment info
-    print('Number of labeling rounds: '+str(iterative_rounds))
-    print('Number of XY positions: '+str(height_axis_positions))
-    print('Number of channels: '+str(n_active_channels))
-    print('Number of Z positions: '+str(tile_axis_positions))
+    if run_scope == True:
+        # output experiment info
+        print('Number of labeling rounds: '+str(iterative_rounds))
+        print('Number of XY positions: '+str(xy.shape[0]))
 
-
-    events = multi_d_acquisition_events(xyz_positions=xyz, 
-                                        z_start=-10.0, z_end=10.0, z_step=0.25,
-                                        channels="Laser",
-                                        channel_group=channel_labels,
-                                        channel_exposures_ms=channel_exposures_ms,
-                                        order='pzc')
+        events = multi_d_acquisition_events(xy_positions=xy, 
+                                            z_start=15974, z_end=15989, z_step=0.25,
+                                            channels=channel_labels,
+                                            channel_group="Laser",
+                                            channel_exposures_ms=channel_exposures_ms,
+                                            order='pzc')
     
-    for r_idx in range(iterative_rounds):
+    for r_idx in range(8,9):
 
         if run_fluidics == True:
             success_fluidics = False
@@ -120,14 +122,21 @@ def main():
 
         if run_scope == True:
 
-            with Acquisition(directory='/path/to/saving/dir', name='acquisition_name') as acq:
+            save_name_round = str(save_name)+'_r'+str(r_idx).zfill(4)
+
+            with Acquisition(directory=str(save_directory), name=save_name_round,show_display=True, max_multi_res_index=0,saving_queue_size=200) as acq:
                 acq.acquire(events)
 
             acq = None
+
+            # turn off lasers
+            core.set_config('Laser','Off')
+            core.wait_for_config('Laser','Off')
             
-    # turn all lasers off
-    core.set_config('Laser','Off')
-    core.wait_for_config('Laser','Off')
+    if run_scope == True:
+        # turn all lasers off
+        core.set_config('Laser','Off')
+        core.wait_for_config('Laser','Off')
 
 #-----------------------------------------------------------------------------
 
