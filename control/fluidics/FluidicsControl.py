@@ -47,6 +47,8 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
     # select current round
     df_current_program = df_program[(df_program['round']==r_idx+1)]
 
+
+    print ('Executing iterative round '+str(r_idx+1)+'.')
     for index, row in df_current_program.iterrows():
         # extract source name
         source_name = str(row['source'])
