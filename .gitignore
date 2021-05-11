@@ -15,3 +15,5 @@ control/.vscode/settings.json
 control/.ipynb_checkpoints/define_fluidics_program-checkpoint.ipynb
 control/define_fluidics_program.ipynb
 control/define_fluidics_program.ipynb
+test_easygui.py
+test.py
