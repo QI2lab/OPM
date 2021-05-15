@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 '''
-OPM stage control with fluidics.
+OPM stage control with iterative fluidics.
 
-Shepherd 05/21 - add in fluidics control. Will refactor once it works into separate files.
+Shepherd 05/21 - pull all settings from MM GUI and prompt user to setup experiment that way using "easygui" package
+Shepherd 05/21 - add in fluidics control. Recently refactored into seaprate files
 Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading to server for simultaneous reconstruction
 '''
 
@@ -59,6 +60,18 @@ def main():
     core.set_config('Laser','Off')
     core.wait_for_config('Laser','Off')
 
+    # set all lasers to software control
+    core.set_config('Trigger-405','CW (constant power)')
+    core.wait_for_config('Trigger-405','CW (constant power)')
+    core.set_config('Trigger-488','CW (constant power)')
+    core.wait_for_config('Trigger-488','CW (constant power)')
+    core.set_config('Trigger-561','CW (constant power)')
+    core.wait_for_config('Trigger-561','CW (constant power)')
+    core.set_config('Trigger-637','CW (constant power)')
+    core.wait_for_config('Trigger-637','CW (constant power)')
+    core.set_config('Trigger-730','CW (constant power)')
+    core.wait_for_config('Trigger-730','CW (constant power)')
+
     # set camera to fast readout mode
     core.set_config('Camera-Setup','ScanMode3')
     core.wait_for_config('Camera-Setup','ScanMode3')
@@ -94,7 +107,7 @@ def main():
     # galvo voltage at neutral
     galvo_neutral_volt = 0.0 # unit: volts
 
-    # setup DAQ
+    # setup digital trigger buffer on DAQ
     samples_per_ch = 2
     DAQ_sample_rate_Hz = 10000
     num_DI_channels = 8
@@ -129,7 +142,8 @@ def main():
     # initialize valves
     valve_controller.autoAddress()
 
-    # load user defined program from hard disk 
+    # load user defined program from hard disk
+    # TO DO: this into data_io.py
     df_program = pd.read_csv(program_name)
     iterative_rounds = df_program['round'].max()
     print('Number of iterative rounds: '+str(iterative_rounds))
@@ -138,6 +152,7 @@ def main():
     for r_idx in range(iterative_rounds):
 
         # set motors to on to actively maintain position during fluidics run
+        # TO DO: figure out how to make this work
         #core.set_property('XYStage:XY:31','MaintainState-MA',2)
         #core.set_property('ZStage:M:37','MaintainState-MA',2)
 
@@ -149,6 +164,7 @@ def main():
             sys.exit()
 
         # set motors to standard drift correction setting
+        # TO DO: figure out how to make this work
         #core.set_property('XYStage:XY:31','MaintainState-MA',0)
         #core.set_property('ZStage:M:37','MaintainState-MA',0)
 
@@ -221,6 +237,8 @@ def main():
                         if (stage_pos.get_stage_device_label() == 'ZStage:M:37'):
                             z_positions[idx] = stage_pos.x
 
+                # determine corners for XY stage and stop/bottom for Z stage
+                # TO DO: setup interpolation and split up XY positions to avoid brute force Z scanning
                 scan_axis_start_um = np.round(x_positions.min(),0)
                 scan_axis_end_um = np.round(x_positions.max(),0)
 
@@ -285,34 +303,24 @@ def main():
                 if height_axis_positions==0:
                     height_axis_positions=1
 
-                # construct imaging summary for user
-                # output experiment info
-                string1 = str(iterative_rounds)
-                string2=str(n_active_channels)
-                string3=str(height_axis_positions)
-                string4=str(tile_axis_positions)
-                string5=str(scan_axis_positions)
-                string6=str(scan_axis_start_um)
-                string7=str(scan_axis_end_um)
-                string8=str(tile_axis_start_um)
-                string9=str(tile_axis_end_um)
-                string10=str(height_axis_start_um)
-                string11=str(height_axis_end_um)
-
-                scan_settings = (f"Number of labeling rounds: {string1} \n"
-                                f"Number of channels:  {string2} \n"
-                                f"Number of Z slabs:  {string3} \n"
-                                f"Number of Y tiles:  {string4} \n"
-                                f"Number of scan positions:  {string5} \n"
-                                f"Scan start: {string6}  \n"
-                                f"Scan end:  {string7} \n"
-                                   f"Tile start:  {string8} \n"
-                                   f"Tile end:  {string9} \n"
-                                   f"Height start:  {string10} \n"
-                                   f"Height end:  {string11} \n")
-
+                # construct and display imaging summary to user
+                scan_settings = (f"Number of labeling rounds: {str(iterative_rounds)} \n\n"
+                                f"Number of Y tiles:  {str(tile_axis_positions)} \n"
+                                f"Tile start:  {str(tile_axis_start_um)} \n"
+                                f"Tile end:  {str(tile_axis_end_um)} \n\n"
+                                f"Number of Z slabs:  {str(height_axis_positions)} \n"
+                                f"Height start:  {str(height_axis_start_um)} \n"
+                                f"Height end:  {str(height_axis_end_um)} \n\n"
+                                f"Number of channels:  {str(n_active_channels)} \n"
+                                f"Active lasers: {str(channel_states)} \n"
+                                f"Lasers powers: {str(channel_powers)} \n\n"
+                                f"Number of scan positions:  {str(scan_axis_positions)} \n"
+                                f"Scan start: {str(scan_axis_start_um)}  \n"
+                                f"Scan end:  {str(scan_axis_end_um)} \n")
+                                
                 output = easygui.textbox(scan_settings, 'Please review scan settings')
 
+                # verify user actually wants to run imaging
                 run_imaging = easygui.ynbox('Run acquistion?', 'Title', ('Yes', 'No'))
 
                 if run_imaging == True:
@@ -451,12 +459,6 @@ def main():
             core.set_config('Laser','AllOn')
             core.wait_for_config('Laser','AllOn')
 
-            # create events to execute scan
-            events = []
-            for x in range(scan_axis_positions):
-                evt = { 'axes': {'z': x}}
-                events.append(evt)
-
         for y_idx in range(tile_axis_positions):
                 # calculate tile axis position
                 tile_position_um = tile_axis_start_um+(tile_axis_step_um*y_idx)
@@ -473,186 +475,202 @@ def main():
                     core.set_position(height_position_um)
                     core.wait_for_device(z_stage)
 
-                    for ch_idx in active_channel_indices:
+                    # TO DO: set Z stage to constantly hold position
+                    # TO DO: figure out autofocusing solution!
 
-                        # create DAQ pattern for laser strobing controlled via rolling shutter
-                        dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
-                        dataDO[0,ch_idx]=1
-                        dataDO[1,ch_idx]=0
+                    # update save_name with current tile information
+                    save_name_ryz = str(save_name) +'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)
 
-                        # update save_name with current tile information
-                        save_name_ryzc = str(save_name) +'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)
+                    # use one Acquisition object for all channels at this RYZ position.
+                    # see: https://github.com/micro-manager/pycro-manager/issues/286
+                    # would be better to go back to one Acquisition per laser line to aid reconstruction and transferring data
+                    with Acquisition(directory=str(save_directory), name=save_name_ryz, saving_queue_size=5000,
+                                     post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                        for ch_idx in active_channel_indices:
 
-                        # turn on 'transmit repeated commands' for Tiger
-                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+                            # create events to execute scan for this channel and all stage scan positions
+                            events = []
+                            for x in range(scan_axis_positions):
+                                evt = { 'axes': {'c': ch_idx, 'z': x}}
+                                events.append(evt)
 
-                        # check to make sure Tiger is not busy
-                        ready='B'
-                        while(ready!='N'):
-                            command = 'STATUS'
-                            core.set_property('TigerCommHub','SerialCommand',command)
-                            ready = core.get_property('TigerCommHub','SerialResponse')
-                            time.sleep(.500)
+                            # create DAQ pattern for laser strobing controlled via rolling shutter
+                            dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
+                            dataDO[0,ch_idx]=1
+                            dataDO[1,ch_idx]=0
 
-                        # turn off 'transmit repeated commands' for Tiger
-                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+                            # turn on 'transmit repeated commands' for Tiger
+                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
-                        # save actual stage positions
-                        xy_pos = core.get_xy_stage_position()
-                        stage_x = xy_pos.x
-                        stage_y = xy_pos.y
-                        stage_z = core.get_position()
-                        current_stage_data = [{'stage_x': stage_x, 'stage_y': stage_y, 'stage_z': stage_z}]
-                        df_current_stage = pd.DataFrame(current_stage_data)
+                            # check to make sure Tiger is not busy
+                            ready='B'
+                            while(ready!='N'):
+                                command = 'STATUS'
+                                core.set_property('TigerCommHub','SerialCommand',command)
+                                ready = core.get_property('TigerCommHub','SerialResponse')
+                                time.sleep(.500)
 
-                        # setup DAQ for laser strobing
-                        try:    
-                            # ----- DIGITAL input -------
-                            taskDI = daq.Task()
-                            taskDI.CreateDIChan("/Dev1/PFI0","",daq.DAQmx_Val_ChanForAllLines)
-                            
-                            ## Configure change detection timing (from wave generator)
-                            taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
-                            taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
+                            # turn off 'transmit repeated commands' for Tiger
+                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
-                            ## Set where the starting trigger 
-                            taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0",daq.DAQmx_Val_Rising)
-                            
-                            ## Export DI signal to unused PFI pins, for clock and start
-                            taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
-                            taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger,"/Dev1/PFI1")
-                            
-                            # ----- DIGITAL output ------   
-                            taskDO = daq.Task()
-                            taskDO.CreateDOChan("/Dev1/port0/line0:7","",daq.DAQmx_Val_ChanForAllLines)
+                            # save actual stage positions
+                            xy_pos = core.get_xy_stage_position()
+                            stage_x = xy_pos.x
+                            stage_y = xy_pos.y
+                            stage_z = core.get_position()
+                            current_stage_data = [{'stage_x': stage_x, 
+                                                   'stage_y': stage_y, 
+                                                   'stage_z': stage_z}]
 
-                            ## Configure timing (from DI task) 
-                            taskDO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
-                            
-                            ## Write the output waveform
-                            samples_per_ch_ct_digital = ct.c_int32()
-                            taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
+                            # setup DAQ for laser strobing
+                            try:    
+                                # ----- DIGITAL input -------
+                                taskDI = daq.Task()
+                                taskDI.CreateDIChan("/Dev1/PFI0","",daq.DAQmx_Val_ChanForAllLines)
+                                
+                                ## Configure change detection timing (from wave generator)
+                                taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
+                                taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
 
-                            ## ------ Start digital input and output tasks ----------
-                            taskDO.StartTask()    
-                            taskDI.StartTask()
+                                ## Set where the starting trigger 
+                                taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0",daq.DAQmx_Val_Rising)
+                                
+                                ## Export DI signal to unused PFI pins, for clock and start
+                                taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
+                                taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger,"/Dev1/PFI1")
+                                
+                                # ----- DIGITAL output ------   
+                                taskDO = daq.Task()
+                                taskDO.CreateDOChan("/Dev1/port0/line0:7","",daq.DAQmx_Val_ChanForAllLines)
 
-                        except daq.DAQError as err:
-                            print("DAQmx Error %s"%err)
+                                ## Configure timing (from DI task) 
+                                taskDO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
+                                
+                                ## Write the output waveform
+                                samples_per_ch_ct_digital = ct.c_int32()
+                                taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
 
-                        # set camera to external control
-                        # DCAM sets the camera back to INTERNAL mode after each acquisition
-                        core.set_config('Camera-TriggerSource','EXTERNAL')
-                        core.wait_for_config('Camera-TriggerSource','EXTERNAL')
+                                ## ------ Start digital input and output tasks ----------
+                                taskDO.StartTask()    
+                                taskDI.StartTask()
 
-                        # verify that camera actually switched back to external trigger mode
-                        trigger_state = core.get_property('Camera','TRIGGER SOURCE')
+                            except daq.DAQError as err:
+                                print("DAQmx Error %s"%err)
 
-                        # if not in external control, keep trying until camera changes settings
-                        while not(trigger_state =='EXTERNAL'):
-                            time.sleep(2.0)
+                            # set camera to external control
+                            # DCAM sets the camera back to INTERNAL mode after each acquisition
                             core.set_config('Camera-TriggerSource','EXTERNAL')
                             core.wait_for_config('Camera-TriggerSource','EXTERNAL')
+
+                            # verify that camera actually switched back to external trigger mode
                             trigger_state = core.get_property('Camera','TRIGGER SOURCE')
 
-                        
-                        print('R: '+str(r_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx)+' C: '+str(ch_idx))
-                        # run acquisition for this tyzc combination
-                        with Acquisition(directory=str(save_directory), name=save_name_ryzc, saving_queue_size=5000,
-                                        post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                            # if not in external control, keep trying until camera changes settings
+                            while not(trigger_state =='EXTERNAL'):
+                                time.sleep(2.0)
+                                core.set_config('Camera-TriggerSource','EXTERNAL')
+                                core.wait_for_config('Camera-TriggerSource','EXTERNAL')
+                                trigger_state = core.get_property('Camera','TRIGGER SOURCE')
+
+                            # run acquisition for this tyzc combination
+                            print('R: '+str(r_idx+1)+' Y: '+str(y_idx)+' Z: '+str(z_idx)+' C: '+str(ch_idx))
                             acq.acquire(events)
 
-                        # clean up acquisition so that AcqEngJ releases directory.
-                        # NOTE: This currently does not work. 
-                        acq = None
+                            # stop DAQ and make sure it is at zero
+                            try:
+                                ## Stop and clear both tasks
+                                taskDI.StopTask()
+                                taskDO.StopTask()
+                                taskDI.ClearTask()
+                                taskDO.ClearTask()
+                            except daq.DAQError as err:
+                                print("DAQmx Error %s"%err)
 
-                        # stop DAQ and make sure it is at zero
-                        try:
-                            ## Stop and clear both tasks
-                            taskDI.StopTask()
-                            taskDO.StopTask()
-                            taskDI.ClearTask()
-                            taskDO.ClearTask()
-                        except daq.DAQError as err:
-                            print("DAQmx Error %s"%err)
+                            # save experimental info after first acquistion. 
+                            if (setup_metadata):
+                                # save acquistion parameters
+                                scan_param_data = [{'root_name': str(save_name),
+                                                    'scan_type': str('ierative-stage'),
+                                                    'theta': float(30.0), 
+                                                    'scan_step_um': float(scan_axis_step_um*1000.), 
+                                                    'pixel_size_um': float(pixel_size_um*1000.),
+                                                    'axial_step_um': str(''),
+                                                    'y_pixels': int(y_pixels),
+                                                    'x_pixels': int(x_pixels),
+                                                    'exposure_ms': float(exposure_ms),
+                                                    'camera': str('Orca_FusionBT'),
+                                                    'readout_mode': str('16bit_mode3'),
+                                                    'num_r': int(iterative_rounds),
+                                                    'num_y': int(tile_axis_positions),
+                                                    'num_z': int(height_axis_positions),
+                                                    'num_ch': int(n_active_channels),
+                                                    'scan_axis_positions': int(scan_axis_positions),
+                                                    '405_active': channel_states[0],
+                                                    '488_active': channel_states[1],
+                                                    '561_active': channel_states[2],
+                                                    '635_active': channel_states[3],
+                                                    '730_active': channel_states[4],
+                                                    '405_power': float(channel_powers[0]),
+                                                    '488_power': float(channel_powers[1]),
+                                                    '561_power': float(channel_powers[2]),
+                                                    '635_power': float(channel_powers[3]),
+                                                    '730_power': float(channel_powers[4])}]
 
-                        # save experimental info after first tile. 
-                        # we do it this way so that Pycromanager can manage the directories.
-                        if (setup_metadata):
-                            # save stage scan parameters
-                            scan_param_data = [{'root_name': str(save_name),
-                                'scan_type': str('stage'),
-                                'theta': float(30.0), 
-                                'scan_step': float(scan_axis_step_um*1000.), 
-                                'pixel_size': float(pixel_size_um*1000.),
-                                'num_r': int(iterative_rounds),
-                                'num_y': int(tile_axis_positions),
-                                'num_z': int(height_axis_positions),
-                                'num_ch': int(n_active_channels),
-                                'scan_axis_positions': int(scan_axis_positions),
-                                'y_pixels': int(y_pixels),
-                                'x_pixels': int(x_pixels),
-                                '405_active': channel_states[0],
-                                '488_active': channel_states[1],
-                                '561_active': channel_states[2],
-                                '635_active': channel_states[3],
-                                '730_active': channel_states[4]}]
+                                save_name_metdata = save_directory / 'scan_metadata.csv'
+                                data_io.write_metadata(scan_param_data[0], save_name_metdata)
 
-                            # df_stage_scan_params = pd.DataFrame(scan_param_data)
-                            # save_name_stage_params = save_directory / 'scan_metadata.csv'
-                            # df_stage_scan_params.to_csv(save_name_stage_params)
-                            data_io.write_metadata(scan_param_data[0], save_directory / 'scan_metadata.csv')
+                                setup_metadata=False
 
-                            setup_metadata=False
+                            # save stage scan positions after each run. This allows for alignment of individual channels better
+                            save_name_stage_positions = Path('r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)+'_stage_positions.csv')
+                            save_name_stage_positions = save_directory / save_name_stage_positions
+                            data_io.write_metadata(current_stage_data[0], save_name_stage_positions)
 
-                        # save stage scan positions after each tile
-                        save_name_stage_positions = Path('r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)+'_stage_positions.csv')
-                        save_name_stage_positions = save_directory / save_name_stage_positions
-                        # todo: use data_io instead
-                        df_current_stage.to_csv(save_name_stage_positions)
+                            # turn on 'transmit repeated commands' for Tiger
+                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
-                        # turn on 'transmit repeated commands' for Tiger
-                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+                            # check to make sure Tiger is not busy
+                            ready='B'
+                            while(ready!='N'):
+                                command = 'STATUS'
+                                core.set_property('TigerCommHub','SerialCommand',command)
+                                ready = core.get_property('TigerCommHub','SerialResponse')
+                                time.sleep(.500)
 
-                        # check to make sure Tiger is not busy
-                        ready='B'
-                        while(ready!='N'):
-                            command = 'STATUS'
-                            core.set_property('TigerCommHub','SerialCommand',command)
-                            ready = core.get_property('TigerCommHub','SerialResponse')
-                            time.sleep(.500)
+                            # turn off 'transmit repeated commands' for Tiger
+                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+                            
+                            # if first tile, make parent directory on NAS and start reconstruction script on the server
+                            if setup_processing:
+                                # make home directory on NAS
+                                save_directory_path = Path(save_directory)
+                                remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
+                                cmd='mkdir ' + str(remote_directory)
+                                status_mkdir = subprocess.run(cmd, shell=True)
 
-                        # turn off 'transmit repeated commands' for Tiger
-                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
-                        
-                        # if first tile, make parent directory on NAS and start reconstruction script on the server
-                        if setup_processing:
-                            # make home directory on NAS
+                                # copy full experiment metadata to NAS
+                                src= Path(save_directory) / Path('scan_metadata.csv') 
+                                dst= Path(remote_directory) / Path('scan_metadata.csv') 
+                                Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
+
+                                setup_processing=False
+                            
+                            # copy current ryzc stage position metadata to NAS
                             save_directory_path = Path(save_directory)
                             remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
-                            cmd='mkdir ' + str(remote_directory)
-                            status_mkdir = subprocess.run(cmd, shell=True)
-
-                            # copy full experiment metadata to NAS
-                            src= Path(save_directory) / Path('scan_metadata.csv') 
-                            dst= Path(remote_directory) / Path('scan_metadata.csv') 
+                            src= Path(save_directory) / Path(save_name_stage_positions.parts[2])
+                            dst= Path(remote_directory) / Path(save_name_stage_positions.parts[2])
                             Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
 
-                            setup_processing=False
-                        
-                        # copy current tyzc metadata to NAS
-                        save_directory_path = Path(save_directory)
-                        remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
-                        src= Path(save_directory) / Path(save_name_stage_positions.parts[2])
-                        dst= Path(remote_directory) / Path(save_name_stage_positions.parts[2])
-                        Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
-
-                        # copy current tyzc data to NAS
-                        save_directory_path = Path(save_directory)
-                        remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
-                        src= Path(save_directory) / Path(save_name_ryzc+ '_1') 
-                        dst= Path(remote_directory) / Path(save_name_ryzc+ '_1') 
-                        Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
+                    # clean up acquisition so that AcqEngJ releases directory.
+                    acq = None
+                            
+                    # copy just acquired ryz data to NAS
+                    save_directory_path = Path(save_directory)
+                    remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
+                    src= Path(save_directory) / Path(save_name_ryz+ '_1') 
+                    dst= Path(remote_directory) / Path(save_name_ryz+ '_1') 
+                    Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
 
     # set lasers to zero power
     channel_powers = [0.,0.,0.,0.,0.]

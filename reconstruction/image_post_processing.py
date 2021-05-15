@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import numpy as np
 from numba import njit, prange
+import scyjava
+from scyjava import jimport
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
@@ -140,13 +142,14 @@ def calculate_flat_field(stack,ij):
 
     # convert dataset from numpy -> java
     if stack.shape[0] >= 200:
-        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 50, replace=False)]
+        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 100, replace=False)]
     else:
         stack_for_flat_field = stack
-    stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(stack_for_flat_field.compute()))
+    stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(stack_for_flat_field))
+    del stack_for_flat_field
 
     # show image in imagej since BaSiC plugin cannot be run headless
-    ij.ui().show(sub_stack_iterable)
+    ij.ui().show(stack_iterable)
     WindowManager = jimport('ij.WindowManager')
     current_image = WindowManager.getCurrentImage()
 
@@ -208,8 +211,7 @@ def calculate_flat_field(stack,ij):
     """
     ij.py.run_macro(macro4)
 
-    del sub_stack_iterable
-    del sub_stack
+    del stack_iterable
 
     return flat_field, dark_field
 
@@ -232,7 +234,7 @@ def perform_flat_field(flat_field,dark_field,stack):
     corrected_stack[corrected_stack<0] = 0 
     corrected_stack = corrected_stack/flat_field
 
-    return corrected_stack.compute()
+    return corrected_stack
 
 def mv_decon(image,ch_idx,dr,dz):
     '''
