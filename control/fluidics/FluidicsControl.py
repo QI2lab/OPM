@@ -6,6 +6,7 @@ Functions to execute fluidics programs
 Shepherd 05/21 - initial commit
 '''
 
+from os.path import supports_unicode_filenames
 import numpy as np
 import pandas as pd
 import time
@@ -51,7 +52,7 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
     print ('Executing iterative round '+str(r_idx+1)+'.')
     for index, row in df_current_program.iterrows():
         # extract source name
-        source_name = str(row['source'])
+        source_name = str(row['source']).strip()
 
         # extract pump rate
         pump_amount_ml = float(row['volume'])
@@ -98,7 +99,9 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
             # please check for your own setup
             pump_rate = -1.0
 
-            if np.round((pump_amount_ml/pump_time_min),2) == 0.50:
+            if np.round((pump_amount_ml/pump_time_min),2) == 1:
+                pump_rate = 48.0
+            elif np.round((pump_amount_ml/pump_time_min),2) == 0.50:
                 pump_rate = 11.0
             elif np.round((pump_amount_ml/pump_time_min),2) == 0.40:
                 pump_rate = 10.0
