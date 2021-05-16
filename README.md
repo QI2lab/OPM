@@ -1,18 +1,41 @@
-# High NA oblique plane microscopy paired with multiplexed RNA-FISH
-Control and analysis code for our OPM using a solid immersion tertiary objective (aka [Mr. Snouty](https://andrewgyork.github.io/high_na_single_objective_lightsheet/)). Preprint [here](https://www.biorxiv.org/content/10.1101/2020.04.07.030569v2).
+# High NA oblique plane microscopy (OPM) with iterative labeling for multiplexed fluorescence imaging
+Control and analysis code for the qi2lab @ ASU OPM using a solid immersion tertiary objective (aka [Mr. Snouty](https://andrewgyork.github.io/high_na_single_objective_lightsheet/)). Original instrument details, performance, and verification found in joint [eLife publication ](https://elifesciences.org/articles/57681) with York and Fiolka labs. Codebase and wavefront data from our high NA OPM are in the "elife-publication-frozen" branch of this repo.
 
-* /Control-MM
-  * [Micromanager 2.0](https://micro-manager.org/wiki/Version_2.0) script to run multicolor stage scan using an OPM built with ASI Tiger controller, ASI constant speed scan optimized XY stage, ASI objective focusing LS-50 stage, Coherent OBIS Laser Box with 5 Coherent OBIS lasers, and Teledyne Photometrics Prime BSI Express.
-* /Reconstruction-python
-  * Python code to execute stage deskew using orthogonal interpolation and create a [BigStitcher](https://github.com/PreibischLab/BigStitcher/) compatible HDF5 file. Orthogonal interpolation algorithm directly inspired by [Vincent Maioli PhD thesis](https://doi.org/10.25560/68022). Depends on [npy2bdv](https://github.com/nvladimus/npy2bdv/), [numba](http://numba.pydata.org/), [scikit-image](https://scikit-image.org/), [natsort](https://natsort.readthedocs.io/en/master/index.html), and standard Python libraries.
-* /probedesign-python (work in progress)
-  * Python code to design (multiplex by barcoding) or (multiplex by sequential) encoding probes, readout probes, amplifier scheme, and codebook from a set of genes. Encoding probe seqeuences are based on the [Oligopaints](https://oligopaints.hms.harvard.edu/) framework. Approach to our two-layer probe design is a synthesis of the existing MERFISH, seqFISH, smiFISH, etc.. literature and our prior RNA-FISH pipelines, which are referenced in the Jupyter notebook. Depends on a [local BLAST server](https://blast.ncbi.nlm.nih.gov/Blast.cgi?PAGE_TYPE=BlastDocs&DOC_TYPE=Download), [BEDtools](https://bedtools.readthedocs.io/en/latest/), [cruzdb](https://pythonhosted.org/cruzdb/), [pandas](https://pandas.pydata.org/), [pybedtools](https://daler.github.io/pybedtools/), [biopython](https://biopython.org/), and standard Python libraries.
-* /fluidics-python (stub)
-  * Python code to control fluidics unit
-* /Control-pyMM (stub)
-  * pycro-manager control software that integrates existing Micromanager 2.0 control code with fluidics control for fully automated acquisition.
+The tools developed here can be used with any OPM design.
 
-This is a work in progress as we work towards fully automated imaging and a release. Integration of our fluidics setup, [pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), and real time data deskewing are next on the roadmap.
+# Important changes (05/21)
+There have been large-scale, breaking changes and bug fixes since publication to the instrument design, control code, and reconstruction code. There will be additional refactors in the common weeks to modularize the code for shared functions and streamline acquisition setup in Micro-manager 2.0. Ongoing work on fast 3D single-molecule tracking and iterative imaging with fluidics will continue to live in separate branches in this repo for now.
+
+On the instrument side, we have added galvo scanning, changed the light sheet launcher to use an ETL for low NA remote focusing, returned to a cylindrical lens instead of DSLM, and swapped out the Triggerscope 3B for an NI DAQ card for more reliable high-speed triggering. In all our our experiments, the camera acts as the master clock. Laser blanking and galvo movements are synchronized to avoid motion blur due to sCMOS rolling shutters.
+
+This branch incorporates fluidics control using a fluidics controller based on designs by the [Moffit Lab](https://moffittlab.github.io/). We are very thankful to them for their help.
+
+A new parts lists is in-progress.
+
+# Iterative OPM operation
+* run_opm_iterative_stagescan_GUI.py
+  * Run a multiround, multiposition, multicolor stage scan using the qi2lab OPM in light sheet mode. Push data to a network drive during acquisition using 10G fiber connection for post-processing.
+  * Depends on: [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
+  * Usage: Run python code with Micromanager open and fluidics program defined. Use the MM GUI to setup the corners of the stage scan, laser lines, laser powers, and exposure time. Software will prompt you to make sure everything looks ok and then execute the multiround imaging.
+* recon_opm_iterative_stagescan.py 
+  * Reconstruct an OPM acquisition created using 'run_opm_iterative_stagescan_GUI.py' and create a BDV H5 file for [BigStitcher](https://imagej.net/BigStitcher). Can be pointed to directory for an in-progress acquisition or completed acquisition. In qi2lab, we push in-progress acquisitions to a NAS via 10G fiber and reconstruct during acquistion using a Linux server with a 10G fiber connection to the NAS, dual 12-core Xeon CPUs, 1TB of RAM, and a Titan RTX GPU.
+  * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [npy2bdv](https://github.com/nvladimus/npy2bdv), [scikit-image](https://scikit-image.org/), data_io.py (in this repo), image_post_processing.py (in this repo), and various standard Python libraries.
+  * Optional dependencies for GPU deconvolution and retrospective flatfield correction: [Microvolution](https://www.microvolution.com/) (commerical software! Can replace with [pyCUDAdecon](https://pycudadecon.readthedocs.io/en/latest/) for open-source GPU deconvolution), [pyimagej](https://github.com/imagej/pyimagej), and local [FIJI](https://imagej.net/Fiji/Downloads) w/ [BaSiC](https://github.com/marrlab/BaSiC) plugin JAR.
+  * Usage: python recon_opm_iterative_stagescan.py -i < inputdirectory > -d <0: no deconvolution (DEFAULT), 1: deconvolution> -f <0: no flat-field (DEFAULT), 1: flat-field>
+
+# Iterative widefield bypass operation
+* run_widefield_iterative_stagescan_GUI.py
+  * Run a multiround, multiposition, multicolor stage scan using the qi2lab OPM in widefield bypass mode. Push data to a network drive during acquisition using 10G fiber connection for post-processing.
+  * Depends on: [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
+  * Usage: Run python code with Micromanager open and fluidics program defined. Use the MM GUI to setup the all stage positions for imaging, z stack size, laser lines, laser powers, and exposure time. Software will prompt you to make sure everything looks ok and then execute the multiround imaging.
+* recon_widefield_iterative_stagescan_GUI.py 
+  * Reconstruct an OPM acquisition created using 'run_widefield_iterative_stagescan_GUI.py' and create a BDV H5 file for [BigStitcher](https://imagej.net/BigStitcher). Can be pointed to directory for an in-progress acquisition or completed acquisition. In qi2lab, we push in-progress acquisitions to a NAS via 10G fiber and reconstruct during acquistion using a Linux server with a 10G fiber connection to the NAS, dual 12-core Xeon CPUs, 1TB of RAM, and a Titan RTX GPU.
+  * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [npy2bdv](https://github.com/nvladimus/npy2bdv), [scikit-image](https://scikit-image.org/), data_io.py (in this repo), image_post_processing.py (in this repo), and various standard Python libraries.
+  * Optional dependencies for GPU deconvolution and retrospective flatfield correction: [Microvolution](https://www.microvolution.com/) (commerical software! Can replace with [pyCUDAdecon](https://pycudadecon.readthedocs.io/en/latest/) for open-source GPU deconvolution), [pyimagej](https://github.com/imagej/pyimagej), and local [FIJI](https://imagej.net/Fiji/Downloads) w/ [BaSiC](https://github.com/marrlab/BaSiC) plugin JAR.
+  * Usage: python recon_opm_iterative_stagescan.py -i < inputdirectory > -d <0: no deconvolution (DEFAULT), 1: deconvolution> -f <0: no flat-field (DEFAULT), 1: flat-field>
 
 # Contributions / Acknowledgements
-Peter Brown (ASU), Rory Kruithoff (ASU), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Jeffrey Moffitt (Harvard Medical School), Brian Long (Allen Brain Institute), Alfred Millet-Sikking (Calico), and Andrew York (Calico).
+Peter Brown (ASU), Franky Djutanta (ASU), Doug Shepherd (ASU), Jefff Moffitt (BCU & Harvard), Nikita Vladimirov (BIMSB_MDC),  Henry Pinkard (UCB), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Alfred Millett-Sikking (Calico), and Andrew York (Calico).
+
+# Contact
+For questions, contact Doug Shepherd (douglas.shepherd (at) asu.edu).
