@@ -28,14 +28,14 @@ A new parts lists is in-progress.
   * Run a multiround, multiposition, multicolor stage scan using the qi2lab OPM in widefield bypass mode. Push data to a network drive during acquisition using 10G fiber connection for post-processing.
   * Depends on: [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
   * Usage: Run python code with Micromanager open and fluidics program defined. Use the MM GUI to setup the all stage positions for imaging, z stack size, laser lines, laser powers, and exposure time. Software will prompt you to make sure everything looks ok and then execute the multiround imaging.
-* recon_widefield_iterative_stagescan_GUI.py 
+* recon_widefield_iterative_stagescan.py 
   * Reconstruct an OPM acquisition created using 'run_widefield_iterative_stagescan_GUI.py' and create a BDV H5 file for [BigStitcher](https://imagej.net/BigStitcher). Can be pointed to directory for an in-progress acquisition or completed acquisition. In qi2lab, we push in-progress acquisitions to a NAS via 10G fiber and reconstruct during acquistion using a Linux server with a 10G fiber connection to the NAS, dual 12-core Xeon CPUs, 1TB of RAM, and a Titan RTX GPU.
   * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [npy2bdv](https://github.com/nvladimus/npy2bdv), [scikit-image](https://scikit-image.org/), data_io.py (in this repo), image_post_processing.py (in this repo), and various standard Python libraries.
   * Optional dependencies for GPU deconvolution and retrospective flatfield correction: [Microvolution](https://www.microvolution.com/) (commerical software! Can replace with [pyCUDAdecon](https://pycudadecon.readthedocs.io/en/latest/) for open-source GPU deconvolution), [pyimagej](https://github.com/imagej/pyimagej), and local [FIJI](https://imagej.net/Fiji/Downloads) w/ [BaSiC](https://github.com/marrlab/BaSiC) plugin JAR.
   * Usage: python recon_opm_iterative_stagescan.py -i < inputdirectory > -d <0: no deconvolution (DEFAULT), 1: deconvolution> -f <0: no flat-field (DEFAULT), 1: flat-field>
 
 # Contributions / Acknowledgements
-Peter Brown (ASU), Franky Djutanta (ASU), Doug Shepherd (ASU), Jefff Moffitt (BCU & Harvard), Nikita Vladimirov (BIMSB_MDC),  Henry Pinkard (UCB), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Alfred Millett-Sikking (Calico), and Andrew York (Calico).
+Peter Brown (ASU), Franky Djutanta (ASU), Doug Shepherd (ASU), Jeff Moffitt (BCU & Harvard), Nikita Vladimirov (BIMSB_MDC),  Henry Pinkard (UCB), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Alfred Millett-Sikking (Calico), and Andrew York (Calico).
 
 # Contact
 For questions, contact Doug Shepherd (douglas.shepherd (at) asu.edu).
