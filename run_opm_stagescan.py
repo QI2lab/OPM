@@ -39,8 +39,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 20, 100, 20, 100] # (0 -> 100%)
+    channel_states = [False, True, True, True, True] # true -> active, false -> inactive
+    channel_powers = [0, 25, 50, 75, 95] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -55,20 +55,23 @@ def main():
     # exposure time
     exposure_ms = 20.0
 
+    # excess scan positions
+    excess_scan_positions = 10
+
     # galvo voltage at neutral
-    galvo_neutral_volt = -0.075 # unit: volts
+    galvo_neutral_volt = 0.0 # unit: volts
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 21500. #unit: um
-    scan_axis_end_um = 22000. #unit: um
+    scan_axis_start_um = 8700. #unit: um
+    scan_axis_end_um = 14500. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -6000 #unit: um
-    tile_axis_end_um = -5500. #unit: um
+    tile_axis_start_um = -6600 #unit: um
+    tile_axis_end_um = 1200. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 14800. #unit: um
-    height_axis_end_um = 14880 #unit:  um
+    height_axis_start_um = 14555. #unit: um
+    height_axis_end_um = 14565 #unit:  um
 
     # number of timepoints to execute
     # TO DO: add in control for rate of experiment
@@ -76,11 +79,11 @@ def main():
 
     # FOV parameters
     # ONLY MODIFY IF NECESSARY
-    ROI = [0, 1152, 2304, 512] #unit: pixels
+    # ROI = [0, 1152, 2304, 512] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210406a/')
-    save_name = 'etx_shield_antigen'
+    save_directory=Path('E:/20210514b/')
+    save_name = 'etx_rat_lung'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -95,8 +98,8 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set camera to fast readout mode
-    core.set_config('Camera-Setup','ScanMode2')
-    core.wait_for_config('Camera-Setup','ScanMode2')
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
     # set camera to START mode upon input trigger
     core.set_config('Camera-TriggerType','START')
@@ -107,8 +110,8 @@ def main():
     core.wait_for_config('Camera-TriggerPolarity','POSITIVE')
 
     # set camera to internal control
-    core.set_config('Camera-TriggerSource','EXTERNAL')
-    core.wait_for_config('Camera-TriggerSource','EXTERNAL')
+    core.set_config('Camera-TriggerSource','INTERNAL')
+    core.wait_for_config('Camera-TriggerSource','INTERNAL')
 
     # set camera to output positive triggers on all lines for exposure
     core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
@@ -124,6 +127,11 @@ def main():
 
     # set exposure
     core.set_exposure(exposure_ms)
+
+    # determine image size
+    core.snap_image()
+    y_pixels = core.get_image_height()
+    x_pixels = core.get_image_width()
 
     # grab exposure
     true_exposure = core.get_exposure()
@@ -142,14 +150,14 @@ def main():
     scan_axis_range_um = np.abs(scan_axis_end_um-scan_axis_start_um)  # unit: um
     scan_axis_range_mm = scan_axis_range_um / 1000 #unit: mm
     actual_exposure_s = actual_readout_ms / 1000. #unit: s
-    scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s,2) #unit: mm/s
+    scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s,4) #unit: mm/s
     scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
 
     # tile axis setup
-    tile_axis_overlap=0.3 #unit: percentage
+    tile_axis_overlap=0.2 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
-    tile_axis_ROI = ROI[2]*pixel_size_um  #unit: um
+    tile_axis_ROI = x_pixels*pixel_size_um  #unit: um
     tile_axis_step_um = np.round((tile_axis_ROI) * (1-tile_axis_overlap),2) #unit: um
     tile_axis_step_mm = tile_axis_step_um / 1000 #unit: mm
     tile_axis_positions = np.rint(tile_axis_range_mm / tile_axis_step_mm).astype(int)+1  #unit: number of positions
@@ -158,10 +166,10 @@ def main():
         tile_axis_positions=1
 
     # height axis setup
-    height_axis_overlap=0.3 #unit: percentage
+    height_axis_overlap=0.2 #unit: percentage
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
-    height_axis_ROI = ROI[3]*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
+    height_axis_ROI = y_pixels*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
     height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
     height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
     height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int)+1 #unit: number of positions
@@ -174,7 +182,7 @@ def main():
     z_stage = core.get_focus_device()
 
     # galvo voltage at neutral
-    galvo_neutral_volt = -0.075 # unit: volts
+    galvo_neutral_volt = 0.0 # unit: volts
 
     # set the galvo to the neutral position if it is not already
     try: 
@@ -295,7 +303,6 @@ def main():
     core.wait_for_config('Laser','AllOn')
 
     # set lasers to user defined power
-    channel_powers = [power_405,power_488,power_561,power_635,power_730]
     core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
     core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
     core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
@@ -326,7 +333,7 @@ def main():
 
     # create events to execute scan
     events = []
-    for x in range(scan_axis_positions):
+    for x in range(scan_axis_positions+excess_scan_positions):
         evt = { 'axes': {'z': x}}
         events.append(evt)
 
@@ -347,7 +354,7 @@ def main():
                 core.set_position(height_position_um)
                 core.wait_for_device(z_stage)
 
-                for ch_idx in channels_in_experiment:
+                for ch_idx in active_channel_indices:
 
                     # create DAQ pattern for laser strobing controlled via rolling shutter
                     dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
@@ -385,16 +392,13 @@ def main():
                         # ----- DIGITAL input -------
                         taskDI = daq.Task()
                         taskDI.CreateDIChan("/Dev1/PFI0","",daq.DAQmx_Val_ChanForAllLines)
-                        #taskDI.CreateDIChan("OnboardClock","",daq.DAQmx_Val_ChanForAllLines)
                         
                         ## Configure change detection timing (from wave generator)
                         taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
                         taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
-                        #taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_FiniteSamps,samples_per_ch)
 
                         ## Set where the starting trigger 
                         taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0",daq.DAQmx_Val_Rising)
-                        #taskDI.SetTrigAttribute(daq.DAQmx_StartTrig_Retriggerable,retriggerable) # only available for finite task sampling
                         
                         ## Export DI signal to unused PFI pins, for clock and start
                         taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
@@ -402,7 +406,6 @@ def main():
                         
                         # ----- DIGITAL output ------   
                         taskDO = daq.Task()
-                        # TO DO: Write each laser line separately!
                         taskDO.CreateDOChan("/Dev1/port0/line0:7","",daq.DAQmx_Val_ChanForAllLines)
 
                         ## Configure timing (from DI task) 
@@ -411,7 +414,6 @@ def main():
                         ## Write the output waveform
                         samples_per_ch_ct_digital = ct.c_int32()
                         taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
-                        #rint("WriteDigitalLines sample per channel count = %d" % samples_per_ch_ct_digital.value)
 
                         ## ------ Start digital input and output tasks ----------
                         taskDO.StartTask()    
@@ -472,13 +474,14 @@ def main():
                             'num_z': int(height_axis_positions),
                             'num_ch': int(n_active_channels),
                             'scan_axis_positions': int(scan_axis_positions),
-                            'y_pixels': int(ROI[3]),
-                            'x_pixels': int(ROI[2]),
-                            '405_active': channel_states[0],
-                            '488_active': channel_states[1],
-                            '561_active': channel_states[2],
-                            '635_active': channel_states[3],
-                            '730_active': channel_states[4]}]
+                            'excess_scan_positions': int(excess_scan_positions),
+                            'y_pixels': int(y_pixels),
+                            'x_pixels': int(x_pixels),
+                            '405_active': bool(channel_states[0]),
+                            '488_active': bool(channel_states[1]),
+                            '561_active': bool(channel_states[2]),
+                            '635_active': bool(channel_states[3]),
+                            '730_active': bool(channel_states[4])}]
 
                         # df_stage_scan_params = pd.DataFrame(scan_param_data)
                         # save_name_stage_params = save_directory / 'scan_metadata.csv'

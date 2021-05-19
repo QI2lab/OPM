@@ -23,9 +23,9 @@ def read_metadata(fname):
             vals[ii] = int(vals[ii])
         elif re.fullmatch("\d*.\d+", vals[ii]):
             vals[ii] = float(vals[ii])
-        elif vals[ii] == "False":
+        elif vals[ii].lower() == "False".lower():
             vals[ii] = False
-        elif vals[ii] == "True":
+        elif vals[ii].lower() == "True".lower():
             vals[ii] = True
         else:
             # otherwise, leave as string
