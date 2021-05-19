@@ -19,7 +19,7 @@ import os
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408m", "glycerol50x_1", "2021_04_21_10;17;23_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430i", "glycerol_60_1", "2021_05_02_15;17;29_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430a", "beads_1", "dummy")
-loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430f", "glycerol_40_1", "2021_05_06_15;36;09_localization")
+loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430f", "glycerol_40_1", "2021_05_06_17;28;06_localization")
 
 
 data_dir, _ = os.path.split(loc_data_dir)

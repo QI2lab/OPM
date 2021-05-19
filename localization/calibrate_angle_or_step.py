@@ -18,9 +18,7 @@ import scipy
 tbegin = time.perf_counter()
 
 # basic parameters
-plot_extra = False
 plot_results = False
-figsize = (16, 8)
 
 # paths to image files
 root_dir = os.path.join(r"\\10.206.26.21", "opm2", "20210430a", "beads_1", "Full resolution")
@@ -96,7 +94,6 @@ for vv in range(nvols):
     tstart = time.perf_counter()
 
     # variables to store results. List of results for each chunk
-    centers_vol = []
     fit_params_vol = []
     rois_vol = []
     centers_guess_vol = []
@@ -145,6 +142,7 @@ for vv in range(nvols):
 
         plotted_counter = 0
         max_plot = np.inf
+        fit_ps = np.zeros((len(rois), 9))
         for ind in range(len(rois)):
             roi = rois[ind]
             img_roi = localize.cut_roi(roi, imgs)
@@ -164,76 +162,65 @@ for vv in range(nvols):
             xf, yf, zf = localize.get_skewed_coords(current_roi_shape, dc, results["fit_params"][-1], results["fit_params"][-2])
             cfit = np.array([results["fit_params"][3], results["fit_params"][2], results["fit_params"][1]])
 
+            fit_ps[ind] = results["fit_params"]
+
             if results["fit_params"][0] < 100 or results["fit_params"][4] < 0.5 * sigma_xy: # or not localize.point_in_trapezoid(cfit, xf, yf, zf):
                 continue
 
             if plotted_counter > max_plot:
                 break
 
-            plotted_counter += 1
-
             img_fit = fit_fn(results["fit_params"])
             img_guess = fit_fn(init_params)
 
-            plt.figure()
-            plt.suptitle("%d, angle=%0.2fdeg, ds=%0.3f" % (ind, results["fit_params"][-2] * 180/np.pi, results["fit_params"][-1]))
-            grid = plt.GridSpec(3, 3)
+            if plot_results:
+                plotted_counter += 1
 
-            for ii in range(3):
-                plt.subplot(grid[0, ii])
-                plt.imshow(np.nanmax(img_roi, axis=ii))
-                plt.title("data")
+                plt.figure()
+                plt.suptitle("%d, angle=%0.2fdeg, ds=%0.3f" % (ind, results["fit_params"][-2] * 180/np.pi, results["fit_params"][-1]))
+                grid = plt.GridSpec(3, 3)
 
-                plt.subplot(grid[1, ii])
-                plt.imshow(np.nanmax(img_fit, axis=ii))
-                plt.title("fit")
+                for ii in range(3):
+                    plt.subplot(grid[0, ii])
+                    plt.imshow(np.nanmax(img_roi, axis=ii))
+                    plt.title("data")
 
-                plt.subplot(grid[2, ii])
-                plt.imshow(np.nanmax(img_guess, axis=ii))
-                plt.title("guess")
+                    plt.subplot(grid[1, ii])
+                    plt.imshow(np.nanmax(img_fit, axis=ii))
+                    plt.title("fit")
+
+                    plt.subplot(grid[2, ii])
+                    plt.imshow(np.nanmax(img_guess, axis=ii))
+                    plt.title("guess")
 
 
-    if chunk_counter > 1:
-        # since left some overlap at the edges, have to again combine results
-        centers_unique, unique_inds = localize.combine_nearby_peaks(centers_vol, min_dists[1], min_dists[0],
-                                                                    mode="keep-one")
-        fit_params_unique = fit_params_vol[unique_inds]
-        rois_unique = rois_vol[unique_inds]
-    else:
-        centers_unique = centers_vol
-        fit_params_unique = fit_params_vol
-        rois_unique = rois_vol
+        fit_params_vol.append(fit_ps)
+        centers_guess_vol.append(centers_guess_inds)
+        rois_vol.append(rois)
+
+    fit_params_vol = np.concatenate(fit_params_vol)
+    centers_guess_vol = np.concatenate(centers_guess_vol)
+    rois_vol = np.concatenate(rois_vol)
 
     tend = time.perf_counter()
     volume_process_times[vv] = tend - tstart
 
+    figh = plt.figure()
+
+    steps, bin_edges = np.histogram(fit_params_vol[:, -1], 15)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+    plt.plot(bin_centers, steps)
+    plt.xlabel("Step size (um)")
+    plt.ylabel('counts')
+    plt.title("histogram of fit step size, mean=%0.3f" % np.mean(fit_params_vol[:, -1]))
+    plt.xlim([0, 0.4])
+
     # save results
-    full_results = {"centers": centers_unique, "centers_guess": centers_guess_vol,
-                    "fit_params": fit_params_unique, "rois": rois_unique,
-                    "volume_um3": volume_um3, "frame_time_ms": frame_time_ms, "elapsed_t": volume_process_times[vv]}
-    fname = os.path.join(save_dir, "localization_results_vol_%d.pkl" % vv)
-    with open(fname, "wb") as f:
-        pickle.dump(full_results, f)
+    # full_results = {"centers": centers_unique, "centers_guess": centers_guess_vol,
+    #                 "fit_params": fit_params_unique, "rois": rois_unique,
+    #                 "volume_um3": volume_um3, "frame_time_ms": frame_time_ms, "elapsed_t": volume_process_times[vv]}
+    # fname = os.path.join(save_dir, "localization_results_vol_%d.pkl" % vv)
+    # with open(fname, "wb") as f:
+    #     pickle.dump(full_results, f)
 
-    # ###############################
-    # print timing information
-    # ###############################
-    elapsed_t = volume_process_times[vv]
-    hrs = (elapsed_t) // (60 * 60)
-    mins = (elapsed_t - hrs * 60 * 60) // 60
-    secs = (elapsed_t - hrs * 60 * 60 - mins * 60)
-    print("Found %d centers in: %dhrs %dmins and %0.2fs" % (len(centers_unique), hrs, mins, secs))
-
-    elapsed_t_total = tend - tbegin
-    days = elapsed_t_total // (24 * 60 * 60)
-    hrs = (elapsed_t_total - days * 24 * 60 * 60) // (60 * 60)
-    mins = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
-    secs = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-    print("Total elapsed time: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
-
-    time_remaining = np.mean(volume_process_times[:vv + 1]) * (nvols - vv - 1)
-    days = time_remaining // (24 * 60 * 60)
-    hrs = (time_remaining - days * 24 * 60 * 60) // (60 * 60)
-    mins = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
-    secs = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-    print("Estimated time remaining: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))

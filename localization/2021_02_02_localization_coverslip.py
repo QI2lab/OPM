@@ -123,8 +123,8 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
         plt.switch_backend("agg")
         print("plotting %d ROI's" % len(fit_params_unique))
         results = joblib.Parallel(n_jobs=-1, verbose=10, timeout=None)(
-            joblib.delayed(localize.plot_roi)(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
-                                      figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
+            joblib.delayed(localize.plot_skewed_roi)(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
+                                                     figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
             for ii in range(len(fit_params_unique)))
 
         # for debugging
