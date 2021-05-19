@@ -1,5 +1,14 @@
+# jupyter notebook files
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
 
+# emacs temporary files
+*.*~
+
+# pycharm files
+.idea
+
+# misc
 __pycache__
 *.json
+
