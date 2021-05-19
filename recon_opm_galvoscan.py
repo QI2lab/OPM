@@ -32,7 +32,7 @@ def main(argv):
     parser.add_argument("-i", "--ipath", type=str, nargs="+", help="supply the directories to be processed")
     parser.add_argument("-o", "--opath", type=str, nargs="+",
                         help="supply the output directories where data will be saved")
-    parser.add_argument("-a", "--acq", type=int, choices=[0, 1], help="0: pycromanager (DEFAULT), 1: hcimage")
+    parser.add_argument("-a", "--acq", type=int, choices=[0, 1], default=0, help="0: pycromanager (DEFAULT), 1: hcimage")
     parser.add_argument("-d", "--decon", type=bool, default=False,
                         help="0: no deconvolution (DEFAULT), 1: deconvolution")
     parser.add_argument("-f", "--flatfield", type=bool, default=False, help="0: no flat-field (DEFAULT), 1: flat-field")
@@ -57,7 +57,7 @@ def main(argv):
         # create parameter array from scan parameters saved by acquisition code
         # [timepoints, channels, scan positions, y pixels, x pixels, theta, stage move distance, camera pixel size]
         # units are [degrees,nm,nm]
-        if acq_type==0:
+        if acq_type == 0:
             # df_metadata = pd.read_csv(input_dir_path.resolve().parents[0] / 'scan_metadata.csv')
             df_metadata = data_io.read_metadata(input_dir_path.resolve().parents[0] / 'scan_metadata.csv')
         else:
