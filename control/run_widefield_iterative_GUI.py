@@ -24,6 +24,7 @@ import data_io
 import easygui
 import PyDAQmx as daq
 import ctypes as ct
+import gc
 
 def main():
 
@@ -44,6 +45,10 @@ def main():
     xy_stage = core.get_xy_stage_device()
     z_stage = core.get_focus_device()
 
+    # enable joystick
+    core.set_property('XYStage:XY:31','JoystickEnabled','Yes')
+    core.set_property('ZStage:M:37','JoystickInput','22 - right wheel')
+
     # turn off lasers
     core.set_config('Laser','Off')
     core.wait_for_config('Laser','Off')
@@ -54,25 +59,25 @@ def main():
 
     # setup Photometrics BSI Express camera
     # set fan to HIGH
-    core.set_property('BSIExpress','FanSpeedSetpoint','High')
+    #core.set_property('BSIExpress','FanSpeedSetpoint','High')
 
     # set temperature to -20
-    core.set_property('BSIExpress','CCDTemperatureSetpoint',-20)
+    #core.set_property('BSIExpress','CCDTemperatureSetPoint',-20)
 
     # set readout mode to 11-bit "sensitive" 
-    core.set_property('BSIExpress','ReadoutRate','200MHz 11bit')
-    core.set_property('BSIExpress','Gain','3-Sensitivity')
+    #core.set_property('BSIExpress','ReadoutRate','200MHz 11bit')
+    #core.set_property('BSIExpress','Gain','3-Sensitivity')
 
     # turn off all onboard pixel corrections
-    core.set_property('BSIExpress','PP 1 ENABLED','No')
-    core.set_property('BSIExpress','PP 2 ENABLED','No')
-    core.set_property('BSIExpress','PP 3 ENABLED','No')
-    core.set_property('BSIExpress','PP 4 ENABLED','No')
-    core.set_property('BSIExpress','PP 4 ENABLED','No')
-    core.set_property('BSIExpress','PP 5 ENABLED','No')
+    #core.set_property('BSIExpress','PP 1 ENABLED','No')
+    #core.set_property('BSIExpress','PP 2 ENABLED','No')
+    #core.set_property('BSIExpress','PP 3 ENABLED','No')
+    #core.set_property('BSIExpress','PP 4 ENABLED','No')
+    #core.set_property('BSIExpress','PP 4 ENABLED','No')
+    #core.set_property('BSIExpress','PP 5 ENABLED','No')
 
     # set output trigger to be HIGH when all rows are active ("Rolling Shutter")
-    core.set_property('BSIExpress','ExposeOutMode','Rolling Shutter')
+    #core.set_property('BSIExpress','ExposeOutMode','Rolling Shutter')
 
     # setup pump parameters
     pump_parameters = {'pump_com_port': pump_COM_port,
@@ -103,8 +108,8 @@ def main():
     for r_idx in range(iterative_rounds):
 
         # set motors to on to actively maintain position during fluidics run
-        core.set_property('XYStage:XY:31','MaintainState-MA','2 - Motors on indefinitely')
-        core.set_property('ZStage:M:37','MaintainState-MA','2 - Motors on indefinitely')
+        #core.set_property('XYStage:XY:31','MaintainState-MA','2 - Motors on indefinitely')
+        #core.set_property('ZStage:M:37','MaintainState-MA','2 - Motors on indefinitely')
 
         # run fluidics program for this round
         success_fluidics = False
@@ -114,8 +119,8 @@ def main():
             sys.exit()
 
         # set motors to standard drift correction setting
-        core.set_property('XYStage:XY:31','MaintainState-MA','0 - Motors off but correct drift for 0.5 sec')
-        core.set_property('ZStage:M:37','MaintainState-MA','0 - Motors off but correct drift for 0.5 sec')
+        #core.set_property('XYStage:XY:31','MaintainState-MA','0 - Motors off but correct drift for 0.5 sec')
+        #core.set_property('ZStage:M:37','MaintainState-MA','0 - Motors off but correct drift for 0.5 sec')
 
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
         if r_idx == 0:
@@ -138,7 +143,7 @@ def main():
                 save_name=Path(acq_settings.prefix())
 
                 # pull active lasers from MDA window
-                channel_labels = ['405', '488', '561', '635', '730']
+                channel_labels = ['405', '488', '561', '637', '730']
                 channel_states = [False,False,False,False,False] #define array to keep active channels
                 channels = acq_settings.channels() # get active channels in MDA window
                 for idx in range(channels.size()):
@@ -184,7 +189,7 @@ def main():
                             x_positions[idx] = stage_pos.x
                             y_positions[idx] = stage_pos.y
                         if (stage_pos.get_stage_device_label() == 'ZStage:M:37'):
-                            z_positions[idx] = stage_pos.z
+                            z_positions[idx] = stage_pos.x
 
                 # grab Z stack information
                 z_relative_start = acq_settings.slice_z_bottom_um()
@@ -197,6 +202,7 @@ def main():
                 xyz_positions[:,0]= x_positions
                 xyz_positions[:,1]= y_positions
                 xyz_positions[:,2]= z_positions
+                print(xyz_positions)
                 
                 # grab autofocus information
                 autofocus_manager = studio.get_autofocus_manager()
@@ -214,14 +220,23 @@ def main():
                 core.set_exposure(exposure_ms)
 
                 # determine image size
-                core.snap_image()
-                y_pixels = core.get_image_height()
-                x_pixels = core.get_image_width()
+                #core.snap_image()
+                y_pixels = 2048
+                x_pixels = 2048
 
                 # construct imaging summary for user
+                scan_settings = (f"Number of labeling rounds: {str(iterative_rounds)} \n"
+                                f"Number of XY tiles:  {str(number_positions)} \n"
+                                f"Number of Z slices:  {str(number_z_positions)} \n"
+                                f"Number of channels:  {str(n_active_channels)} \n"
+                                f"Active lasers: {str(channel_states)} \n"
+                                f"Lasers powers: {str(channel_powers)} \n"
+                                f"Z stage start: {str(z_relative_start)} \n"
+                                f"Z stage end: {str(z_relative_end)} \n"
+                                f"Z step: {str(z_relative_step)} \n")
 
                 # display summary to user to make sure settings are correct
-                easygui.textbox('Please review scan settings')
+                easygui.textbox(scan_settings,'Please review scan settings')
 
                 run_imaging = easygui.ynbox('Run acquistion?', 'Title', ('Yes', 'No'))
 
@@ -246,13 +261,14 @@ def main():
 
         if config_changed:
 
+            '''
             # setup DAQ triggering
             # channels then stage trigger. Stage trigger goes high on last falling edge
             # setup DAQ
-            samples_per_ch = 2*(n_active_channels+1)
-            DAQ_sample_rate_Hz = 10000
-            num_DI_channels = 8
-            do_stage_pin = 5
+             samples_per_ch = 2*(n_active_channels+1)
+             DAQ_sample_rate_Hz = 10000
+             num_DI_channels = 8
+             do_stage_pin = 5
 
             # create array for triggering
             dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
@@ -308,10 +324,16 @@ def main():
             core.wait_for_config('Trigger-637','External-Digital')
             core.set_config('Trigger-730','External-Digital')
             core.wait_for_config('Trigger-730','External-Digital')
+            
 
             # turn all lasers on
             core.set_config('Laser','AllOn')
             core.wait_for_config('Laser','AllOn')
+            '''
+
+            # turn all lasers on
+            core.set_config('Laser','Off')
+            core.wait_for_config('Laser','Off')
             
             # set lasers to user defined power
             core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
@@ -319,17 +341,13 @@ def main():
             core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
             core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
             core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
-                
-            # define event structure for each position
-            events = []
-            for z in range(z_positions):
-                for c in range(n_active_channels):
-                    evt = { 'axes': {'z': z, 'c': c}}
-                    events.append(evt)
+
+            core.set_config('Trigger-730','External-Digital')
+            core.wait_for_config('Trigger-730','External-Digital')
 
             config_changed = False
 
-        for xyz_idx in range(xyz_positions): 
+        for xyz_idx in range(number_positions): 
 
             # move to next XYZ position
             core.set_xy_position(xyz_positions[xyz_idx,0],xyz_positions[xyz_idx,1])
@@ -338,21 +356,35 @@ def main():
             core.wait_for_device(z_stage)
 
             # run software autofocus at this postion on bead channel
-            autofocus_offset = autofocus_method.full_focus()
-
+            #autofocus_offset = autofocus_method.full_focus()
+            #print(autofocus_offset)
+            
             # move Z stage to defined distanced below determined autofocus position
-            start_z_position = xyz_positions[xyz_idx,2] + autofocus_offset - z_relative_start
-            core.set_position(start_z_position)
-            core.wait_for_device(z_stage)
+            #start_z_position = xyz_positions[xyz_idx,2] + autofocus_offset + z_relative_start
+            #core.set_position(start_z_position)
+            #core.wait_for_device(z_stage)
 
             # save actual stage positions
             xy_pos = core.get_xy_stage_position()
             stage_x = xy_pos.x
             stage_y = xy_pos.y
             stage_z = core.get_position()
-            current_stage_data = [{'stage_x': stage_x, 'stage_y': stage_y, 'stage_z': stage_z}]
-            df_current_stage = pd.DataFrame(current_stage_data)
+            current_stage_data = [{'stage_x': stage_x, 
+                                    'stage_y': stage_y, 
+                                    'stage_z': stage_z}]
 
+            # define event structure for each position
+            events = []
+            for z in range(number_z_positions):
+                for c in range(len(channel_states)):
+                    if channel_states[c]:
+                        evt = { 'axes': {'z': z, 'c': c}, 
+                                'z': stage_z+z_relative_start+(z*z_relative_step), 
+                                'channel': {'group': 'Laser',
+                                            'config': channel_labels[c]}}
+                        events.append(evt)
+
+            '''
             # set FTP stage for triggered moves using repeated moves instead of ring buffer
             core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
@@ -397,12 +429,24 @@ def main():
             except daq.DAQError as err:
                 print("DAQmx Error %s"%err)
 
+            '''
+
             # run hardware triggered stack for this XY position
             save_name_round_xyz = str(save_name)+'_r'+str(r_idx).zfill(4)+'_xyz'+str(xyz_idx).zfill(4)
-            with Acquisition(directory=str(save_directory), name=save_name_round_xyz, show_display=False, max_multi_res_index=0,saving_queue_size=300) as acq:
+            with Acquisition(directory=str(save_directory), name=save_name_round_xyz, show_display=False, max_multi_res_index=0,saving_queue_size=5000) as acq:
                 acq.acquire(events)
+
             acq = None
 
+            # turn all lasers on
+            core.set_config('Laser','Off')
+            core.wait_for_config('Laser','Off')
+
+            time.sleep(5)
+            del acq
+            gc.collect()
+
+            '''
             # turn off "repeat last relative move with TTL" for FTP controller
             core.set_property('ZStage:M:37','TTLInputMode','0 - not done')
 
@@ -415,14 +459,18 @@ def main():
                 taskDO.ClearTask()
             except daq.DAQError as err:
                 print("DAQmx Error %s"%err)
+            '''
 
             # save stage scan positions after each tile
-            save_name_stage_positions = Path('r'+str(r_idx).zfill(4)+'_xyz'+str(xyz_positions).zfill(4)+'_stage_positions.csv')
+            save_name_stage_positions = Path('r'+str(r_idx).zfill(4)+'_xyz'+str(xyz_idx).zfill(4)+'_stage_positions.csv')
             save_name_stage_positions = save_directory / save_name_stage_positions
-            data_io.write_metadata(df_current_stage[0], save_name_stage_positions)
+            data_io.write_metadata(current_stage_data[0], save_name_stage_positions)
 
+
+            '''
             # Turn on backlash compensation for FTP controller
             core.set_property('ZStage:M:37','Backlash-B(um)',normal_backlash_z)
+            '''
 
         # save metadata for this round
         scan_param_data = [{'root_name': str(save_name),

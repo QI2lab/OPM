@@ -19,6 +19,7 @@ import time
 import sys
 import pandas as pd
 import data_io
+import gc
 
 def main():
 
@@ -36,9 +37,9 @@ def main():
 
     if run_scope == True:
         # set up lasers
-        channel_labels = ["405","488"]
+        channel_labels = ["488","561","637"]
         channel_powers = [5, 50, 90, 90, 0 ] # (0 -> 100%)
-        channel_exposures_ms = [10, 100]
+        channel_exposures_ms = [10, 100, 200]
         
         xy = np.empty([9,2]).astype(float)
         xy[0:3,0]=9500
@@ -129,9 +130,14 @@ def main():
 
             acq = None
 
+            time.sleep(5)
+
             # turn off lasers
             core.set_config('Laser','Off')
             core.wait_for_config('Laser','Off')
+
+            del acq
+            gc.collect()
             
     if run_scope == True:
         # turn all lasers off
