@@ -16,7 +16,7 @@ root_dirs = glob.glob(os.path.join(top_dir, "r*_atto565_r*_alexa647_1"))
 # ###############################
 # load/set parameters for all datasets
 # ###############################
-chunk_size = 301
+chunk_size = 512
 chunk_overlap = 5
 nvols = 1
 nchannels = 3
@@ -97,20 +97,16 @@ for root_dir in root_dirs:
         # ###############################
 
         volume_process_times = np.zeros(nvols)
-        nchunks = int(np.ceil(nyp / chunk_size) * np.ceil(nxp / chunk_size))
+        nchunks = int(np.ceil(nyp / (chunk_size - chunk_overlap)) * np.ceil(nxp / (chunk_size - chunk_overlap)))
         for vv in range(nvols):
             print("################################\nstarting volume %d/%d" % (vv + 1, nvols))
             tstart_vol = time.perf_counter()
 
-            centers_vol = []
             fit_params_vol = []
-            rois_vol = []
-            # with full dim
-            rois_all_vol = []
-            centers_guess_vol = []
             init_params_vol = []
-            fit_params_all_vol = []
-            fit_results_all_vol = []
+            rois_vol = []
+            fit_results_vol = []
+            to_keep_vol = []
             conditions_vol = []
 
             ichunk = 0
@@ -196,108 +192,36 @@ for root_dir in root_dirs:
                     print("Fitting %d rois on GPU" % (len(rois)))
                     # use MLE if background subtracted images
                     fit_params, fit_states, chi_sqrs, niters, fit_t = localize.fit_rois(img_rois, (zrois, yrois, xrois), init_params,
-                                                                                        estimator="LSE")
-
-                    # ###############################
-                    # store unfiltered results
-                    # ###############################
-                    fit_results_all_vol.append(np.concatenate((np.expand_dims(fit_states, axis=1),
-                                                               np.expand_dims(chi_sqrs, axis=1),
-                                                               np.expand_dims(niters, axis=1)), axis=1))
-
-                    fit_params_all_vol.append(np.array(fit_params, copy=True))
-
-                    rois_temp = np.array(rois, copy=True)
-                    rois_temp[:, 2:4] += iy_start
-                    rois_temp[:, 4:6] += ix_start
-                    rois_all_vol.append(rois_temp)
+                                                                                        estimator="LSE", sf=1, dc=dc, angles=(0, 0, 0))
 
                     # ###############################
                     # filter some peaks
                     # ###############################
                     tstart = time.perf_counter()
-                    centers_fit = np.concatenate((fit_params[:, 3][:, None], fit_params[:, 2][:, None], fit_params[:, 1][:, None]),
-                                                 axis=1)
 
-                    # only keep points if fit parameters were reasonable
-                    sigmas_min_keep = sigmas_min
-                    sigmas_max_keep = sigmas_max
-                    amp_min = 0.5 * thresholds[jj]
-                    xmin = x.min() + sigma_xy
-                    xmax = x.max() - sigma_xy
-                    ymin = y.min() + sigma_xy
-                    ymax = y.max() - sigma_xy
-                    zmin = z.min()
-                    zmax = z.max()
-
-                    in_bounds = np.logical_and.reduce((fit_params[:, 1] >= xmin,
-                                                       fit_params[:, 1] <= xmax,
-                                                       fit_params[:, 2] >= ymin,
-                                                       fit_params[:, 2] <= ymax,
-                                                       fit_params[:, 3] >= zmin,
-                                                       fit_params[:, 3] <= zmax))
-
-                    center_close_to_guess_xy = np.sqrt( (centers_guess[:, 2] - fit_params[:, 1])**2 + (centers_guess[:, 1] - fit_params[:, 2])**2) <= sigma_xy
-                    center_close_to_guess_z = np.abs(centers_guess[:, 0]- fit_params[:, 3]) <= sigma_z
-
-                    condition_names = ["in_bounds", "center_close_to_guess_xy", "center_close_to_guess_z",
-                                       "xy_size_small_enough", "xy_size_big_enough", "z_size_small_enough",
-                                       "z_size_big_enough", "amp_ok"]
-                    conditions = np.concatenate((np.expand_dims(in_bounds, axis=1),
-                                                 np.expand_dims(center_close_to_guess_xy, axis=1),
-                                                 np.expand_dims(center_close_to_guess_z, axis=1),
-                                                 np.expand_dims(fit_params[:, 4] <= sigmas_max_keep[1], axis=1),
-                                                 np.expand_dims(fit_params[:, 4] >= sigmas_min_keep[1], axis=1),
-                                                 np.expand_dims(fit_params[:, 5] <= sigmas_max_keep[0], axis=1),
-                                                 np.expand_dims(fit_params[:, 5] >= sigmas_min_keep[0], axis=1),
-                                                 np.expand_dims(fit_params[:, 0] >= amp_min, axis=1)), axis=1)
-
-                    to_keep = np.logical_and.reduce(conditions, axis=1)
+                    to_keep, conditions, condition_names = localize.filter_localizations(fit_params, init_params,
+                                                                                         (z, y, x), sigma_xy, sigma_z,
+                                                                                         min_dists, (sigmas_min, sigmas_max),
+                                                                                         0.5 * thresholds[jj], mode="straight")
 
                     tend = time.perf_counter()
-                    print("identified %d/%d localizations in %0.3f with:\n"
-                          "amp >= %0.5g\n"
-                          "xy distance from guess <= %0.5g\n"
-                          "z distance from guess <= %0.5g\n"
-                          "%0.5g <= cx <= %.5g\n"
-                          "%0.5g <= cy <= %.5g\n"
-                          "%0.5g <= cz <= %.5g\n"
-                          "%0.5g <= sxy <= %0.5g\n"
-                          "%0.5g <= sz <= %0.5g " %
-                          (np.sum(to_keep), to_keep.size, tend - tstart,
-                           amp_min, sigma_xy, sigma_z,
-                           xmin, xmax, ymin, ymax, zmin, zmax,
-                           sigmas_min_keep[1], sigmas_max_keep[1],
-                           sigmas_min_keep[0], sigmas_max_keep[0]))
+                    print("identified %d/%d localizations in %0.3f" % (np.sum(to_keep), to_keep.size,  time.perf_counter() - tstart))
 
-                    tstart = time.perf_counter()
-                    # only keep unique center if close enough
-
-                    if np.sum(to_keep) > 0:
-                        centers_unique, unique_inds = localize.combine_nearby_peaks(centers_fit[to_keep], min_dists[1],
-                                                                                    min_dists[0], mode="keep-one")
-                        fit_params_unique = fit_params[to_keep][unique_inds]
-                        rois_unique = rois[to_keep][unique_inds]
-                        tend = time.perf_counter()
-                        print("identified %d/%d unique points as unique: separations dxy > %0.5g, and dz > %0.5g in %0.3f" %
-                              (len(centers_unique), np.sum(to_keep), min_dists[1], min_dists[0], tend - tstart))
-
-                        # correct for full image coordinates
-                        rois_unique[:, 2:4] += iy_start
-                        rois_unique[:, 4:6] += ix_start
-                    else:
-                        centers_unique = np.zeros((0, 3))
-                        fit_params_unique = np.zeros((0, 7))
-                        rois_unique = np.zeros((0, 6))
-
+                    # ###############################
                     # store results
-                    centers_vol.append(centers_unique)
-                    fit_params_vol.append(fit_params_unique)
-                    rois_vol.append(rois_unique)
-                    #
-                    centers_guess_vol.append(centers_guess)
-                    conditions_vol.append(conditions)
+                    # ###############################
+                    fit_results_vol.append(np.concatenate((np.expand_dims(fit_states, axis=1),
+                                                               np.expand_dims(chi_sqrs, axis=1),
+                                                               np.expand_dims(niters, axis=1)), axis=1))
+
+                    fit_params_vol.append(fit_params)
                     init_params_vol.append(init_params)
+                    conditions_vol.append(conditions)
+                    to_keep_vol.append(to_keep)
+
+                    rois[:, 2:4] += iy_start
+                    rois[:, 4:6] += ix_start
+                    rois_vol.append(rois)
 
                 tend_chunk = time.perf_counter()
                 print("Processed chunk = %0.2fs" % (tend_chunk - tstart_chunk))
@@ -314,15 +238,12 @@ for root_dir in root_dirs:
                     more_chunks = False
 
             # assemble results
-            centers_vol = np.concatenate(centers_vol, axis=0)
             fit_params_vol = np.concatenate(fit_params_vol, axis=0)
-            fit_params_all_vol = np.concatenate(fit_params_all_vol, axis=0)
-            rois_vol = np.concatenate(rois_vol, axis=0)
-            rois_all_vol = np.concatenate(rois_all_vol, axis=0)
-            centers_guess_vol = np.concatenate(centers_guess_vol, axis=0)
-            conditions_vol = np.concatenate(conditions_vol, axis=0)
             init_params_vol = np.concatenate(init_params_vol, axis=0)
-            fit_results_all_vol = np.concatenate(fit_results_all_vol, axis=0)
+            rois_vol = np.concatenate(rois_vol, axis=0)
+            fit_results_vol = np.concatenate(fit_results_vol, axis=0)
+            to_keep_vol = np.concatenate(to_keep_vol, axis=0)
+            conditions_vol = np.concatenate(conditions_vol, axis=0)
 
             volume_process_times[vv] = time.perf_counter() - tstart_vol
 
@@ -333,12 +254,9 @@ for root_dir in root_dirs:
                                      "chunk_size": chunk_size, "chunk_overlap": chunk_overlap
                                      }
 
-            full_results = {"centers": centers_vol,
-                            "centers_guess": centers_guess_vol,
-                            "conditions": conditions_vol, "conditions_names": condition_names,
-                            "fit_params": fit_params_vol, "rois": rois_vol,
-                            "fit_params_all": fit_params_all_vol, "init_params": init_params_vol,
-                            "rois_all": rois_all_vol, "fit_results_all": fit_results_all_vol,
+            full_results = {"fit_params": fit_params_vol, "init_params": init_params_vol, "rois": rois_vol,
+                            "to_keep": to_keep_vol, "conditions": conditions_vol, "conditions_names": condition_names,
+                            "fit_results": fit_results_vol,
                             "volume_um3": volume_um3, "frame_time_ms": frame_time_ms,
                             "elapsed_t": volume_process_times[vv],
                             "excitation_wavelength_um": excitation_wavelengths[jj],
@@ -356,7 +274,7 @@ for root_dir in root_dirs:
             hrs = (elapsed_t) // (60 * 60)
             mins = (elapsed_t - hrs * 60 * 60) // 60
             secs = (elapsed_t - hrs * 60 * 60 - mins * 60)
-            print("################################\nFound %d centers in: %dhrs %dmins and %0.2fs" % (len(centers_vol), hrs, mins, secs))
+            print("################################\nFound %d centers in: %dhrs %dmins and %0.2fs" % (np.sum(to_keep_vol), hrs, mins, secs))
 
             elapsed_t_total = time.perf_counter() - tbegin
             days = elapsed_t_total // (24 * 60 * 60)

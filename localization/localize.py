@@ -23,6 +23,8 @@ except ImportError:
     CUPY_AVAILABLE = False
 
 # for fitting on GPU
+# custom code found in qi2lab branch of gpufit repo
+# this must be compiled from source, and then the python package installed from there
 try:
     import pygpufit.gpufit as gf
     GPUFIT_AVAILABLE = True
@@ -88,21 +90,28 @@ def point_in_trapezoid(pts, x, y, z):
     return in_region
 
 # coordinate transformations between OPM and coverslip frames
-def get_skewed_coords(sizes, dc, ds, theta):
+def get_skewed_coords(sizes, dc, ds, theta, scan_direction="lateral"):
     """
     Get laboratory coordinates (i.e. coverslip coordinates) for a stage-scanning OPM set
-    :param nx_cam:
-    :param ny_cam:
+    :param sizes: (n0, n1, n2)
     :param dc: camera pixel size
-    :param theta:
-    :param stage_pos: list of y-displacements for each scan position
-    :return:
+    :param ds: stage step size
+    :param theta: in radians
+    :return x, y, z:
     """
     nimgs, ny_cam, nx_cam = sizes
-    x = dc * np.arange(nx_cam)[None, None, :]
-    # y = stage_pos[:, None, None] + dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
-    y = ds * np.arange(nimgs)[:, None, None] + dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
-    z = dc * np.sin(theta) * np.arange(ny_cam)[None, :, None]
+
+    if scan_direction == "lateral":
+        x = dc * np.arange(nx_cam)[None, None, :]
+        # y = stage_pos[:, None, None] + dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
+        y = ds * np.arange(nimgs)[:, None, None] + dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
+        z = dc * np.sin(theta) * np.arange(ny_cam)[None, :, None]
+    elif scan_direction == "axial":
+        x = dc * np.arange(nx_cam)[None, None, :]
+        y = dc * np.cos(theta) * np.arange(ny_cam)[None, :, None]
+        z = ds * np.arange(nimgs)[:, None, None] + dc * np.sin(theta) * np.arange(ny_cam)[None, :, None]
+    else:
+        raise ValueError("scan_direction must be `lateral` or `axial` but was `%s`" % scan_direction)
 
     return x, y, z
 
@@ -325,52 +334,145 @@ def interp_opm_data(imgs, dc, ds, theta, mode="ortho-interp"):
 
 
 # point spread function model and fitting
-def gaussian3d_pixelated_psf(x, y, z, ds, normal, p, sf=3):
+def oversample_pixel(x, y, z, ds, sf=3, euler_angles=(0., 0., 0.)):
     """
-    Gaussian function, accounting for image pixelation in the xy plane. This function mimics the style of the
-    PSFmodels functions.
+    Suppose we have a set of pixels centered at points given by x, y, z. Generate sf**2 points in this pixel equally
+    spaced about the center. Allow the pixel to be orientated in an arbitrary direction with respect to the coordinate
+    system. The pixel rotation is described by the Euler angles (psi, theta, phi), where the pixel "body" frame
+    is a square with xy axis orientated along the legs of the square with z-normal to the square
+
+    :param x:
+    :param y:
+    :param z:
+    :param ds: pixel size
+    :param sf: sample factor
+    :param euler_angles: [phi, theta, psi] where phi and theta are the polar angles describing the normal of the pixel,
+    and psi describes the rotation of the pixel about its normal
+    :return:
+
+    """
+
+    # generate new points in pixel, each of which is centered about an equal area of the pixel, so summing them is
+    # giving an approximation of the integral
+    if sf > 1:
+        pts = np.arange(1 / (2*sf), 1 - 1 / (2*sf), 1 / sf) - 0.5
+        xp, yp = np.meshgrid(ds * pts, ds * pts)
+        zp = np.zeros(xp.shape)
+
+        # rotate points to correct position using normal vector
+        # for now we will fix x, but lose generality
+        mat = euler_mat(*euler_angles)
+        result = mat.dot(np.concatenate((xp.ravel()[None, :], yp.ravel()[None, :], zp.ravel()[None, :]), axis=0))
+        xs, ys, zs = result
+
+        # now must add these to each point x, y, z
+        xx_s = x[..., None] + xs[None, ...]
+        yy_s = y[..., None] + ys[None, ...]
+        zz_s = z[..., None] + zs[None, ...]
+    else:
+        xx_s = np.expand_dims(x, axis=-1)
+        yy_s = np.expand_dims(y, axis=-1)
+        zz_s = np.expand_dims(z, axis=-1)
+
+    return xx_s, yy_s, zz_s
+
+def euler_mat(phi, theta, psi):
+    """
+    Define our euler angles connecting the body frame to the space/lab frame by
+
+    r_lab = U_z(phi) * U_y(theta) * U_z(psi) * r_body
+
+    Consider the z-axis in the body frame. This axis is then orientated at [cos(phi)*sin(theta), sin(phi)*sin(theta), cos(theta)]
+    in the space frame. i.e. phi, theta are the usual polar angles. psi represents a rotation of the object about its own axis.
+
+    U_z(phi) = [[cos(phi), -sin(phi), 0], [sin(phi), cos(phi), 0], [0, 0, 1]]
+    U_y(theta) = [[cos(theta), 0, sin(theta)], [0, 1, 0], [-sin(theta), 0, cos(theta)]]
+    """
+    euler_mat = np.array([[np.cos(phi) * np.cos(theta) * np.cos(psi) - np.sin(phi) * np.sin(psi),
+                          -np.cos(phi) * np.cos(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi),
+                           np.cos(phi) * np.sin(theta)],
+                          [np.sin(phi) * np.cos(theta) * np.cos(psi) + np.cos(phi) * np.sin(psi),
+                          -np.sin(phi) * np.cos(theta) * np.sin(psi) + np.cos(phi) * np.cos(psi),
+                           np.sin(phi) * np.sin(theta)],
+                          [-np.sin(theta) * np.cos(psi), np.sin(theta) * np.sin(psi), np.cos(theta)]])
+
+    return euler_mat
+
+
+def euler_mat_inv(phi, theta, psi):
+    """
+    r_body = U_z(-psi) * U_y(-theta) * U_z(-phi) * r_lab
+    """
+
+    inv = euler_mat(-psi, -theta, -phi)
+    return inv
+
+
+def euler_mat_derivatives(phi, theta, psi):
+    dphi = np.array([[-np.sin(phi) * np.cos(theta) * np.cos(psi) - np.cos(phi) * np.sin(psi),
+                       np.sin(phi) * np.cos(theta) * np.sin(psi) - np.cos(phi) * np.cos(psi),
+                      -np.sin(phi) * np.sin(theta)],
+                     [ np.cos(phi) * np.cos(theta) * np.cos(psi) - np.sin(phi) * np.sin(psi),
+                      -np.cos(phi) * np.cos(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi),
+                       np.cos(phi) * np.sin(theta)],
+                     [0, 0, 0]])
+    dtheta = np.array([[-np.cos(phi) * np.sin(theta) * np.cos(psi),
+                         np.cos(phi) * np.sin(theta) * np.sin(psi),
+                         np.cos(phi) * np.cos(theta)],
+                       [-np.sin(phi) * np.sin(theta) * np.cos(psi),
+                         np.sin(phi) * np.sin(theta) * np.sin(psi),
+                         np.sin(phi) * np.cos(theta)],
+                       [-np.cos(theta) * np.cos(psi), np.cos(theta) * np.sin(psi), -np.sin(theta)]])
+    dpsi = np.array([[-np.cos(phi) * np.cos(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi),
+                      -np.cos(phi) * np.cos(theta) * np.cos(psi) + np.sin(phi) * np.sin(psi),
+                      0],
+                     [-np.sin(phi) * np.cos(theta) * np.sin(psi) + np.cos(phi) * np.cos(psi),
+                      -np.sin(phi) * np.cos(theta) * np.cos(psi) - np.cos(phi) * np.sin(psi),
+                      0],
+                     [np.sin(theta) * np.sin(psi), np.sin(theta) * np.cos(psi), 0]])
+
+    return dphi, dtheta, dpsi
+
+
+def euler_mat_inv_derivatives(phi, theta, psi):
+    d1, d2, d3 = euler_mat_derivatives(-psi, -theta, -phi)
+    dphi = -d3
+    dtheta = -d2
+    dpsi = -d1
+
+    return dphi, dtheta, dpsi
+
+def gaussian3d_pixelated_psf(x, y, z, dc, p, sf=3, angles=(0., 0., 0.)):
+    """
+    Gaussian function, accounting for image pixelation in the xy plane. 
 
     vectorized, i.e. can rely on obeying broadcasting rules for x,y,z
 
     :param x:
     :param y:
     :param z: coordinates of z-planes to evaluate function at
-    :param ds: [dx, dy]
-    :param normal:
+    :param dc: pixel size
+    :param angle:
     :param p: [A, cx, cy, cz, sxy, sz, bg]
     :param sf: factor to oversample pixels. The value of each pixel is determined by averaging sf**2 equally spaced
     points in the pixel.
     :return:
     """
-    if len(ds) != 2:
-        raise ValueError("ds = [dx, dy] must have length was not 2")
 
-    normal = np.array(normal)
+    # oversample points in pixel
+    xx_s, yy_s, zz_s = oversample_pixel(x, y, z, dc, sf=sf, euler_angles=angles)
 
-    # generate new points in pixel
-    if sf != 1:
-        pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
-    else:
-        pts = np.array([0])
-
-    xp, yp = np.meshgrid(ds[0] * pts, ds[1] * pts)
-    zp = np.zeros(xp.shape)
-
-    # rotate points to correct position using normal vector
-    # for now we will fix x, but lose generality
-    eyp = np.cross(normal, np.array([1, 0, 0]))
-    mat_r2rp = np.concatenate((np.array([1, 0, 0])[:, None], eyp[:, None], normal[:, None]), axis=1)
-    result = mat_r2rp.dot(np.concatenate((xp.ravel()[None, :], yp.ravel()[None, :], zp.ravel()[None, :]), axis=0))
-    xs, ys, zs = result
-
-    # now must add these to each point x, y, z
-    xx_s = x[..., None] + xs[None, ...]
-    yy_s = y[..., None] + ys[None, ...]
-    zz_s = z[..., None] + zs[None, ...]
-
+    # calculate psf at oversampled points
     psf_s = np.exp(-(xx_s - p[1]) ** 2 / 2 / p[4] ** 2
                    -(yy_s - p[2]) ** 2 / 2 / p[4] ** 2
                    -(zz_s - p[3]) ** 2 / 2 / p[5] ** 2)
+
+    # todo: might want to put this in, but complicates jacobian calculation
+    # calculate norm
+    #xn, yn, zn = oversample_pixel(np.array([0]), np.array([0]), np.array([0]), dx, sf=sf, euler_angles=angle)
+    #norm = np.exp(-(xn - p[1]) ** 2 / 2 / p[4] ** 2
+    #             -(yn - p[2]) ** 2 / 2 / p[4] ** 2
+    #             -(zn - p[3]) ** 2 / 2 / p[5] ** 2)
 
     # normalization is such that the predicted peak value of the PSF ignoring binning would be p[0]
     psf = p[0] * np.mean(psf_s, axis=-1) + p[-1]
@@ -378,43 +480,23 @@ def gaussian3d_pixelated_psf(x, y, z, ds, normal, p, sf=3):
     return psf
 
 
-def gaussian3d_pixelated_psf_jac(x, y, z, ds, normal, p, sf):
+def gaussian3d_pixelated_psf_jac(x, y, z, dc, p, sf, angles):
     """
     Jacobian of gaussian3d_pixelated_psf()
 
     :param x:
     :param y:
     :param z: coordinates of z-planes to evaluate function at
-    :param ds: [dx, dy]
-    :param normal:
+    :param dc: pixel size
     :param p: [A, cx, cy, cz, sxy, sz, bg]
     :param sf: factor to oversample pixels. The value of each pixel is determined by averaging sf**2 equally spaced
     points in the pixel.
     :return:
     """
 
-    if len(ds) != 2:
-        raise ValueError("ds = (dx, dy) length as not 2")
 
-    # generate new points in pixel
-    if sf != 1:
-        pts = np.arange(1 / sf / 2, 1 - 1 / sf / 2, 1 / sf) - 0.5
-    else:
-        pts = np.array([0])
-    xp, yp = np.meshgrid(ds[0] * pts, ds[1] * pts)
-    zp = np.zeros(xp.shape)
-
-    # rotate points to correct position using normal vector
-    # for now we will fix x, but lose generality
-    eyp = np.cross(normal, np.array([1, 0, 0]))
-    mat_r2rp = np.concatenate((np.array([1, 0, 0])[:, None], eyp[:, None], normal[:, None]), axis=1)
-    result = mat_r2rp.dot(np.concatenate((xp.ravel()[None, :], yp.ravel()[None, :], zp.ravel()[None, :]), axis=0))
-    xs, ys, zs = result
-
-    # now must add these to each point x, y, z
-    xx_s = x[..., None] + xs[None, ...]
-    yy_s = y[..., None] + ys[None, ...]
-    zz_s = z[..., None] + zs[None, ...]
+    # oversample points in pixel
+    xx_s, yy_s, zz_s = oversample_pixel(x, y, z, dc, sf=sf, euler_angles=angles)
 
     psf_s = np.exp(-(xx_s - p[1]) ** 2 / 2 / p[4] ** 2
                    -(yy_s - p[2]) ** 2 / 2 / p[4] ** 2
@@ -637,7 +719,7 @@ def simulate_img(scan_params, physical_params, ncenters=1, centers=None, sf=3):
     img_gt = np.zeros((x+y+z).shape)
     for c in centers:
         params = [amp, c[2], c[1], c[0], sxy, sz, bg]
-        img_gt += gaussian3d_pixelated_psf(x, y, z, [dc, dc], normal, params, sf=sf)
+        img_gt += gaussian3d_pixelated_psf(x, y, z, dc, params, sf=sf, angles=np.array([0, theta, 0]))
 
     return img_gt, centers
 
@@ -821,7 +903,7 @@ def get_skewed_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     return [n0, n1, n2]
 
 
-def get_skewed_roi(center, x, y, z, sizes, shape):
+def get_skewed_roi(center, imgs, x, y, z, sizes):
     """
 
     :param float center: [cz, cy, cx] in same units as x, y, z
@@ -832,15 +914,19 @@ def get_skewed_roi(center, x, y, z, sizes, shape):
     :param shape: shape of full image ... todo: should infer from x, y, z
     :return:
     """
+    shape = imgs.shape
     i2 = np.argmin(np.abs(x.ravel() - center[2]))
     i0, i1, _ = np.unravel_index(np.argmin((y - center[1]) ** 2 + (z - center[0]) ** 2), y.shape)
     roi = np.array(get_centered_roi([i0, i1, i2], sizes, min_vals=[0, 0, 0], max_vals=np.array(shape)))
 
+    img_roi = cut_roi(roi, imgs)
+
     x_roi = x[:, :, roi[4]:roi[5]]  # only roi on last one because x has only one entry on first two dims
     y_roi = y[roi[0]:roi[1], roi[2]:roi[3], :]
     z_roi = z[:, roi[2]:roi[3], :]
+    z_roi, y_roi, x_roi = np.broadcast_arrays(z_roi, y_roi, x_roi)
 
-    return roi, x_roi, y_roi, z_roi
+    return roi, img_roi, x_roi, y_roi, z_roi
 
 
 def get_roi_mask(center, max_seps, coords):
@@ -855,14 +941,14 @@ def get_roi_mask(center, max_seps, coords):
     """
     z_roi, y_roi, x_roi = coords
     x_roi_full, y_roi_full, z_roi_full = np.broadcast_arrays(x_roi, y_roi, z_roi)
-    mask = np.ones(x_roi_full.shape)
+    mask = np.ones(x_roi_full.shape, dtype=np.bool)
 
     # roi is parallelogram, so still want to cut out points which are too far from center
     too_far_xy = np.sqrt((x_roi - center[2]) ** 2 + (y_roi - center[1]) ** 2) > max_seps[1]
     too_far_z = np.abs(z_roi - center[0]) > max_seps[0]
     too_far = np.logical_or(too_far_xy, too_far_z)
 
-    mask[too_far] = np.nan
+    mask[too_far] = False
 
     return mask
 
@@ -929,7 +1015,7 @@ def get_filter_kernel(sigmas, dc, dz, sigma_cutoff=2):
     return kernel
 
 
-def filter_convolve(imgs, kernel, use_gpu=True):
+def filter_convolve(imgs, kernel, use_gpu=CUPY_AVAILABLE):
     """
     Gaussian filter accounting for OPM geometry
 
@@ -943,7 +1029,6 @@ def filter_convolve(imgs, kernel, use_gpu=True):
     """
 
     # convolve, and deal with edges by normalizing
-    # todo: is there a wrap around issue, where this blends opposite edges?
     if use_gpu:
         kernel_cp = cp.asarray(kernel, dtype=cp.float32)
         imgs_cp = cp.asarray(imgs, dtype=cp.float32)
@@ -951,7 +1036,7 @@ def filter_convolve(imgs, kernel, use_gpu=True):
                                    cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same"))
     else:
         imgs_filtered = scipy.signal.fftconvolve(imgs, kernel, mode="same") / \
-             scipy.signal.fftconvolve(np.ones(imgs.shape), kernel, mode="same")
+                        scipy.signal.fftconvolve(np.ones(imgs.shape), kernel, mode="same")
 
     # this method too slow for large filter sizes
     # imgs_filtered = scipy.ndimage.convolve(imgs, kernel, mode="constant", cval=0) / \
@@ -1211,9 +1296,10 @@ def localize_radial_symm(img, coords, mode="radial-symmetry"):
     return np.array([amp, xc, yc, zc, sigma_xy, sz, np.nan])
 
 
-def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, sf=3):
+def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, sf=1, dc=None, angles=None):
     """
     Fit single ROI
+    TODO: generalize to accept skewed or regular data
     :param img_roi:
     :param coords: (z_roi, y_roi, x_roi)
     :param init_params:
@@ -1225,11 +1311,6 @@ def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, s
 
     to_use = np.logical_not(np.isnan(img_roi))
     x_roi_full, y_roi_full, z_roi_full = np.broadcast_arrays(x_roi, y_roi, z_roi)
-
-    # get parameters from coordinates
-    dc = x_roi[0, 0, 1] - x_roi[0, 0, 0]
-    theta = np.arcsin((z_roi[0, 1, 0] - z_roi[0, 0, 0]) / dc)
-    normal = np.array([0, -np.sin(theta), np.cos(theta)])
 
     if init_params is None:
         init_params = [None] * 7
@@ -1262,10 +1343,10 @@ def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, s
 
     # gaussian fitting localization
     def model_fn(p):
-        return gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, [dc, dc], normal, p, sf=sf)
+        return gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, dc, p, sf=sf, angles=angles)
 
     def jac_fn(p):
-        return gaussian3d_pixelated_psf_jac(x_roi, y_roi, z_roi, [dc, dc], normal, p, sf=sf)
+        return gaussian3d_pixelated_psf_jac(x_roi, y_roi, z_roi, dc, p, sf, angles)
 
     # do fitting
     results = fit_model(img_roi, model_fn, init_params, bounds=bounds, fixed_params=fixed_params, model_jacobian=jac_fn)
@@ -1273,85 +1354,98 @@ def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, s
     return results
 
 
-def fit_rois(img_rois, coords_rois, init_params, masks_rois=None, max_number_iterations=100,
-             estimator="LSE"):
+def fit_rois(img_rois, coords_rois, init_params, max_number_iterations=100,
+             sf=3, dc=None, angles=None, estimator="LSE", use_gpu=GPUFIT_AVAILABLE):
     """
-    Fit rois using GPU parallelization
+    Fit rois. Can use either CPU parallelization with joblib or GPU parallelization using gpufit
+
     :param img_rois: list of image rois
     :param coords_rois: ((z0, y0, x0), (z1, y1, x1), ....)
     :param init_params:
-    :param masks_rois:
     :param max_number_iterations:
+    :param int sf: oversampling factor for simulating pixelation
+    :param float dc: pixel size, only used for oversampling
+    :param (float, float, float) angles: euler angles describing pixel orientation. Only used for oversampling.
     :param estimator: "LSE" or "MLE"
+    :param bool use_gpu:
     :return:
     """
 
-    # todo: if requires more memory than GPU has, split into chunks
-
     zrois, yrois, xrois = coords_rois
 
-    # ensure arrays are 1D, and do any cutting of ROI if necessary
-    if masks_rois is not None:
-        xrois, yrois, zrois, img_rois = zip(*[(xr[rm][None, :], yr[rm][None, :], zr[rm][None, :], ir[rm][None, :])
-                                              for xr, yr, zr, ir, rm in zip(xrois, yrois, zrois, img_rois, masks_rois)])
+    if not use_gpu:
+        results = joblib.Parallel(n_jobs=-1, verbose=1, timeout=None)(
+                  joblib.delayed(fit_roi)(img_rois[ii], (zrois[ii], yrois[ii], xrois[ii]), init_params=init_params[ii],
+                                          sf=sf, dc=dc, angles=angles)
+                  for ii in range(len(img_rois)))
+
+        fit_params = np.asarray([r["fit_params"] for r in results])
+        chi_sqrs = np.asarray([r["chi_squared"] for r in results])
+        fit_states = np.asarray([r["status"] for r in results])
+        niters = np.asarray([r["nfev"] for r in results])
+        fit_t = np.zeros(niters.shape) # todo: what to set this to?
+        
     else:
+        # todo: if requires more memory than GPU has, split into chunks
+
+        # ensure arrays row vectors
         xrois, yrois, zrois, img_rois = zip(*[(xr.ravel()[None, :], yr.ravel()[None, :], zr.ravel()[None, :], ir.ravel()[None, :])
-                                              for xr, yr, zr, ir in zip(xrois, yrois, zrois, img_rois)])
+                                          for xr, yr, zr, ir in zip(xrois, yrois, zrois, img_rois)])
 
-    # setup rois
-    roi_sizes = np.array([ir.size for ir in img_rois])
-    nmax = roi_sizes.max()
+        # setup rois
+        roi_sizes = np.array([ir.size for ir in img_rois])
+        nmax = roi_sizes.max()
 
-    # pad ROI's to make sure all rois same size
-    img_rois = [np.pad(ir, ((0, 0), (0, nmax - ir.size)), mode="constant") for ir in img_rois]
+        # pad ROI's to make sure all rois same size
+        img_rois = [np.pad(ir, ((0, 0), (0, nmax - ir.size)), mode="constant") for ir in img_rois]
 
-    # build roi data
-    data = np.concatenate(img_rois, axis=0)
-    data = data.astype(np.float32)
-    nfits, n_pts_per_fit = data.shape
+        # build roi data
+        data = np.concatenate(img_rois, axis=0)
+        data = data.astype(np.float32)
+        nfits, n_pts_per_fit = data.shape
 
-    # build user info
-    coords = [np.concatenate(
-              (np.pad(xr.ravel(), (0, nmax - xr.size)),
-               np.pad(yr.ravel(), (0, nmax - yr.size)),
-               np.pad(zr.ravel(), (0, nmax - zr.size))
-              ))
-              for xr, yr, zr in zip(xrois, yrois, zrois)]
-    coords = np.concatenate(coords)
+        # build user info
+        coords = [np.concatenate(
+            (np.pad(xr.ravel(), (0, nmax - xr.size)),
+             np.pad(yr.ravel(), (0, nmax - yr.size)),
+             np.pad(zr.ravel(), (0, nmax - zr.size))
+            ))
+                  for xr, yr, zr in zip(xrois, yrois, zrois)]
+        coords = np.concatenate(coords)
 
-    user_info = np.concatenate((coords.astype(np.float32), roi_sizes.astype(np.float32)))
+        user_info = np.concatenate((coords.astype(np.float32), roi_sizes.astype(np.float32)))
 
-    # initial parameters
-    init_params = init_params.astype(np.float32)
+        # initial parameters
+        init_params = init_params.astype(np.float32)
 
-    # check arguments
-    if data.ndim != 2:
-        raise ValueError
-    if init_params.ndim != 2 or init_params.shape != (nfits, 7):
-        raise ValueError
-    if user_info.ndim != 1 or user_info.size != (3 * nfits * n_pts_per_fit + nfits):
-        raise ValueError
+        # check arguments
+        if data.ndim != 2:
+            raise ValueError
+        if init_params.ndim != 2 or init_params.shape != (nfits, 7):
+            raise ValueError
+        if user_info.ndim != 1 or user_info.size != (3 * nfits * n_pts_per_fit + nfits):
+            raise ValueError
 
-    if estimator == "MLE":
-        est = gf.EstimatorID.MLE
-    elif estimator == "LSE":
-        est = gf.EstimatorID.LSE
-    else:
-        raise ValueError("'estimator' must be 'MLE' or 'LSE' but was '%s'" % estimator)
+        if estimator == "MLE":
+            est = gf.EstimatorID.MLE
+        elif estimator == "LSE":
+            est = gf.EstimatorID.LSE
+        else:
+            raise ValueError("'estimator' must be 'MLE' or 'LSE' but was '%s'" % estimator)
 
-    fit_params, fit_states, chi_sqrs, niters, fit_t = gf.fit(data, None, gf.ModelID.GAUSS_3D_ARB, init_params,
-                                                             max_number_iterations=max_number_iterations,
-                                                             estimator_id=est,
-                                                             user_info=user_info)
+        fit_params, fit_states, chi_sqrs, niters, fit_t = gf.fit(data, None, gf.ModelID.GAUSS_3D_ARB, init_params,
+                                                                 max_number_iterations=max_number_iterations,
+                                                                 estimator_id=est,
+                                                                 user_info=user_info)
 
-    # correct sigmas in case negative
-    fit_params[:, 4] = np.abs(fit_params[:, 4])
-    fit_params[:, 5] = np.abs(fit_params[:, 5])
+        # correct sigmas in case negative
+        fit_params[:, 4] = np.abs(fit_params[:, 4])
+        fit_params[:, 5] = np.abs(fit_params[:, 5])
 
     return fit_params, fit_states, chi_sqrs, niters, fit_t
 
 # plotting functions
-def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, figsize=(16, 8),
+def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, same_color_scale=True, figsize=(16, 8),
                     prefix="", save_dir=None):
     """
     plot results from fit_roi()
@@ -1371,15 +1465,14 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
     dc = x[0, 0, 1] - x[0, 0, 0]
     stage_pos = y[:, 0]
 
-    if center_guess is not None:
-        if center_guess.ndim == 1:
-            center_guess = center_guess[None, :]
+    if init_params is not None:
+        center_guess = np.array([init_params[3], init_params[2], init_params[1]])
 
     center_fit = np.array([fit_params[3], fit_params[2], fit_params[1]])
-    normal = np.array([0, -np.sin(theta), np.cos(theta)])
+    #normal = np.array([0, -np.sin(theta), np.cos(theta)])
 
     # get ROI and coordinates
-    img_roi = imgs[roi[0]:roi[1], roi[2]:roi[3], roi[4]:roi[5]]
+    img_roi = cut_roi(roi, imgs)
     x_roi = x[:, :, roi[4]:roi[5]]  # only roi on last one because x has only one entry on first two dims
     y_roi = y[roi[0]:roi[1], roi[2]:roi[3], :]
     z_roi = z[:, roi[2]:roi[3], :]
@@ -1387,8 +1480,15 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
     vmin_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 1)
     vmax_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 99.9)
 
-    # git fit
-    fit_volume = gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, [dc, dc], normal, fit_params, sf=3)
+    # get fit
+    fit_volume = gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, dc, fit_params, sf=3, angles=np.array([0., theta, 0.]))
+
+    if same_color_scale:
+        vmin_fit = vmin_roi
+        vmax_fit = vmax_roi
+    else:
+        vmin_fit = np.percentile(fit_volume, 1)
+        vmax_fit = np.percentile(fit_volume, 99.9)
 
     # interpolate on regular grid
     xi_roi, yi_roi, zi_roi, img_roi_unskew = interp_opm_data(img_roi, dc, dstage, theta, mode="ortho-interp")
@@ -1401,14 +1501,20 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
 
     # fit on regular grid
     fit_roi_unskew = gaussian3d_pixelated_psf(xi_roi[None, None, :], yi_roi[None, :, None], zi_roi[:, None, None]
-                                              , [dc, dc * np.cos(theta)], np.array([0, 0, 1]), fit_params, sf=3)
+                                              , dc, fit_params, sf=1)
 
     # ################################
     # plot results interpolated on regular grid
     # ################################
     figh_interp = plt.figure(figsize=figsize)
-    plt.suptitle("Fit, max projections, interpolated\nA=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" %
-                 (fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6]))
+    st_str = "Fit, max projections, interpolated, ROI = [%d, %d, %d, %d, %d, %d]\n" \
+             "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+             (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
+              fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
+    if init_params is not None:
+        st_str += "\nguess A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5], init_params[6])
+    plt.suptitle(st_str)
     grid = plt.GridSpec(2, 3)
 
     ax = plt.subplot(grid[0, 0])
@@ -1416,8 +1522,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
                extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
                        xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi])
     plt.plot(center_fit[1], center_fit[2], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 2], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[1], center_guess[2], 'gx')
     plt.xlabel("Y (um)")
     plt.ylabel("X (um)")
     plt.title("XY")
@@ -1427,8 +1533,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
                extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
                        zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
     plt.plot(center_fit[2], center_fit[0], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 2], center_guess[:, 0], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[2], center_guess[0], 'gx')
     plt.xlabel("X (um)")
     plt.ylabel("Z (um)")
     plt.title("XZ")
@@ -1440,39 +1546,39 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
                    extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
                        zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
     plt.plot(center_fit[1], center_fit[0], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 0], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[1], center_guess[0], 'gx')
     plt.xlabel("Y (um)")
     plt.ylabel("Z (um)")
     plt.title("YZ")
 
     ax = plt.subplot(grid[1, 0])
-    plt.imshow(np.nanmax(fit_roi_unskew, axis=0).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
+    plt.imshow(np.nanmax(fit_roi_unskew, axis=0).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
                extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
                        xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi])
     plt.plot(center_fit[1], center_fit[2], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 2], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[ 1], center_guess[2], 'gx')
     plt.xlabel("Y (um)")
     plt.ylabel("X (um)")
 
     ax = plt.subplot(grid[1, 1])
-    plt.imshow(np.nanmax(fit_roi_unskew, axis=1), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
+    plt.imshow(np.nanmax(fit_roi_unskew, axis=1), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
                extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
                        zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
     plt.plot(center_fit[2], center_fit[0], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 2], center_guess[:, 0], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[2], center_guess[0], 'gx')
     plt.xlabel("X (um)")
     plt.ylabel("Z (um)")
 
     ax = plt.subplot(grid[1, 2])
-    plt.imshow(np.nanmax(fit_roi_unskew, axis=2), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
+    plt.imshow(np.nanmax(fit_roi_unskew, axis=2), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
                extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
                        zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
     plt.plot(center_fit[1], center_fit[0], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 0], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[1], center_guess[0], 'gx')
     plt.xlabel("Y (um)")
     plt.ylabel("Z (um)")
 
@@ -1484,8 +1590,16 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
     # plot fits in raw OPM coords
     # ################################
     figh_raw = plt.figure(figsize=figsize)
-    plt.suptitle("ROI single PSF fit\nA=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" %
-                 (fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6]))
+    st_str = "ROI single PSF fit, ROI = [%d, %d, %d, %d, %d, %d]\n" \
+             "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+                 (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
+                  fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
+    if init_params is not None:
+        st_str += "\nguess A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5],
+                   init_params[6])
+
+    plt.suptitle(st_str)
     grid = plt.GridSpec(3, roi[1] - roi[0])
 
     xp = np.arange(imgs.shape[2]) * dc
@@ -1516,7 +1630,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, center_guess=None, fi
             ax.axes.yaxis.set_ticks([])
 
         ax = plt.subplot(grid[1, jj])
-        plt.imshow(fit_volume[jj], vmin=vmin_roi, vmax=vmax_roi, extent=extent_roi, origin="lower")
+        plt.imshow(fit_volume[jj], vmin=vmin_fit, vmax=vmax_fit, extent=extent_roi, origin="lower")
         if jj != jj_min:
             plt.plot(xp, yp, 'mx')
         else:
@@ -1581,7 +1695,7 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     vmax_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 99.9)
 
     # git fit
-    img_fit = gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, [dc, dc], [0, 0, 1], fit_params, sf=1)
+    img_fit = gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, dc, fit_params, sf=1)
 
     # ################################
     # plot results interpolated on regular grid
@@ -1681,9 +1795,9 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     return figh_interp
 
 # orchestration functions
-def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_sigma_large,
-             min_sep_allowed, sigma_bounds, offsets=(0, 0, 0), allowed_polygon=None, sf=3, use_max_filter=True,
-             mode="fit", use_gpu_fit=GPUFIT_AVAILABLE, use_gpu_filter=CUPY_AVAILABLE):
+def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_sigma_large,
+                    min_sep_allowed, offsets=(0, 0, 0), allowed_polygon=None, sf=3,
+                    mode="fit", use_gpu_fit=GPUFIT_AVAILABLE, use_gpu_filter=CUPY_AVAILABLE):
     """
     :param imgs: raw OPM data
     :param params: {"dc", "dstage", "theta"}
@@ -1692,8 +1806,6 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     :param filter_sigma_small: (sz, sy, sx) sigmas for small size filter to be used in difference of gaussian filter
     :param filter_sigma_large:
     :param min_sep_allowed: (dz, dy, dx) assume points separated by less than this distance come from one spot
-    :param sigma_bounds: ((sz_min, sy_min, sx_min), (sz_max, sy_max, sx_max)) exclude fits with sigmas that fall outside
-    these ranges
     :param offsets: offset to apply to y-coordinates. Useful for analyzing datasets in chunks
     :return:
     """
@@ -1722,8 +1834,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     imgs_lp = filter_convolve(imgs, kl, use_gpu=use_gpu_filter)
     imgs_filtered = imgs_hp - imgs_lp
 
-    tend = time.perf_counter()
-    print("Filtered images in %0.2fs" % (tend - tstart))
+    print("Filtered images in %0.2fs" % (time.perf_counter() - tstart))
 
     # ###################################################
     # mask off region of each camera frame
@@ -1737,25 +1848,16 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
         xx, yy = np.meshgrid(range(imgs.shape[2]), range(imgs.shape[1]))
         rs = np.concatenate((xx.ravel()[:, None], yy.ravel()[:, None]), axis=1)
         mask = p.contains_points(rs).reshape([1, imgs.shape[1], imgs.shape[2]])
-    tend = time.perf_counter()
-    print("Masked region in %0.2fs" % (tend - tstart))
+
+    print("Masked region in %0.2fs" % (time.perf_counter() - tstart))
 
     # ###################################################
     # identify candidate beads
     # ###################################################
     tstart = time.perf_counter()
-    if False:
-        centers_guess_inds = skimage.feature.peak_local_max(imgs_filtered * mask, min_distance=1, threshold_abs=abs_threshold,
-                                            exclude_border=False, num_peaks=np.inf)
-    elif False:
-        ispeak = imgs_filtered * mask > abs_threshold
 
-        # get indices of points above threshold
-        coords = np.meshgrid(*[range(imgs.shape[ii]) for ii in range(imgs.ndim)], indexing="ij")
-        centers_guess_inds = np.concatenate([c[ispeak][:, None] for c in coords], axis=1)
-    else:
-        footprint = get_skewed_footprint(min_sep_allowed, dc, stage_step, theta)
-        centers_guess_inds = find_peak_candidates(imgs_filtered * mask, footprint, abs_threshold, use_gpu_filter=use_gpu_filter)
+    footprint = get_skewed_footprint(min_sep_allowed, dc, stage_step, theta)
+    centers_guess_inds, amps = find_peak_candidates(imgs_filtered * mask, footprint, abs_threshold, use_gpu_filter=use_gpu_filter)
 
     # convert to xyz coordinates
     xc = x[0, 0, centers_guess_inds[:, 2]]
@@ -1763,8 +1865,7 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
     zc = z[0, centers_guess_inds[:, 1], 0]  # z-position is determined by the y'-index in OPM image
     centers_guess = np.concatenate((zc[:, None], yc[:, None], xc[:, None]), axis=1)
 
-    tend = time.perf_counter()
-    print("Found %d points above threshold in %0.2fs" % (len(centers_guess), tend - tstart))
+    print("Found %d points above threshold in %0.2fs" % (len(centers_guess), time.perf_counter() - tstart))
 
     # ###################################################
     # average multiple points too close together. Necessary bc if naive threshold, may identify several points
@@ -1774,26 +1875,47 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
 
     inds = np.ravel_multi_index(centers_guess_inds.transpose(), imgs_filtered.shape)
     weights = imgs_filtered.ravel()[inds]
-    centers_guess, _ = combine_nearby_peaks(centers_guess, min_sep_allowed[1], min_sep_allowed[0], weights=weights, mode="average")
+    centers_guess, inds_comb = combine_nearby_peaks(centers_guess, min_sep_allowed[1], min_sep_allowed[0], weights=weights, mode="average")
 
-    # remove point outside boundaries
-    in_region = point_in_trapezoid(centers_guess, x, y, z)
-    centers_guess = centers_guess[in_region]
+    amps = amps[inds_comb]
+    print("Found %d points separated by dxy > %0.5g and dz > %0.5g in %0.1fs" %
+          (len(centers_guess), min_sep_allowed[1], min_sep_allowed[0], time.perf_counter() - tstart))
 
-    tend = time.perf_counter()
-    print("Found %d points separated by dxy > %0.5g and dz > %0.5g and in allowed region in %0.1fs" %
-          (len(centers_guess), min_sep_allowed[1], min_sep_allowed[0], tend - tstart))
-
+    # ###################################################
+    # prepare ROIs
+    # ###################################################
     tstart = time.perf_counter()
-    # get rois and coordinates for each center
+
+    # cut rois out
     roi_size_skew = get_skewed_roi_size(roi_size, theta, dc, stage_step, ensure_odd=True)
-    rois, xrois, yrois, zrois = zip(*[get_skewed_roi(c, x, y, z, roi_size_skew, imgs.shape) for c in centers_guess])
+    rois, img_rois, xrois, yrois, zrois = zip(*[get_skewed_roi(c, imgs, x, y, z, roi_size_skew) for c in centers_guess])
     rois = np.asarray(rois)
 
     # exclude some regions of roi
     roi_masks = [get_roi_mask(c, (np.inf, 0.5 * roi_size[1]), (zrois[ii], yrois[ii], xrois[ii])) for ii, c in enumerate(centers_guess)]
-    tend = time.perf_counter()
-    print("Prepared %d rois in %0.2fs" % (len(rois), tend - tstart))
+
+    # mask regions
+    xrois, yrois, zrois, img_rois = zip(*[(xr[rm][None, :], yr[rm][None, :], zr[rm][None, :], ir[rm][None, :])
+                                        for xr, yr, zr, ir, rm in zip(xrois, yrois, zrois, img_rois, roi_masks)])
+
+    # extract guess values
+    bgs = np.array([np.mean(r) for r in img_rois])
+    sxs = np.array([np.sqrt(np.sum(ir * (xr - cg[2]) ** 2) / np.sum(ir)) for ir, xr, cg in zip(img_rois, xrois, centers_guess)])
+    sys = np.array([np.sqrt(np.sum(ir * (yr - cg[1]) ** 2) / np.sum(ir)) for ir, yr, cg in zip(img_rois, yrois, centers_guess)])
+    sxys = np.expand_dims(0.5 * (sxs + sys), axis=1)
+    szs = np.expand_dims(np.array([np.sqrt(np.sum(ir * (zr - cg[0]) ** 2) / np.sum(ir)) for ir, zr, cg in zip(img_rois, zrois, centers_guess)]), axis=1)
+
+
+    # get initial parameter guesses
+    init_params = np.concatenate((np.expand_dims(amps, axis=1),
+                                  centers_guess[:, 2][:, None],
+                                  centers_guess[:, 1][:, None],
+                                  centers_guess[:, 0][:, None],
+                                  sxys, szs,
+                                  np.expand_dims(bgs, axis=1)),
+                                 axis=1)
+
+    print("Prepared %d rois in %0.2fs" % (len(rois), time.perf_counter() - tstart))
 
     # ###################################################
     # localization
@@ -1802,60 +1924,10 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
         print("starting fitting for %d rois" % centers_guess.shape[0])
         tstart = time.perf_counter()
 
-        if use_gpu_fit:
-
-            # exclude rois near edge
-            roi_sizes = np.array([(r[1] - r[0]) * (r[3] - r[2]) * (r[5] - r[4]) for r in rois])
-            roi_masks = [r.astype(np.bool) for r in roi_masks]
-            roi_mask_sizes = np.array([np.sum(r) for r in roi_masks])
-            nmax = np.max(roi_mask_sizes)
-
-            print("starting fitting in parallel on GPU")
-            imgs_roi = [cut_roi(r, imgs)[rm].astype(np.float32)[None, :] for r, rm in zip(rois, roi_masks)]
-            imgs_roi = [np.pad(im, ((0, 0), (0, nmax - im.size)), mode="constant") for im in imgs_roi]
-
-            data = np.concatenate(imgs_roi, axis=0)
-            data = data.astype(np.float32)
-
-            coords = [np.broadcast_arrays(x, y, z) for x, y, z in zip(xrois, yrois, zrois)]
-            user_info = [(c[0][rm], c[1][rm], c[2][rm]) for c, rm in zip(coords, roi_masks)]
-            user_info = [np.concatenate((np.pad(c[0], (0, nmax - c[0].size), mode="constant"),
-                                         np.pad(c[1], (0, nmax - c[1].size), mode="constant"),
-                                         np.pad(c[2], (0, nmax - c[1].size), mode="constant"))) for c in user_info]
-            user_info = np.concatenate(user_info).astype(np.float32)
-
-            user_info = np.concatenate((user_info, roi_mask_sizes.astype(np.float32)))
-
-            nfits, n_pts_per_fit = data.shape
-            init_params = np.concatenate((100 * np.ones((nfits, 1)), centers_guess[:, 2][:, None],
-                                          centers_guess[:, 1][:, None], centers_guess[:, 0][:, None],
-                                          0.14 * np.ones((nfits, 1)), 0.4 * np.ones((nfits, 1)), 0 * np.ones((nfits, 1))), axis=1)
-            init_params = init_params.astype(np.float32)
-
-            if data.ndim != 2:
-                raise ValueError
-            if init_params.ndim != 2 or init_params.shape != (nfits, 7):
-                raise ValueError
-            if user_info.ndim != 1 or user_info.size != (3 * nfits * n_pts_per_fit + nfits):
-                raise ValueError
-
-            fit_params, fit_states, chi_sqrs, niters, fit_t = gf.fit(data, None, gf.ModelID.GAUSS_3D_ARB, init_params,
-                                                                     max_number_iterations=100,
-                                                                     estimator_id=gf.EstimatorID.LSE,
-                                                                     user_info=user_info)
-        else:
-            print("using multiprocessor parallelization on CPU")
-            results = joblib.Parallel(n_jobs=-1, verbose=1, timeout=None)(
-                      joblib.delayed(fit_roi)(cut_roi(rois[ii], imgs_filtered) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
-                                              init_params=[None, centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], None, None, None])
-                      for ii in range(len(centers_guess)))
-            # results = []
-            # for ii in range(len(centers_guess)):
-            #     print(ii)
-            #     results.append(fit_roi(get_roi(rois[ii], imgs) * roi_masks[ii], (zrois[ii], yrois[ii], xrois[ii]), sf=sf,
-            #     init_params=[None, centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], None, None, None]))
-
-            fit_params = np.asarray([r["fit_params"] for r in results])
+        fit_params, fit_states, chi_sqrs, niters, fit_t = fit_rois(img_rois, (zrois, yrois, xrois),
+                                                                   init_params, estimator="LSE",
+                                                                   sf=sf, dc=dc, angles=(0., theta, 0.),
+                                                                   use_gpu=use_gpu_fit)
 
     elif mode == "radial-symmetry":
         print("starting radial-symmetry localization for %d rois" % len(centers_guess))
@@ -1871,58 +1943,90 @@ def localize(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_s
 
         fit_params = np.asarray(results)
 
-        # tstart = time.process_time()
-        # fit_params = np.zeros((len(rois), 7))
-        # for ii in range(len(rois)):
-        #     img_roi = get_roi(rois[ii], imgs_filtered) * roi_masks[ii]
-        #     img_roi[img_roi < 0] = 0
-        #     fit_params[ii] = localize_radial_symm(img_roi, (zrois[ii], yrois[ii], xrois[ii]), mode="radial-symmetry")
-
-        # tend = time.process_time()
-        # print("radial-symmetry localzation for %d rois in %0.2fs" % (centers_guess.shape[0], tend - tstart))
     else:
-        raise ValueError
+        raise ValueError("'mode' must be 'fit' or 'radial-symmetry' but was '%s'" % mode)
+
     tend = time.perf_counter()
     print("Localization took %0.2fs" % (tend - tstart))
 
-    tstart = time.perf_counter()
+    fit_results = np.concatenate((np.expand_dims(fit_states, axis=1),
+                                  np.expand_dims(chi_sqrs, axis=1),
+                                  np.expand_dims(niters, axis=1)), axis=1)
+
+    return rois, fit_params, init_params, fit_results, imgs_filtered, (z, y, x)
+
+def filter_localizations(fit_params, init_params, coords, xy_fit_err_max, z_err_fit_max, min_sep_allowed,
+                         sigma_bounds, amp_min, mode="skewed"):
+    """
+    :param fit_params:
+    :param init_params:
+    :param coords: (z, y, x)
+    :param xy_fit_err_max: maximum allowed error in xy position from initial guess
+    :param z_err_fit_max: maximum allowed error in z position from initial guess
+    :param min_sep_allowed: (dz, dy, dx) assume points separated by less than this distance come from one spot
+    :param sigma_bounds: ((sz_min, sxy_min), (sz_max, sxy_max)) exclude fits with sigmas that fall outside
+    these ranges
+    :param amp_min:
+    :return to_keep, conditions, condition_names:
+    """
+    z, y, x = coords
+    centers_guess = np.concatenate((init_params[:, 3][:, None], init_params[:, 2][:, None], init_params[:, 1][:, None]), axis=1)
     centers_fit = np.concatenate((fit_params[:, 3][:, None], fit_params[:, 2][:, None], fit_params[:, 1][:, None]), axis=1)
 
     # ###################################################
     # only keep points if size and position were reasonable
     # ###################################################
-    amp_min = 0.1 * abs_threshold
+
+    if mode == "skewed":
+        in_bounds = point_in_trapezoid(centers_fit, x, y, z)
+    elif mode == "straight":
+        in_bounds = np.logical_and.reduce((fit_params[:, 1] >= x.min(),
+                                           fit_params[:, 1] <= x.max(),
+                                           fit_params[:, 2] >= y.min(),
+                                           fit_params[:, 2] <= y.max(),
+                                           fit_params[:, 3] >= z.min(),
+                                           fit_params[:, 3] <= z.max()))
+    else:
+        raise ValueError("mode must be 'skewed' or 'straight' but was '%s'" % mode)
+
+    center_close_to_guess_xy = np.sqrt((centers_guess[:, 2] - fit_params[:, 1])**2 +
+                                       (centers_guess[:, 1] - fit_params[:, 2])**2) <= xy_fit_err_max
+    center_close_to_guess_z = np.abs(centers_guess[:, 0] - fit_params[:, 3]) <= z_err_fit_max
+
+    condition_names = ["in_bounds", "center_close_to_guess_xy", "center_close_to_guess_z",
+                       "xy_size_small_enough", "xy_size_big_enough", "z_size_small_enough",
+                      "z_size_big_enough", "amp_ok"]
+
     sigmas_min_keep = sigma_bounds[0]
     sigmas_max_keep = sigma_bounds[1]
-    to_keep = np.logical_and.reduce((point_in_trapezoid(centers_fit, x, y, z),
-                                     fit_params[:, 0] >= amp_min,
-                                     fit_params[:, 4] <= sigmas_max_keep[2],
-                                     fit_params[:, 4] >= sigmas_min_keep[2],
-                                     fit_params[:, 4] <= sigmas_max_keep[1],
-                                     fit_params[:, 4] >= sigmas_min_keep[1],
-                                     fit_params[:, 5] <= sigmas_max_keep[0],
-                                     fit_params[:, 5] >= sigmas_min_keep[0]))
+    conditions = np.concatenate((np.expand_dims(in_bounds, axis=1),
+                                 np.expand_dims(center_close_to_guess_xy, axis=1),
+                                 np.expand_dims(center_close_to_guess_z, axis=1),
+                                 np.expand_dims(fit_params[:, 4] <= sigmas_max_keep[1], axis=1),
+                                 np.expand_dims(fit_params[:, 4] >= sigmas_min_keep[1], axis=1),
+                                 np.expand_dims(fit_params[:, 5] <= sigmas_max_keep[0], axis=1),
+                                 np.expand_dims(fit_params[:, 5] >= sigmas_min_keep[0], axis=1),
+                                 np.expand_dims(fit_params[:, 0] >= amp_min, axis=1)), axis=1)
 
-    tend = time.perf_counter()
-    print("identified %d valid localizations with:\n"
-          "centers in bounds, amp >= %.5g\n"
-          "%0.5g <= sx <= %0.5g, %0.5g <= sy <= %0.5g and %0.5g <= sz <= %0.5g in %0.3f" %
-          (np.sum(to_keep), amp_min, sigmas_min_keep[2], sigmas_max_keep[2],
-           sigmas_min_keep[1], sigmas_max_keep[1],
-           sigmas_min_keep[0], sigmas_max_keep[0], tend - tstart))
+    to_keep_temp = np.logical_and.reduce(conditions, axis=1)
 
-    if np.sum(to_keep) > 0:
-        tstart = time.perf_counter()
+    # ###################################################
+    # check again for unique points
+    # ###################################################                                                                   
+    if np.sum(to_keep_temp) > 0:
+
         # only keep unique center if close enough
-        centers_unique, unique_inds = combine_nearby_peaks(centers_fit[to_keep], min_sep_allowed[1], min_sep_allowed[0], mode="keep-one")
-        fit_params_unique = fit_params[to_keep][unique_inds]
-        rois_unique = rois[to_keep][unique_inds]
-        tend = time.perf_counter()
-        print("identified %d unique points, dxy > %0.5g, and dz > %0.5g in %0.3f" %
-              (len(centers_unique), min_sep_allowed[1], min_sep_allowed[0], tend - tstart))
+        _, unique_inds = combine_nearby_peaks(centers_fit[to_keep_temp], min_sep_allowed[1], min_sep_allowed[0], mode="keep-one")
+        # convert to indices into full array
+        unique_inds_full = np.arange(len(to_keep_temp), dtype=np.int)[to_keep_temp][unique_inds]
+        # boolean array showing which elements unique
+        unique = np.zeros(len(fit_params), dtype=np.bool)
+        unique[unique_inds_full] = True
     else:
-        centers_unique = np.zeros((0, 3))
-        fit_params_unique = np.zeros((0, 7))
-        rois_unique = np.zeros((0, 6))
+        unique = np.ones(len(fit_params), dtype=np.bool)
 
-    return imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess
+    conditions = np.concatenate((conditions, np.expand_dims(unique, axis=1)), axis=1)
+    condition_names += ["unique"]
+    to_keep = np.logical_and(to_keep_temp, unique)
+
+    return to_keep, conditions, condition_names

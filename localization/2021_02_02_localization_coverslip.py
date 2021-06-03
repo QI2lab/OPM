@@ -102,7 +102,7 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
 
     y_offset = (aa - n_overlap) * dstage
 
-    imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize(
+    imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize_skewed(
         imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_roi_size, z_roi_size, 0, 0, min_z_dist,
         min_xy_dist, sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
 

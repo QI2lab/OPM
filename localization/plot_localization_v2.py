@@ -13,14 +13,17 @@ import localize
 import data_io
 import tifffile
 import os
+import pycromanager
+import matplotlib.pyplot as plt
 
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_20_18;15;17_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_21_10;22;43_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408m", "glycerol50x_1", "2021_04_21_10;17;23_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430i", "glycerol_60_1", "2021_05_02_15;17;29_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430a", "beads_1", "dummy")
-loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430f", "glycerol_40_1", "2021_05_06_17;28;06_localization")
-
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430f\glycerol_40_1", "2021_05_20_16;20;04_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210518k", "glycerol40_1", "2021_05_06_17;28;06_localization")
+loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210521s", "glycerol_70_1", "2021_05_31_10;39;05_localization")
 
 data_dir, _ = os.path.split(loc_data_dir)
 root_dir, _ = os.path.split(data_dir)
@@ -29,7 +32,7 @@ deskew_fname = os.path.join(root_dir, "full_deskew_only.h5")
 md_fname = os.path.join(root_dir, "scan_metadata.csv")
 track_fname = os.path.join(loc_data_dir, "tracks.pkl")
 plot_centers = True
-plot_tracks = True
+plot_tracks = False
 plot_centers_guess = True
 
 # reader for deskewed dataset
@@ -38,18 +41,18 @@ ntimes, nilluminations, nchannels, ntiles, nangle = reader.get_attribute_count()
 
 # load metadata
 md = data_io.read_metadata(md_fname)
-# x, y, z = localize.get_lab_coords(md["x_pixels"], md["y_pixels"], md["pixel_size"] / 1000, md["theta"] * np.pi/180,
-#                                   np.arange(md["scan_axis_positions"]) * md["scan_step"] / 1000)
-# raw_shape = np.broadcast_arrays(x, y, z)[0].shape
-
 pix_sizes = [md["pixel_size"] / 1000] * 3
-# pix_sizes = [md["pixel_size"] * np.sin(md["theta"] * np.pi / 180) / 1000, md["pixel_size"] * np.cos(md["theta"] * np.pi / 180) / 1000, md["pixel_size"] / 1000]
 
 if plot_centers:
     # load all localizations and convert to pixel coordinates
     try:
         centers = []
         centers_guess = []
+        to_keep = []
+        conditions = []
+        rois = []
+        fit_params = []
+        init_params = []
         for ii in range(ntimes):
             data_fname = os.path.join(loc_data_dir, loc_data_str % ii)
 
@@ -59,16 +62,43 @@ if plot_centers:
 
             with open(data_fname, "rb") as f:
                 dat = pickle.load(f)
-            centers.append(np.concatenate((ii * np.ones((len(dat["centers"]), 1)),
-                                           dat["centers"][:, 0][:, None] / pix_sizes[0],
-                                           dat["centers"][:, 1][:, None] / pix_sizes[1],
-                                           dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
-            centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
-                                           dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
-                                           dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
-                                           dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
+            # centers.append(np.concatenate((ii * np.ones((len(dat["centers"]), 1)),
+            #                                dat["centers"][:, 0][:, None] / pix_sizes[0],
+            #                                dat["centers"][:, 1][:, None] / pix_sizes[1],
+            #                                dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
+            # centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
+            #                                dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
+            #                                dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
+            #                                dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
+            tk = dat["to_keep"]
+            cd = dat["conditions"]
+            cd_names = dat["condition_names"]
+            fp = dat["fit_params"]
+            ip = dat["init_params"]
+            ri = dat["rois"]
+            centers.append(np.concatenate((ii * np.ones((int(np.sum(tk)), 1)),
+                                           fp[:, 3][tk][:, None] / pix_sizes[0],
+                                           fp[:, 2][tk][:, None] / pix_sizes[1],
+                                           fp[:, 1][tk][:, None] / pix_sizes[2]
+                                           ), axis=1))
+            centers_guess.append(np.concatenate((ii * np.ones((len(ip), 1)),
+                                           ip[:, 3][:, None] / pix_sizes[0],
+                                           ip[:, 2][:, None] / pix_sizes[1],
+                                           ip[:, 1][:, None] / pix_sizes[2]
+                                           ), axis=1))
+            to_keep.append(tk)
+            conditions.append(cd)
+            rois.append(ri)
+            fit_params.append(fp)
+            init_params.append(ip)
+
         centers = np.concatenate(centers, axis=0)
         centers_guess = np.concatenate(centers_guess, axis=0)
+        to_keep = np.concatenate(to_keep, axis=0)
+        conditions = np.concatenate(conditions, axis=0)
+        rois = np.concatenate(rois, axis=0)
+        fit_params = np.concatenate(fit_params, axis=0)
+        init_params = np.concatenate(init_params, axis=0)
     except:
         plot_centers = False
 
@@ -119,13 +149,52 @@ shape0 = img0.shape
 arr = [da.from_delayed(lazy_image, dtype=np.uint16, shape=shape0) for lazy_image in lazy_images]
 stack = da.stack(arr, axis=0)
 
+if False:
+    # plot one roi
+
+    # need to load real data for this
+    dset_dir = os.path.join(loc_data_dir, "..")
+    dset = pycromanager.Dataset(dset_dir)
+
+    imgs = []
+    vv = 0
+    for kk in range(25):
+        imgs.append(dset.read_image(z=kk, t=vv, c=0))
+    imgs = np.asarray(imgs)
+    imgs = np.flip(imgs, axis=0)
+
+    # find fit nearest to point from napari (in deskewed pixels)
+    inds = [31, 105, 581]
+    dists = ((centers_guess[:, 1] - inds[0])**2 + (centers_guess[:, 2] - inds[1])**2 + (centers_guess[:, 3] - inds[2])**2)
+    dists[centers_guess[:, 0] != 0] = np.nan
+    # dists[np.logical_not(to_keep)] = np.nan
+    ind = np.nanargmin(dists)
+    print("kept = %d" % to_keep[ind])
+
+    # plot
+    theta = md["theta"] * np.pi/180
+    x, y, z = localize.get_skewed_coords(imgs.shape, md["pixel_size"] / 1000, md["scan_step"] / 1000, theta)
+    figa, figb = localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params=init_params[ind],
+                             figsize=(16, 8), same_color_scale=False)
+
 # plot with napari
-with napari.gui_qt():
-    # specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
-    viewer = napari.view_image(stack, colormap="bone", contrast_limits=[0, 750], multiscale=False, title=loc_data_dir)
-    if plot_centers:
-        viewer.add_points(centers, size=2, face_color="red", opacity=0.75, n_dimensional=True)
-    if plot_centers_guess:
-        viewer.add_points(centers_guess, size=2, face_color="green", opacity=0.5, n_dimensional=True)
-    if plot_tracks:
-        viewer.add_tracks(track_data, opacity=1, blending="opaque", tail_length=20, tail_width=2)
+# specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
+viewer = napari.view_image(stack, colormap="bone", contrast_limits=[np.percentile(img0, 1), np.percentile(img0, 99.999)],
+                           multiscale=False, title=loc_data_dir)
+
+if plot_centers:
+    viewer.add_points(centers, size=2, face_color="red", name="fits", opacity=0.75, n_dimensional=True)
+
+if plot_centers_guess:
+    viewer.add_points(centers_guess, size=2, face_color="green", name="guesses", opacity=0.5, n_dimensional=True)
+
+    # show which fits failed and why
+    cds = conditions.transpose()
+    colors = ["purple", "blue", "green", "yellow", "orange"] * int(np.ceil(len(cds) / 5))
+    for c, cn, col in zip(cds, cd_names, colors):
+        ct = centers_guess[np.logical_not(c)]
+        viewer.add_points(ct, size=2, face_color=col, opacity=0.5, name="not %s" % cn.replace("_", " "),
+                          n_dimensional=True, visible=False)
+
+if plot_tracks:
+    viewer.add_tracks(track_data, opacity=1, blending="opaque", tail_length=20, tail_width=2)

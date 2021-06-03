@@ -37,7 +37,7 @@ img, _, _ = localize.simulate_img_noise(gt, 1, cam_gains=2, cam_offsets=100, cam
 # localize using gauss nonlinear fit
 tstart = time.process_time()
 
-results = localize.fit_roi(img, (z, y, x))
+results = localize.fit_roi(img, (z, y, x), dc=dc, angles=np.array([0, theta, 0]))
 c_nl = np.array([results["fit_params"][3], results["fit_params"][2], results["fit_params"][1]])
 
 tend = time.process_time()
