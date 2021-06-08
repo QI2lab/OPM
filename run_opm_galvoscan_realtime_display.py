@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
 '''
-OPM galvo scan using Pycromanager.
+Real-time display of deskewed data from a OPM galvo scan using Pycromanager.
 
+D. Shepherd 06/21 - initial work on real-time display using Napari
 D. Shepherd 04/21 - streamline code for fast acquisition and immediate upload to server
 P. Brown 03/21 - multiline digital and analog NI DAQ control using camera as master
 D. Shepherd 01/21 - initial pycromanager work, ported from stage control code
