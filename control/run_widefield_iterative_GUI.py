@@ -32,9 +32,16 @@ def main():
     fluidics_path = easygui.fileopenbox('Load fluidics program')
     program_name = Path(fluidics_path)
 
+    # check if user wants to flush system?
+    run_type = easygui.choicebox('Type of run?', 'Iterative multiplexing setup', ['Flush fluidics (no imaging)', 'Iterative imaging'])
+    if run_type == str('Flush fluidics (no imaging)'):
+        flush_system = True
+    else:
+        flush_system = False
+
     # define ports for pumps and valves
-    pump_COM_port = 'COM3'
-    valve_COM_port = 'COM4'
+    pump_COM_port = 'COM5'
+    valve_COM_port = 'COM6'
 
     # connect to Micromanager instance
     bridge = Bridge()
@@ -103,6 +110,16 @@ def main():
     df_program = pd.read_csv(program_name)
     iterative_rounds = df_program['round'].max()
     print('Number of iterative rounds: '+str(iterative_rounds))
+
+    if flush_system:
+        # run fluidics program for this round
+        success_fluidics = False
+        success_fluidics = run_fluidic_program(0, df_program, valve_controller, pump_controller)
+        if not(success_fluidics):
+            print('Error in fluidics! Stopping scan.')
+            sys.exit()
+        print('Flushed fluidic system.')
+        sys.exit()
 
     # iterate over user defined program
     for r_idx in range(iterative_rounds):
@@ -443,8 +460,16 @@ def main():
             core.wait_for_config('Laser','Off')
 
             time.sleep(5)
-            del acq
-            gc.collect()
+            acq_deleted = False
+            while (acq_deleted):
+                try:
+                    del acq
+                except:
+                    acq_deleted = False
+                    time.sleep(5)
+                else:
+                    acq_deleted = True
+                    gc.collect()
 
             '''
             # turn off "repeat last relative move with TTL" for FTP controller
