@@ -238,8 +238,8 @@ def main():
 
                 # determine image size
                 #core.snap_image()
-                y_pixels = 2048
-                x_pixels = 2048
+                y_pixels = 1462
+                x_pixels = 1462
 
                 # construct imaging summary for user
                 scan_settings = (f"Number of labeling rounds: {str(iterative_rounds)} \n"
@@ -272,6 +272,13 @@ def main():
             # set up lasers and exposure times
             channel_states = [True,True,False,False,False]
             channel_powers[0] = 2
+            channel_powers[1] = 50
+            channel_powers[2] = 0
+            channel_powers[3] = 0
+            channel_powers[4] = 0
+
+            exposure_ms = 10
+            core.set_exposure(exposure_ms)
 
              # set flag to change DAQ settings
             config_changed = True
@@ -331,16 +338,16 @@ def main():
                 
             # setup lasers
             # set all laser to external triggering
-            core.set_config('Trigger-405','External-Digital')
-            core.wait_for_config('Trigger-405','External-Digital')
-            core.set_config('Trigger-488','External-Digital')
-            core.wait_for_config('Trigger-488','External-Digital')
-            core.set_config('Trigger-561','External-Digital')
-            core.wait_for_config('Trigger-561','External-Digital')
-            core.set_config('Trigger-637','External-Digital')
-            core.wait_for_config('Trigger-637','External-Digital')
-            core.set_config('Trigger-730','External-Digital')
-            core.wait_for_config('Trigger-730','External-Digital')
+            core.set_config('Modulation-405','External-Digital')
+            core.wait_for_config('Modulation-405','External-Digital')
+            core.set_config('Modulation-488','External-Digital')
+            core.wait_for_config('Modulation-488','External-Digital')
+            core.set_config('Modulation-561','External-Digital')
+            core.wait_for_config('Modulation-561','External-Digital')
+            core.set_config('Modulation-637','External-Digital')
+            core.wait_for_config('Modulation-637','External-Digital')
+            core.set_config('Modulation-730','External-Digital')
+            core.wait_for_config('Modulation-730','External-Digital')
             
 
             # turn all lasers on
@@ -359,8 +366,8 @@ def main():
             core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
             core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
-            core.set_config('Trigger-730','External-Digital')
-            core.wait_for_config('Trigger-730','External-Digital')
+            core.set_config('Modulation-730','External-Digital')
+            core.wait_for_config('Modulation-730','External-Digital')
 
             config_changed = False
 
@@ -459,14 +466,14 @@ def main():
             core.set_config('Laser','Off')
             core.wait_for_config('Laser','Off')
 
-            time.sleep(5)
+            time.sleep(2)
             acq_deleted = False
             while (acq_deleted):
                 try:
                     del acq
                 except:
                     acq_deleted = False
-                    time.sleep(5)
+                    time.sleep(2)
                 else:
                     acq_deleted = True
                     gc.collect()
@@ -548,16 +555,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all lasers back to software control
-    core.set_config('Trigger-405','CW (constant power)')
-    core.wait_for_config('Trigger-405','CW (constant power)')
-    core.set_config('Trigger-488','CW (constant power)')
-    core.wait_for_config('Trigger-488','CW (constant power)')
-    core.set_config('Trigger-561','CW (constant power)')
-    core.wait_for_config('Trigger-561','CW (constant power)')
-    core.set_config('Trigger-637','CW (constant power)')
-    core.wait_for_config('Trigger-637','CW (constant power)')
-    core.set_config('Trigger-730','CW (constant power)')
-    core.wait_for_config('Trigger-730','CW (constant power)')
+    core.set_config('Modulation-405','CW (constant power)')
+    core.wait_for_config('Modulation-405','CW (constant power)')
+    core.set_config('Modulation-488','CW (constant power)')
+    core.wait_for_config('Modulation-488','CW (constant power)')
+    core.set_config('Modulation-561','CW (constant power)')
+    core.wait_for_config('Modulation-561','CW (constant power)')
+    core.set_config('Modulation-637','CW (constant power)')
+    core.wait_for_config('Modulation-637','CW (constant power)')
+    core.set_config('Modulation-730','CW (constant power)')
+    core.wait_for_config('Modulation-730','CW (constant power)')
 
     # enable joystick
     core.set_property('XYStage:XY:31','JoystickEnabled','Yes')

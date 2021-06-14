@@ -1,0 +1,20 @@
+import java.text.SimpleDateFormat;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.lang.System;
+import java.lang.Math;
+
+String conda_env_name = "OPM";
+String control_script_path = "C:\\Users\\qi2lab\\Documents\\GitHub\\OPM\\control\\run_widefield_iterative_GUI.py";
+
+Runtime r = Runtime.getRuntime();
+Process p;
+
+p = r.exec("cmd /c conda activate " + conda_env_name + " & python " + control_script_path);
+
+BufferedReader stdInput = new BufferedReader(new InputStreamReader(p.getInputStream()));
+BufferedReader stdError = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+
+while ((s=stdInput.readLine()) != null){print(s);}
+while ((s=stdError.readLine()) != null){print(s);}
