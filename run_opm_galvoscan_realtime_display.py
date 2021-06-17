@@ -59,8 +59,8 @@ def acquire_data():
 
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
-        channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-        channel_powers = [0, 10,100, 20, 100] # (0 -> 100%)
+        channel_states = [False, True, False, False, False] # true -> active, false -> inactive
+        channel_powers = [0, 10,50, 20, 100] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -73,13 +73,13 @@ def acquire_data():
         print("")
 
         # exposure time
-        exposure_ms = 30.0 #unit: ms
+        exposure_ms = 10.0 #unit: ms
 
         # scan axis range
-        scan_axis_range_um = 10.0 # unit: microns
+        scan_axis_range_um = 20.0 # unit: microns
         
         # galvo voltage at neutral
-        galvo_neutral_volt = .1 # unit: volts
+        galvo_neutral_volt = 0 # unit: volts
 
         # timepoints
         timepoints = 1
@@ -104,12 +104,12 @@ def acquire_data():
         
         # set camera to internal trigger
         # give camera time to change modes if necessary
-        core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
-        core.set_property('Camera','OUTPUT TRIGGER KIND[1]','EXPOSURE')
-        core.set_property('Camera','OUTPUT TRIGGER KIND[2]','EXPOSURE')
-        core.set_property('Camera','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-        core.set_property('Camera','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-        core.set_property('Camera','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[0]','EXPOSURE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[1]','EXPOSURE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[2]','EXPOSURE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
         # set exposure time
         core.set_exposure(exposure_ms)
@@ -124,16 +124,16 @@ def acquire_data():
         core.wait_for_config('Laser','Off')
 
         # set all laser to external triggering
-        core.set_config('Trigger-405','External-Digital')
-        core.wait_for_config('Trigger-405','External-Digital')
-        core.set_config('Trigger-488','External-Digital')
-        core.wait_for_config('Trigger-488','External-Digital')
-        core.set_config('Trigger-561','External-Digital')
-        core.wait_for_config('Trigger-561','External-Digital')
-        core.set_config('Trigger-637','External-Digital')
-        core.wait_for_config('Trigger-637','External-Digital')
-        core.set_config('Trigger-730','External-Digital')
-        core.wait_for_config('Trigger-730','External-Digital')
+        core.set_config('Modulation-405','External-Digital')
+        core.wait_for_config('Modulation-405','External-Digital')
+        core.set_config('Modulation-488','External-Digital')
+        core.wait_for_config('Modulation-488','External-Digital')
+        core.set_config('Modulation-561','External-Digital')
+        core.wait_for_config('Modulation-561','External-Digital')
+        core.set_config('Modulation-637','External-Digital')
+        core.wait_for_config('Modulation-637','External-Digital')
+        core.set_config('Modulation-730','External-Digital')
+        core.wait_for_config('Modulation-730','External-Digital')
 
         # turn all lasers on
         core.set_config('Laser','AllOn')
@@ -286,8 +286,16 @@ def acquire_data():
         while not(scan_finished):
             time.sleep(0.25)
         
-        del acq
-        gc.collect()
+        acq_deleted = False
+        while not(acq_deleted):
+            try:
+                del acq
+            except:
+                time.sleep(0.1)
+                acq_deleted = False
+            else:
+                gc.collect()
+                acq_deleted = True
 
         # stop DAQ
         try:
@@ -308,7 +316,6 @@ def acquire_data():
         deskewed_image = deskew(np.flipud(image_stack),deskew_parameters)
 
         yield deskewed_image.astype(np.uint16)
-
 
 def main():
 
@@ -362,16 +369,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all lasers back to software control
-    core.set_config('Trigger-405','CW (constant power)')
-    core.wait_for_config('Trigger-405','CW (constant power)')
-    core.set_config('Trigger-488','CW (constant power)')
-    core.wait_for_config('Trigger-488','CW (constant power)')
-    core.set_config('Trigger-561','CW (constant power)')
-    core.wait_for_config('Trigger-561','CW (constant power)')
-    core.set_config('Trigger-637','CW (constant power)')
-    core.wait_for_config('Trigger-637','CW (constant power)')
-    core.set_config('Trigger-730','CW (constant power)')
-    core.wait_for_config('Trigger-730','CW (constant power)')
+    core.set_config('Modulation-405','CW (constant power)')
+    core.wait_for_config('Modulation-405','CW (constant power)')
+    core.set_config('Modulation-488','CW (constant power)')
+    core.wait_for_config('Modulation-488','CW (constant power)')
+    core.set_config('Modulation-561','CW (constant power)')
+    core.wait_for_config('Modulation-561','CW (constant power)')
+    core.set_config('Modulation-637','CW (constant power)')
+    core.wait_for_config('Modulation-637','CW (constant power)')
+    core.set_config('Modulation-730','CW (constant power)')
+    core.wait_for_config('Modulation-730','CW (constant power)')
 
     # set all laser to zero power
     channel_powers=[0,0,0,0,0]
