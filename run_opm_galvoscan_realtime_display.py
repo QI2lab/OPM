@@ -51,7 +51,7 @@ def acquire_data():
         if first_iteration:
             first_iteration = False
         else:
-            time.sleep(5)
+            time.sleep(.5)
 
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -60,7 +60,7 @@ def acquire_data():
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
         channel_states = [False, True, False, False, False] # true -> active, false -> inactive
-        channel_powers = [0, 10,50, 20, 100] # (0 -> 100%)
+        channel_powers = [0, 10, 30, 20, 100] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -76,7 +76,7 @@ def acquire_data():
         exposure_ms = 10.0 #unit: ms
 
         # scan axis range
-        scan_axis_range_um = 180.0 # unit: microns
+        scan_axis_range_um = 10.0 # unit: microns
         
         # galvo voltage at neutral
         galvo_neutral_volt = 0 # unit: volts
@@ -247,14 +247,14 @@ def acquire_data():
 
             # first, set the galvo to the initial point if it is not already
             taskAO_first = daq.Task()
-            taskAO_first.CreateAOVoltageChan("/Dev1/ao0", "", -5.0, 5.0, daq.DAQmx_Val_Volts, None)
+            taskAO_first.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
             taskAO_first.WriteAnalogScalarF64(True, -1, waveform[0], None)
             taskAO_first.StopTask()
             taskAO_first.ClearTask()
 
             # now set up the task to ramp the galvo
             taskAO = daq.Task()
-            taskAO.CreateAOVoltageChan("/Dev1/ao0", "", -5.0, 5.0, daq.DAQmx_Val_Volts, None)
+            taskAO.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
 
             ## Configure timing (from DI task)
             taskAO.CfgSampClkTiming("/Dev1/PFI2", DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, samples_per_ch)
@@ -285,7 +285,7 @@ def acquire_data():
 
         while not(scan_finished):
             time.sleep(0.25)
-        
+
         acq_deleted = False
         while not(acq_deleted):
             try:
@@ -328,6 +328,15 @@ def main():
 
     first_iteration = True
     acq_running = False
+
+    # first, set the galvo to the initial point if it is not already
+    galvo_neutral_volt = 0 # unit: volts
+    taskAO_last = daq.Task()
+    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
+    taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
+    taskAO_last.StopTask()
+    taskAO_last.ClearTask()
+
 
     viewer = napari.Viewer(ndisplay=2)
 
@@ -381,18 +390,20 @@ def main():
     core.wait_for_config('Modulation-730','CW (constant power)')
 
     # set all laser to zero power
+    '''
     channel_powers=[0,0,0,0,0]
     core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
     core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
     core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
     core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
     core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
+    '''
 
     # put the galvo back to neutral
     # first, set the galvo to the initial point if it is not already
     galvo_neutral_volt = 0 # unit: volts
     taskAO_last = daq.Task()
-    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-5.0,5.0,daq.DAQmx_Val_Volts,None)
+    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
     taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
     taskAO_last.StopTask()
     taskAO_last.ClearTask()

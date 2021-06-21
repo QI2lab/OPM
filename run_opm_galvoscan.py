@@ -31,7 +31,7 @@ def main():
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
     channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 10, 100, 20, 100] # (0 -> 100%)
+    channel_powers = [0, 10, 90, 20, 100] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -53,14 +53,14 @@ def main():
     galvo_neutral_volt = 0 # unit: volts
 
     # timepoints
-    timepoints = 3000
+    timepoints = 2000
 
     # setup file name
-    save_directory=Path('E:/20210521ee/')
-    save_name = 'glycerol_50'
+    save_directory=Path('D:/20210621y/')
+    save_name = '50suc_z26um'
 
     # automatically transfer files to NAS at end of dataset
-    transfer_files = True
+    transfer_files = False
  
     # display data
     display_flag = False
@@ -82,12 +82,12 @@ def main():
     
     # set camera to internal trigger
     # give camera time to change modes if necessary
-    core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[1]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[2]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[0]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[1]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[2]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
     # set exposure time
     core.set_exposure(exposure_ms)
@@ -102,16 +102,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all laser to external triggering
-    core.set_config('Trigger-405','External-Digital')
-    core.wait_for_config('Trigger-405','External-Digital')
-    core.set_config('Trigger-488','External-Digital')
-    core.wait_for_config('Trigger-488','External-Digital')
-    core.set_config('Trigger-561','External-Digital')
-    core.wait_for_config('Trigger-561','External-Digital')
-    core.set_config('Trigger-637','External-Digital')
-    core.wait_for_config('Trigger-637','External-Digital')
-    core.set_config('Trigger-730','External-Digital')
-    core.wait_for_config('Trigger-730','External-Digital')
+    core.set_config('Modulation-405','External-Digital')
+    core.wait_for_config('Modulation-405','External-Digital')
+    core.set_config('Modulation-488','External-Digital')
+    core.wait_for_config('Modulation-488','External-Digital')
+    core.set_config('Modulation-561','External-Digital')
+    core.wait_for_config('Modulation-561','External-Digital')
+    core.set_config('Modulation-637','External-Digital')
+    core.wait_for_config('Modulation-637','External-Digital')
+    core.set_config('Modulation-730','External-Digital')
+    core.wait_for_config('Modulation-730','External-Digital')
 
     # turn all lasers on
     core.set_config('Laser','AllOn')
@@ -299,16 +299,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all lasers back to software control
-    core.set_config('Trigger-405','CW (constant power)')
-    core.wait_for_config('Trigger-405','CW (constant power)')
-    core.set_config('Trigger-488','CW (constant power)')
-    core.wait_for_config('Trigger-488','CW (constant power)')
-    core.set_config('Trigger-561','CW (constant power)')
-    core.wait_for_config('Trigger-561','CW (constant power)')
-    core.set_config('Trigger-637','CW (constant power)')
-    core.wait_for_config('Trigger-637','CW (constant power)')
-    core.set_config('Trigger-730','CW (constant power)')
-    core.wait_for_config('Trigger-730','CW (constant power)')
+    core.set_config('Modulation-405','CW (constant power)')
+    core.wait_for_config('Modulation-405','CW (constant power)')
+    core.set_config('Modulation-488','CW (constant power)')
+    core.wait_for_config('Modulation-488','CW (constant power)')
+    core.set_config('Modulation-561','CW (constant power)')
+    core.wait_for_config('Modulation-561','CW (constant power)')
+    core.set_config('Modulation-637','CW (constant power)')
+    core.wait_for_config('Modulation-637','CW (constant power)')
+    core.set_config('Modulation-730','CW (constant power)')
+    core.wait_for_config('Modulation-730','CW (constant power)')
 
     # set all laser to zero power
     channel_powers=[0,0,0,0,0]
