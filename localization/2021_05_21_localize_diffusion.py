@@ -106,7 +106,7 @@ for root_dir in root_dirs:
     volume_process_times = np.zeros(nvols)
     for vv in range(nvols):
         print("################################\nstarting volume %d/%d in %s" % (vv + 1, nvols, dset_dir))
-        tstart = time.perf_counter()
+        tstart_vol = time.perf_counter()
 
         # variables to store results. List of results for each chunk
         fit_params_vol = []
@@ -182,7 +182,7 @@ for root_dir in root_dirs:
         to_keep_vol = np.concatenate(to_keep_vol, axis=0)
 
         tend = time.perf_counter()
-        volume_process_times[vv] = tend - tstart
+        volume_process_times[vv] = tend - tstart_vol
 
         # save results
         localization_settings = {"filter_sigma_small_um": filter_sigma_small,
@@ -216,11 +216,11 @@ for root_dir in root_dirs:
         hrs = (elapsed_t_total - days * 24 * 60 * 60) // (60 * 60)
         mins = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
         secs = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-        print("Total elapsed time: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
+        print("Total elapsed time (all volumes): %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
 
         time_remaining = np.mean(volume_process_times[:vv + 1]) * (nvols - vv - 1)
         days = time_remaining // (24 * 60 * 60)
         hrs = (time_remaining - days * 24 * 60 * 60) // (60 * 60)
         mins = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
         secs = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-        print("Estimated time remaining: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
+        print("Estimated time remaining (this volume): %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))

@@ -5,8 +5,6 @@ import os
 import numpy as np
 import scipy.optimize
 import scipy.ndimage
-import skimage.feature
-import skimage.filters
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import warnings

@@ -16,6 +16,9 @@ import os
 import pycromanager
 import matplotlib.pyplot as plt
 
+# #######################################
+# data files
+# #######################################
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_20_18;15;17_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408n", "glycerol60x_1", "2021_04_21_10;22;43_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210408m", "glycerol50x_1", "2021_04_21_10;17;23_localization")
@@ -23,7 +26,8 @@ import matplotlib.pyplot as plt
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430a", "beads_1", "dummy")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430f\glycerol_40_1", "2021_05_20_16;20;04_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210518k", "glycerol40_1", "2021_05_06_17;28;06_localization")
-loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210521s", "glycerol_70_1", "2021_05_31_10;39;05_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210521s", "glycerol_70_1", "2021_05_31_10;39;05_localization")
+loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210622a", "glycerol90_1", "2021_06_22_23;18;29_localization")
 
 data_dir, _ = os.path.split(loc_data_dir)
 root_dir, _ = os.path.split(data_dir)
@@ -35,14 +39,45 @@ plot_centers = True
 plot_tracks = False
 plot_centers_guess = True
 
+# #######################################
+# load metadata
+# #######################################
+md = data_io.read_metadata(md_fname)
+pix_sizes = [md["pixel_size"] / 1000] * 3
+
+# #######################################
+# lazy loading for reading deskewed image files
+# #######################################
 # reader for deskewed dataset
 reader = npy2bdv.BdvEditor(deskew_fname)
 ntimes, nilluminations, nchannels, ntiles, nangle = reader.get_attribute_count()
 
-# load metadata
-md = data_io.read_metadata(md_fname)
-pix_sizes = [md["pixel_size"] / 1000] * 3
+# create lazy dask array of deskewed data
+# with npy2bdv
+# imread = dask.delayed(reader.read_view, pure=True)
+# lazy_images = [imread(ii, 0, 0, 0, 0) for ii in range(ntimes)]
 
+# with h5py
+if not os.path.exists(deskew_fname):
+    raise ValueError("path '%s' does not exist" % deskew_fname)
+hf = h5py.File(deskew_fname)
+imread = dask.delayed(lambda ii: np.asarray(hf["t%05d/s00/0/cells" % ii]), pure=True)
+lazy_images = [imread(ii) for ii in range(ntimes)]
+
+# other deskew code
+# fpath = r"\\10.206.26.21\opm2\20210408n\deskew_test"
+# imread = dask.delayed(lambda ii: tifffile.imread(os.path.join(fpath, "vol=%d.tiff" % ii)), pure=True)
+# lazy_images = [imread(ii) for ii in range(3)]
+
+img0 = lazy_images[0].compute()
+shape0 = img0.shape
+
+arr = [da.from_delayed(lazy_image, dtype=np.uint16, shape=shape0) for lazy_image in lazy_images]
+stack = da.stack(arr, axis=0)
+
+# #######################################
+# load localizations
+# #######################################
 if plot_centers:
     # load all localizations and convert to pixel coordinates
     try:
@@ -54,6 +89,7 @@ if plot_centers:
         fit_params = []
         init_params = []
         for ii in range(ntimes):
+            print("loading file %d/%d" % (ii + 1, ntimes))
             data_fname = os.path.join(loc_data_dir, loc_data_str % ii)
 
             # in case not all images have been analyzed
@@ -102,7 +138,9 @@ if plot_centers:
     except:
         plot_centers = False
 
+# #######################################
 # load tracks
+# #######################################
 if os.path.exists(track_fname):
     with open(track_fname, "rb") as f:
         track_data_pd = pickle.load(f)
@@ -127,27 +165,6 @@ if os.path.exists(track_fname):
 else:
     plot_tracks = False
 
-
-# create lazy dask array of deskewed data
-# with npy2bdv
-# imread = dask.delayed(reader.read_view, pure=True)
-# lazy_images = [imread(ii, 0, 0, 0, 0) for ii in range(ntimes)]
-
-# with h5py
-hf = h5py.File(deskew_fname)
-imread = dask.delayed(lambda ii: np.asarray(hf["t%05d/s00/0/cells" % ii]), pure=True)
-lazy_images = [imread(ii) for ii in range(ntimes)]
-
-# other deskew code
-# fpath = r"\\10.206.26.21\opm2\20210408n\deskew_test"
-# imread = dask.delayed(lambda ii: tifffile.imread(os.path.join(fpath, "vol=%d.tiff" % ii)), pure=True)
-# lazy_images = [imread(ii) for ii in range(3)]
-
-img0 = lazy_images[0].compute()
-shape0 = img0.shape
-
-arr = [da.from_delayed(lazy_image, dtype=np.uint16, shape=shape0) for lazy_image in lazy_images]
-stack = da.stack(arr, axis=0)
 
 if False:
     # plot one roi
@@ -177,7 +194,9 @@ if False:
     figa, figb = localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params=init_params[ind],
                              figsize=(16, 8), same_color_scale=False)
 
+# #######################################
 # plot with napari
+# #######################################
 # specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
 viewer = napari.view_image(stack, colormap="bone", contrast_limits=[np.percentile(img0, 1), np.percentile(img0, 99.999)],
                            multiscale=False, title=loc_data_dir)
