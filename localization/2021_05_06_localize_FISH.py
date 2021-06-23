@@ -1,4 +1,3 @@
-# TODO: not update for most recent changes
 import glob
 import re
 import os
@@ -8,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 import localize
+import load_dataset
 import pycromanager
 import sys
 
@@ -18,18 +18,9 @@ sys.path.append(fdir)
 import data_io
 
 # paths to image files
-# root_dirs = [os.path.join(r"/mnt", "opm2", "20210430f", "glycerol_40_1", "Full resolution"),
-#              os.path.join(r"/mnt", "opm2", "20210430h", "glycerol_50_1", "Full resolution"),
-#              os.path.join(r"/mnt", "opm2", "20210430i", "glycerol_60_1", "Full resolution")]
-# root_dirs = [os.path.join(r"\\10.206.26.21", "opm2", "20210430f", "glycerol_40_1", "Full resolution")]
-root_dirs = [os.path.join(r"/mnt", "opm2", "20210518k", "glycerol40_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518l", "glycerol40_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518m", "glycerol50_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518n", "glycerol50_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518o", "glycerol60_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518p", "glycerol60_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518q", "glycerol70_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518r", "glycerol70_1", "Full resolution")]
+form = os.path.join(r"/mnt", "opm2", "20210506lung", "16gene_lung_10micron_r*_y*_z*_ch*_1")
+root_dirs = glob.glob(form)
+root_dirs = [os.path.join(form)]
 
 
 tbegin = time.perf_counter()
@@ -86,7 +77,7 @@ for root_dir in root_dirs:
     min_dists = (3 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
     # exclude points with sigmas outside these ranges
     sigmas_min = (0.25 * sigma_z, 0.25 * sigma_xy, 0.25 * sigma_xy)
-    sigmas_max = (2 * sigma_z, 3 * sigma_xy, 3 * sigma_xy)
+    sigmas_max = (np.inf * sigma_z, np.inf * sigma_xy, np.inf * sigma_xy)
 
     # don't consider any points outside of this polygon
     # cx, cy
@@ -145,7 +136,7 @@ for root_dir in root_dirs:
             y_offset = img_start * dstage
 
             # do localization
-            imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize_skewed(
+            imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize(
                 imgs, {"dc": dc, "dstep": dstage, "theta": theta}, absolute_threshold, roi_size,
                 filter_sigma_small, filter_sigma_large, min_dists, (sigmas_min, sigmas_max),
                 offsets=(0, y_offset, 0), allowed_polygon=allowed_camera_region, mode="fit")

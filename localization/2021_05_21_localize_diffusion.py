@@ -1,4 +1,3 @@
-# TODO: not update for most recent changes
 import glob
 import re
 import os
@@ -18,19 +17,19 @@ sys.path.append(fdir)
 import data_io
 
 # paths to image files
-# root_dirs = [os.path.join(r"/mnt", "opm2", "20210430f", "glycerol_40_1", "Full resolution"),
-#              os.path.join(r"/mnt", "opm2", "20210430h", "glycerol_50_1", "Full resolution"),
-#              os.path.join(r"/mnt", "opm2", "20210430i", "glycerol_60_1", "Full resolution")]
-# root_dirs = [os.path.join(r"\\10.206.26.21", "opm2", "20210430f", "glycerol_40_1", "Full resolution")]
-root_dirs = [os.path.join(r"/mnt", "opm2", "20210518k", "glycerol40_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518l", "glycerol40_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518m", "glycerol50_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518n", "glycerol50_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518o", "glycerol60_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518p", "glycerol60_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518q", "glycerol70_1", "Full resolution"),
-             os.path.join(r"/mnt", "opm2", "20210518r", "glycerol70_1", "Full resolution")]
+root_dirs = [os.path.join(r"\\10.206.26.21", "opm2", "20210521s", "glycerol_70_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521t", "glycerol_70_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521u", "glycerol_70_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521w", "glycerol_60_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521y", "glycerol_60_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521z", "glycerol_60_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521cc", "glycerol_50_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521dd", "glycerol_50_1", "Full resolution"),
+             os.path.join(r"\\10.206.26.21", "opm2", "20210521ee", "glycerol_50_1", "Full resolution")]
 
+for rd in root_dirs:
+    if not os.path.exists(rd):
+        raise ValueError("path %s does not exist" % rd)
 
 tbegin = time.perf_counter()
 for root_dir in root_dirs:
@@ -85,8 +84,8 @@ for root_dir in root_dirs:
     # assume points closer together than this come from a single bead
     min_dists = (3 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
     # exclude points with sigmas outside these ranges
-    sigmas_min = (0.25 * sigma_z, 0.25 * sigma_xy, 0.25 * sigma_xy)
-    sigmas_max = (2 * sigma_z, 3 * sigma_xy, 3 * sigma_xy)
+    sigmas_min = (0.25 * sigma_z, 0.25 * sigma_xy)
+    sigmas_max = (2 * sigma_z, 3 * sigma_xy)
 
     # don't consider any points outside of this polygon
     # cx, cy
@@ -106,14 +105,16 @@ for root_dir in root_dirs:
     n_chunk_overlap = 3
     volume_process_times = np.zeros(nvols)
     for vv in range(nvols):
-        print("################################\nstarting volume %d/%d" % (vv + 1, nvols))
-        tstart = time.perf_counter()
+        print("################################\nstarting volume %d/%d in %s" % (vv + 1, nvols, dset_dir))
+        tstart_vol = time.perf_counter()
 
         # variables to store results. List of results for each chunk
-        centers_vol = []
         fit_params_vol = []
+        init_params_vol = []
         rois_vol = []
-        centers_guess_vol = []
+        fit_results_vol = []
+        to_keep_vol = []
+        conditions_vol = []
 
         # loop over chunks of images
         more_chunks = True
@@ -145,42 +146,58 @@ for root_dir in root_dirs:
             y_offset = img_start * dstage
 
             # do localization
-            imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize_skewed(
+            rois, fit_params, init_params, fit_results, imgs_filtered, coords = localize.localize_skewed(
                 imgs, {"dc": dc, "dstep": dstage, "theta": theta}, absolute_threshold, roi_size,
-                filter_sigma_small, filter_sigma_large, min_dists, (sigmas_min, sigmas_max),
+                filter_sigma_small, filter_sigma_large, min_dists,
                 offsets=(0, y_offset, 0), allowed_polygon=allowed_camera_region, mode="fit")
 
+
+
+            # filter results
+            to_keep, conditions, condition_names = localize.filter_localizations(fit_params, init_params, coords,
+                                                                                 sigma_xy, sigma_z, min_dists,
+                                                                                 (sigmas_min, sigmas_max),
+                                                                                 0.5 * absolute_threshold)
+
+            # ind = 333
+            # x, y, z = localize.get_skewed_coords(imgs.shape, dc, dstage, theta)
+            # localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
+
             # store results
-            centers_vol.append(centers_unique)
-            fit_params_vol.append(fit_params_unique)
-            rois_vol.append(rois_unique)
-            centers_guess_vol.append(centers_guess)
+            fit_params_vol.append(fit_params)
+            init_params_vol.append(init_params)
+            rois_vol.append(rois)
+            fit_results_vol.append(fit_results)
+            conditions_vol.append(conditions)
+            to_keep_vol.append(to_keep)
 
             chunk_counter += 1
 
         # assemble results
-        centers_vol = np.concatenate(centers_vol, axis=0)
         fit_params_vol = np.concatenate(fit_params_vol, axis=0)
+        init_params_vol = np.concatenate(init_params_vol, axis=0)
         rois_vol = np.concatenate(rois_vol, axis=0)
-        centers_guess_vol = np.concatenate(centers_guess_vol, axis=0)
-
-        if chunk_counter > 1:
-            # since left some overlap at the edges, have to again combine results
-            centers_unique, unique_inds = localize.combine_nearby_peaks(centers_vol, min_dists[1], min_dists[0], mode="keep-one")
-            fit_params_unique = fit_params_vol[unique_inds]
-            rois_unique = rois_vol[unique_inds]
-        else:
-            centers_unique = centers_vol
-            fit_params_unique = fit_params_vol
-            rois_unique = rois_vol
+        fit_results_vol = np.concatenate(fit_results_vol, axis=0)
+        conditions_vol = np.concatenate(conditions_vol, axis=0)
+        to_keep_vol = np.concatenate(to_keep_vol, axis=0)
 
         tend = time.perf_counter()
-        volume_process_times[vv] = tend - tstart
+        volume_process_times[vv] = tend - tstart_vol
 
         # save results
-        full_results = {"centers": centers_unique, "centers_guess": centers_guess_vol,
-                        "fit_params": fit_params_unique, "rois": rois_unique,
-                        "volume_um3": volume_um3, "frame_time_ms": frame_time_ms, "elapsed_t": volume_process_times[vv]}
+        localization_settings = {"filter_sigma_small_um": filter_sigma_small,
+                                 "filter_sigma_large_um": filter_sigma_large,
+                                 "roi_size_um": roi_size, "min_dists_um": min_dists,
+                                 "sigmas_min_um": sigmas_min, "sigmas_max_um": sigmas_max, "threshold": absolute_threshold,
+                                 "chunk_size": imgs_per_chunk, "chunk_overlap": n_chunk_overlap
+                                 }
+
+        full_results = {"fit_params": fit_params_vol, "init_params": init_params_vol,
+                        "rois": rois_vol, "fit_results": fit_results_vol,
+                        "to_keep": to_keep_vol, "conditions": conditions_vol, "condition_names": condition_names,
+                        "volume_um3": volume_um3, "frame_time_ms": frame_time_ms, "elapsed_t": volume_process_times[vv],
+                        "localization_settings": localization_settings}
+
         fname = os.path.join(save_dir, "localization_results_vol_%d.pkl" % vv)
         with open(fname, "wb") as f:
             pickle.dump(full_results, f)
@@ -192,18 +209,18 @@ for root_dir in root_dirs:
         hrs = (elapsed_t) // (60 * 60)
         mins = (elapsed_t - hrs * 60 * 60) // 60
         secs = (elapsed_t - hrs * 60 * 60 - mins * 60)
-        print("Found %d centers in: %dhrs %dmins and %0.2fs" % (len(centers_unique), hrs, mins, secs))
+        print("Found %d centers in: %dhrs %dmins and %0.2fs" % (np.sum(to_keep_vol), hrs, mins, secs))
 
         elapsed_t_total = tend - tbegin
         days = elapsed_t_total // (24 * 60 * 60)
         hrs = (elapsed_t_total - days * 24 * 60 * 60) // (60 * 60)
         mins = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
         secs = (elapsed_t_total - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-        print("Total elapsed time: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
+        print("Total elapsed time (all volumes): %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
 
         time_remaining = np.mean(volume_process_times[:vv + 1]) * (nvols - vv - 1)
         days = time_remaining // (24 * 60 * 60)
         hrs = (time_remaining - days * 24 * 60 * 60) // (60 * 60)
         mins = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60) // 60
         secs = (time_remaining - days * 24 * 60 * 60 - hrs * 60 * 60 - mins * 60)
-        print("Estimated time remaining: %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
+        print("Estimated time remaining (this volume): %ddays %dhrs %dmins and %0.2fs" % (days, hrs, mins, secs))
