@@ -174,46 +174,58 @@ def xy_lab2cam(x, y, stage_pos, theta):
     return xp, yp
 
 
-def trapezoid_cz(cy, coords):
+def get_trapezoid_zbound(cy, coords):
     """
     Find z-range of trapezoid for given center position cy
     :param cy:
     :param coords: (z, y, x)
-    :return:
+    :return zmax, zmin:
     """
+    cy = np.array(cy)
+
     z, y, x = coords
-    slope = (z[:, -1] - z[:, 0]) / (y[0, -1] - y[0, 0])
+    slope = (z[:, -1, 0] - z[:, 0, 0]) / (y[0, -1, 0] - y[0, 0, 0])
 
-    if cy > y[0, -1]:
-        zmax = z.max()
-    else:
-        zmax = slope * (cy - y[0, 0])
+    # zmax
+    zmax = np.zeros(cy.shape)
+    cy_greater = cy > y[0, -1]
+    zmax[cy_greater] = z.max()
+    zmax[np.logical_not(cy_greater)] = slope * (cy[np.logical_not(cy_greater)] - y[0, 0])
+    # if cy > y[0, -1]:
+    #     zmax = z.max()
+    # else:
+    #     zmax = slope * (cy - y[0, 0])
 
-    if cy < y[-1, 0]:
-        zmin = z.min()
-    else:
-        zmin = slope * (cy - y[-1, 0])
+    # zmin
+    zmin = np.zeros(cy.shape)
+    cy_less = cy < y[-1, 0]
+    zmin[cy_less] = z.min()
+    zmin[np.logical_not(cy_less)] = slope * (cy[np.logical_not(cy_less)] - y[-1, 0])
 
-    cz = 0.5 * (zmax + zmin)
+    # if cy < y[-1, 0]:
+    #     zmin = z.min()
+    # else:
+    #     zmin = slope * (cy - y[-1, 0])
 
-    return cz, zmax, zmin
+    return zmax, zmin
 
 
-def trapezoid_cy(cz, coords):
+def get_trapezoid_ybound(cz, coords):
     """
     Find y-range of trapezoid for given center position cz
     :param cz:
     :param coords: (z, y, x)
-    :return:
+    :return cy, ymax, ymin:
     """
+    cz = np.array(cz)
+
     z, y, x = coords
-    slope = (z[:, -1] - z[:, 0]) / (y[0, -1] - y[0, 0])
+    slope = (z[:, -1, 0] - z[:, 0, 0]) / (y[0, -1, 0] - y[0, 0, 0])
 
     ymin = cz / slope
     ymax = cz / slope + y[-1, 0]
-    cy = 0.5 * (ymax + ymin)
 
-    return cy, ymax, ymin
+    return ymax, ymin
 
 
 def get_coords(sizes, dc, dz):
@@ -1794,7 +1806,7 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
 
 # orchestration functions
 def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_sigma_large,
-                    min_sep_allowed, offsets=(0, 0, 0), allowed_polygon=None, sf=3,
+                    min_spot_sep, offsets=(0, 0, 0), allowed_polygon=None, sf=3,
                     mode="fit", use_gpu_fit=GPUFIT_AVAILABLE, use_gpu_filter=CUPY_AVAILABLE):
     """
     :param imgs: raw OPM data
@@ -1803,10 +1815,12 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
     :param roi_size: (sz, sy, sx) size to include in xyz directions for fit rois. Note: currently sy=sx and sx is unused
     :param filter_sigma_small: (sz, sy, sx) sigmas for small size filter to be used in difference of gaussian filter
     :param filter_sigma_large:
-    :param min_sep_allowed: (dz, dy, dx) assume points separated by less than this distance come from one spot
+    :param min_spot_sep: (dz, dxy) assume points separated by less than this distance come from one spot
     :param offsets: offset to apply to y-coordinates. Useful for analyzing datasets in chunks
     :return:
     """
+
+    dz_min, dxy_min = min_spot_sep
     # ###################################################
     # set up geometry
     # ###################################################
@@ -1854,7 +1868,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
     # ###################################################
     tstart = time.perf_counter()
 
-    footprint = get_skewed_footprint(min_sep_allowed, dc, stage_step, theta)
+    footprint = get_skewed_footprint((dz_min, dxy_min, dxy_min), dc, stage_step, theta)
     centers_guess_inds, amps = find_peak_candidates(imgs_filtered * mask, footprint, abs_threshold, use_gpu_filter=use_gpu_filter)
 
     # convert to xyz coordinates
@@ -1873,11 +1887,11 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
 
     inds = np.ravel_multi_index(centers_guess_inds.transpose(), imgs_filtered.shape)
     weights = imgs_filtered.ravel()[inds]
-    centers_guess, inds_comb = combine_nearby_peaks(centers_guess, min_sep_allowed[1], min_sep_allowed[0], weights=weights, mode="average")
+    centers_guess, inds_comb = combine_nearby_peaks(centers_guess, dxy_min, dz_min, weights=weights, mode="average")
 
     amps = amps[inds_comb]
     print("Found %d points separated by dxy > %0.5g and dz > %0.5g in %0.1fs" %
-          (len(centers_guess), min_sep_allowed[1], min_sep_allowed[0], time.perf_counter() - tstart))
+          (len(centers_guess), dxy_min, dz_min, time.perf_counter() - tstart))
 
     # ###################################################
     # prepare ROIs
@@ -1953,20 +1967,24 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
 
     return rois, fit_params, init_params, fit_results, imgs_filtered, (z, y, x)
 
-def filter_localizations(fit_params, init_params, coords, xy_fit_err_max, z_err_fit_max, min_sep_allowed,
-                         sigma_bounds, amp_min, mode="skewed"):
+def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_spot_sep,
+                         sigma_bounds, amp_min=0, dist_boundary_min=(0, 0), mode="skewed"):
     """
     :param fit_params:
     :param init_params:
     :param coords: (z, y, x)
-    :param xy_fit_err_max: maximum allowed error in xy position from initial guess
-    :param z_err_fit_max: maximum allowed error in z position from initial guess
-    :param min_sep_allowed: (dz, dy, dx) assume points separated by less than this distance come from one spot
+    :param fit_dist_max_err = (dz_max, dxy_max)
+    :param min_spot_sep: (dz, dxy) assume points separated by less than this distance come from one spot
     :param sigma_bounds: ((sz_min, sxy_min), (sz_max, sxy_max)) exclude fits with sigmas that fall outside
     these ranges
-    :param amp_min:
+    :param amp_min: exclude fits with smaller amplitude
+    :param dist_boundary_min: (dz_min, dxy_min)
     :return to_keep, conditions, condition_names:
     """
+
+    filter_settings = {"fit_dist_max_err": fit_dist_max_err, "min_spot_sep": min_spot_sep,
+                       "sigma_bounds": sigma_bounds, "amp_min": amp_min, "dist_boundary_min": dist_boundary_min}
+
     z, y, x = coords
     centers_guess = np.concatenate((init_params[:, 3][:, None], init_params[:, 2][:, None], init_params[:, 1][:, None]), axis=1)
     centers_fit = np.concatenate((fit_params[:, 3][:, None], fit_params[:, 2][:, None], fit_params[:, 1][:, None]), axis=1)
@@ -1974,47 +1992,61 @@ def filter_localizations(fit_params, init_params, coords, xy_fit_err_max, z_err_
     # ###################################################
     # only keep points if size and position were reasonable
     # ###################################################
+    dz_min, dxy_min = dist_boundary_min
 
     if mode == "skewed":
         in_bounds = point_in_trapezoid(centers_fit, x, y, z)
+
+        zmax, zmin = get_trapezoid_zbound(centers_fit[:, 1], coords)
+        far_from_boundary_z = np.logical_and(centers_fit[:, 0] > zmin + dz_min, centers_fit[:, 0] < zmax - dz_min)
+
+        ymax, ymin = get_trapezoid_ybound(centers_fit[:, 0], coords)
+        far_from_boundary_y = np.logical_and(centers_fit[:, 1] > ymin + dxy_min, centers_fit[:, 0] < ymax - dxy_min)
+
+        xmin = np.min(x)
+        xmax = np.max(x)
+        far_from_boundary_x = np.logical_and(centers_fit[:, 2] > xmin + dxy_min, centers_fit[:, 2] < xmax - dxy_min)
+
+        in_bounds = np.logical_and.reduce((in_bounds, far_from_boundary_x, far_from_boundary_y, far_from_boundary_z))
     elif mode == "straight":
-        in_bounds = np.logical_and.reduce((fit_params[:, 1] >= x.min(),
-                                           fit_params[:, 1] <= x.max(),
-                                           fit_params[:, 2] >= y.min(),
-                                           fit_params[:, 2] <= y.max(),
-                                           fit_params[:, 3] >= z.min(),
-                                           fit_params[:, 3] <= z.max()))
+        in_bounds = np.logical_and.reduce((fit_params[:, 1] >= x.min() + dxy_min,
+                                           fit_params[:, 1] <= x.max() - dxy_min,
+                                           fit_params[:, 2] >= y.min() + dxy_min,
+                                           fit_params[:, 2] <= y.max() - dxy_min,
+                                           fit_params[:, 3] >= z.min() + dz_min,
+                                           fit_params[:, 3] <= z.max() - dz_min))
     else:
         raise ValueError("mode must be 'skewed' or 'straight' but was '%s'" % mode)
 
+    # maximum distance between fit center and guess center
+    z_err_fit_max, xy_fit_err_max = fit_dist_max_err
     center_close_to_guess_xy = np.sqrt((centers_guess[:, 2] - fit_params[:, 1])**2 +
                                        (centers_guess[:, 1] - fit_params[:, 2])**2) <= xy_fit_err_max
     center_close_to_guess_z = np.abs(centers_guess[:, 0] - fit_params[:, 3]) <= z_err_fit_max
 
+    # maximum/minimum sigmas AND combine all conditions
+    (sz_min, sxy_min), (sz_max, sxy_max) = sigma_bounds
+    conditions = np.stack((in_bounds, center_close_to_guess_xy, center_close_to_guess_z,
+                            fit_params[:, 4] <= sxy_max, fit_params[:, 4] >= sxy_min,
+                            fit_params[:, 5] <= sz_max, fit_params[:, 5] >= sz_min,
+                            fit_params[:, 0] >= amp_min), axis=1)
+
+
     condition_names = ["in_bounds", "center_close_to_guess_xy", "center_close_to_guess_z",
                        "xy_size_small_enough", "xy_size_big_enough", "z_size_small_enough",
-                      "z_size_big_enough", "amp_ok"]
-
-    sigmas_min_keep = sigma_bounds[0]
-    sigmas_max_keep = sigma_bounds[1]
-    conditions = np.concatenate((np.expand_dims(in_bounds, axis=1),
-                                 np.expand_dims(center_close_to_guess_xy, axis=1),
-                                 np.expand_dims(center_close_to_guess_z, axis=1),
-                                 np.expand_dims(fit_params[:, 4] <= sigmas_max_keep[1], axis=1),
-                                 np.expand_dims(fit_params[:, 4] >= sigmas_min_keep[1], axis=1),
-                                 np.expand_dims(fit_params[:, 5] <= sigmas_max_keep[0], axis=1),
-                                 np.expand_dims(fit_params[:, 5] >= sigmas_min_keep[0], axis=1),
-                                 np.expand_dims(fit_params[:, 0] >= amp_min, axis=1)), axis=1)
+                       "z_size_big_enough", "amp_ok"]
 
     to_keep_temp = np.logical_and.reduce(conditions, axis=1)
 
     # ###################################################
     # check again for unique points
-    # ###################################################                                                                   
+    # ###################################################
+
+    dz, dxy = min_spot_sep
     if np.sum(to_keep_temp) > 0:
 
         # only keep unique center if close enough
-        _, unique_inds = combine_nearby_peaks(centers_fit[to_keep_temp], min_sep_allowed[1], min_sep_allowed[0], mode="keep-one")
+        _, unique_inds = combine_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
         # convert to indices into full array
         unique_inds_full = np.arange(len(to_keep_temp), dtype=np.int)[to_keep_temp][unique_inds]
         # boolean array showing which elements unique
@@ -2027,4 +2059,4 @@ def filter_localizations(fit_params, init_params, coords, xy_fit_err_max, z_err_
     condition_names += ["unique"]
     to_keep = np.logical_and(to_keep_temp, unique)
 
-    return to_keep, conditions, condition_names
+    return to_keep, conditions, condition_names, filter_settings

@@ -17,17 +17,20 @@ sys.path.append(fdir)
 import data_io
 
 # paths to image files
-# root_dirs = [os.path.join(r"\\10.206.26.21", "opm2", "20210622a", "glycerol90_1", "Full resolution"),
-#              os.path.join(r"\\10.206.26.21", "opm2", "20210622b", "glycerol90_1", "Full resolution"),
-#              os.path.join(r"\\10.206.26.21", "opm2", "20210622c", "glycerol80_1", "Full resolution"),
-#              os.path.join(r"\\10.206.26.21", "opm2", "20210622d", "glycerol80_1", "Full resolution"),
-#              os.path.join(r"\\10.206.26.21", "opm2", "20210622e", "glycerol60_1", "Full resolution"),
-#              os.path.join(r"\\10.206.26.21", "opm2", "20210622f", "glycerol60_1", "Full resolution"),
-#              os.path.join(r"\\10.206.26.21", "opm2", "20210622g", "glycerol50_1", "Full resolution"),
-#              os.path.join(r"\\10.206.26.21", "opm2", "20210622h", "glycerol50_1", "Full resolution")]
+root_dirs = [r"\\10.206.26.21\opm2\20210624a\glycerol80_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624b\glycerol80_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624c\glycerol80_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624d\glycerol80_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624e\glycerol60_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624f\glycerol60_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624g\glycerol60_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624h\glycerol60_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624i\glycerol50_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624j\glycerol50_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624k\glycerol50_1\Full resolution",
+             r"\\10.206.26.21\opm2\20210624l\glycerol50_1\Full resolution"
+            ]
 
-root_dirs = [os.path.join(r"\\10.206.26.21", "opm2", "20210622g", "glycerol50_1", "Full resolution"),
-             os.path.join(r"\\10.206.26.21", "opm2", "20210622h", "glycerol50_1", "Full resolution")]
 
 for rd in root_dirs:
     if not os.path.exists(rd):

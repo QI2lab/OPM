@@ -36,8 +36,9 @@ deskew_fname = os.path.join(root_dir, "full_deskew_only.h5")
 md_fname = os.path.join(root_dir, "scan_metadata.csv")
 track_fname = os.path.join(loc_data_dir, "tracks.pkl")
 plot_centers = True
-plot_tracks = False
 plot_centers_guess = True
+plot_fit_filters = False
+plot_tracks = False
 
 # #######################################
 # load metadata
@@ -165,10 +166,8 @@ if os.path.exists(track_fname):
 else:
     plot_tracks = False
 
-
+# plot roi's with matplotlib
 if False:
-    # plot one roi
-
     # need to load real data for this
     dset_dir = os.path.join(loc_data_dir, "..")
     dset = pycromanager.Dataset(dset_dir)
@@ -181,18 +180,25 @@ if False:
     imgs = np.flip(imgs, axis=0)
 
     # find fit nearest to point from napari (in deskewed pixels)
-    inds = [31, 105, 581]
-    dists = ((centers_guess[:, 1] - inds[0])**2 + (centers_guess[:, 2] - inds[1])**2 + (centers_guess[:, 3] - inds[2])**2)
-    dists[centers_guess[:, 0] != 0] = np.nan
-    # dists[np.logical_not(to_keep)] = np.nan
-    ind = np.nanargmin(dists)
-    print("kept = %d" % to_keep[ind])
+    # inds = [31, 105, 581]
+    # dists = ((centers_guess[:, 1] - inds[0])**2 + (centers_guess[:, 2] - inds[1])**2 + (centers_guess[:, 3] - inds[2])**2)
+    # dists[centers_guess[:, 0] != 0] = np.nan
+    # # dists[np.logical_not(to_keep)] = np.nan
+    # ind = np.nanargmin(dists)
+    # print("kept = %d" % to_keep[ind])
 
     # plot
     theta = md["theta"] * np.pi/180
     x, y, z = localize.get_skewed_coords(imgs.shape, md["pixel_size"] / 1000, md["scan_step"] / 1000, theta)
-    figa, figb = localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params=init_params[ind],
-                             figsize=(16, 8), same_color_scale=False)
+
+    num_plotted = 0
+    ind = 0
+    while num_plotted < 73:
+        if to_keep[ind]:
+            figa, figb = localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params=init_params[ind],
+                                     figsize=(16, 8), same_color_scale=False)
+            num_plotted += 1
+        ind += 1
 
 # #######################################
 # plot with napari
@@ -200,6 +206,7 @@ if False:
 # specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
 viewer = napari.view_image(stack, colormap="bone", contrast_limits=[np.percentile(img0, 1), np.percentile(img0, 99.999)],
                            multiscale=False, title=loc_data_dir)
+# viewer.scale_bar_visible = True
 
 if plot_centers:
     viewer.add_points(centers, size=2, face_color="red", name="fits", opacity=0.75, n_dimensional=True)
@@ -207,6 +214,8 @@ if plot_centers:
 if plot_centers_guess:
     viewer.add_points(centers_guess, size=2, face_color="green", name="guesses", opacity=0.5, n_dimensional=True)
 
+# filters are useful, but slow down rendering considerably even when not visible
+if plot_fit_filters:
     # show which fits failed and why
     cds = conditions.transpose()
     colors = ["purple", "blue", "green", "yellow", "orange"] * int(np.ceil(len(cds) / 5))
