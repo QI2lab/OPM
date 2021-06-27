@@ -63,9 +63,37 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, y_pixels,x_p
     data_numpy = np.empty([num_images,y_pixels,x_pixels]).astype(np.uint16)
 
     for i in range(num_images):
-        if (channel_axis is None):
-            data_numpy[i,:,:] = dataset.read_image(z=i, t=time_axis)
+        if (time_axis is None):
+            if (channel_axis is None):
+                data_numpy[i,:,:] = dataset.read_image(z=i)
+            else:
+                data_numpy[i,:,:] = dataset.read_image(z=i, c=channel_axis)
         else:
-            data_numpy[i,:,:] = dataset.read_image(z=i, t=time_axis, c=channel_axis)
+            if (channel_axis is None):
+                data_numpy[i,:,:] = dataset.read_image(z=i, t=time_axis)
+            else:
+                data_numpy[i,:,:] = dataset.read_image(z=i, t=time_axis, c=channel_axis)
+
+    return data_numpy
+
+
+def return_data_numpy_widefield(dataset, channel_axis, ch_BDV_idx, num_z, y_pixels,x_pixels):
+    """
+    :param dataset: pycromanager dataset object
+    :param channel_axis: integer channel index
+    :param time_axis: integer time_axis
+    :param num_images: integer for number of images to return 
+    :param y_pixels: integer for y pixel size
+    :param x_pixels: integer for x pixel size
+    :return data_numpy: 3D numpy array of requested data
+    """
+
+    data_numpy = np.empty([num_z,y_pixels,x_pixels]).astype(np.uint16)
+
+    for i in range(num_z):
+        if (channel_axis is None):
+            data_numpy[i,:,:] = dataset.read_image(z=i)
+        else:
+            data_numpy[i,:,:] = dataset.read_image(z=i, c=channel_axis, channel=ch_BDV_idx)
 
     return data_numpy

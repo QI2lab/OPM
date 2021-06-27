@@ -486,7 +486,7 @@ def main():
                         # df_stage_scan_params = pd.DataFrame(scan_param_data)
                         # save_name_stage_params = save_directory / 'scan_metadata.csv'
                         # df_stage_scan_params.to_csv(save_name_stage_params)
-                        data_io.write_metadata(scan_param_data[0], save_directory / 'scan_metadata.csv')
+                        data_io.write_metadata(scan_param_data[0], save_directory / Path('scan_metadata.csv'))
 
                         setup_metadata=False
 

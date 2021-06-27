@@ -2,6 +2,9 @@
 import sys
 import numpy as np
 from numba import njit, prange
+from scyjava import jimport
+import itertools
+from flat_field import calc_flatfield
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
@@ -98,6 +101,32 @@ def deskew(data,theta,distance,pixel_size):
 
     # return output
     return output
+
+
+def manage_flat_field_py(stack):
+    """
+    Manage performing flat and dark-field using python adapation of BaSiC algorithm.
+
+    Returns flat- and darkfield corrected image
+    
+    :param stack: ndarray
+        matrix of OPM planes
+
+    :return corrected_stack: ndarray of deskewed OPM planes on uniform grid
+    """
+
+    print('Calculating flat-field correction using python BaSiC adaption.')
+    if stack.shape[0] > 100:
+        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 100, replace=False)]
+    else:
+        stack_for_flat_field = stack
+
+    flat_field, dark_field = calc_flatfield(images=stack_for_flat_field)
+
+    print('Performing flat-field correction.')
+    corrected_stack = perform_flat_field(flat_field,dark_field,stack)
+
+    return corrected_stack
 
 def manage_flat_field(stack,ij):
     """
@@ -259,8 +288,8 @@ def mv_decon(image,ch_idx,dr,dz):
     params.nz = image.shape[0]
     params.generatePsf = True
     params.lightSheetNA = 0.16
-    params.blind=True
-    params.NA = 1.35
+    params.blind=False
+    params.NA = 1.2
     params.RI = 1.4
     params.ns = 1.4
     params.psfModel = mv.PSFModel_Vectorial
