@@ -94,14 +94,13 @@ for round in [0, 1, 2, 3, 4, 5, 6, 7]:
             filter_sigma_small = (0.5 * sigma_z, 0.5 * sigma_xy, 0.5 * sigma_xy)
             filter_sigma_large = (5 * sigma_z, 5 * sigma_xy, 5 * sigma_xy)
             # fit roi size
-            roi_size = (5 * sigma_z, 8 * sigma_xy, 8 * sigma_xy)
+            roi_size = (5 * sigma_z, 12 * sigma_xy, 12 * sigma_xy)
             roi_size_pix = localize.get_roi_size(roi_size, dc, dz)
             # assume points closer together than this come from a single bead
             min_dists = (3 * sigma_z, 2 * sigma_xy)
             # exclude points with sigmas outside these ranges
-            # sigmas_min = (0.25 * sigma_z, 0.25 * sigma_xy, 0.25 * sigma_xy)
-            sigmas_min = (0.25 * sigma_z, dc)
-            sigmas_max = (np.inf * sigma_z, 3 * sigma_xy)
+            sigmas_min = (0.5 * sigma_z, dc)
+            sigmas_max = (2 * sigma_z, 2 * sigma_xy)
 
             # don't consider any points outside of this polygon
             # cx, cy
@@ -182,14 +181,7 @@ for round in [0, 1, 2, 3, 4, 5, 6, 7]:
                                                        contrast_limits=[vmin, vmax],
                                                        multiscale=False, title="chunk = %d" % ichunk)
 
-                            # viewer = napari.view_image(imgs_chunk, colormap="bone",
-                            #                            contrast_limits=[np.percentile(imgs_chunk, 0.1),
-                            #                                             np.percentile(imgs_chunk, 99.9)],
-                            #                            multiscale=False, title="chunk = %d" % ichunk)
-
                             viewer.add_points(centers_guess_inds, size=2, face_color="red", opacity=0.5, name="centers guess", n_dimensional=True)
-
-
 
                     if len(centers_guess) > 0:
                         # ###############################
@@ -202,7 +194,7 @@ for round in [0, 1, 2, 3, 4, 5, 6, 7]:
                         rois, img_rois, xrois, yrois, zrois = zip(*[localize.get_roi(c, imgs_chunk, x, y, z, roi_size_pix) for c in centers_guess])
                         # rois, img_rois, xrois, yrois, zrois = zip(*[localize.get_roi(c, imgs_filtered, x, y, z, roi_size_pix) for c in centers_guess])
                         rois = np.asarray(rois)
-                        nsizes = (rois[:, 1]- rois[:, 0]) * (rois[:, 3] - rois[:, 2]) * (rois[:, 5] - rois[:, 4])
+                        nsizes = (rois[:, 1] - rois[:, 0]) * (rois[:, 3] - rois[:, 2]) * (rois[:, 5] - rois[:, 4])
                         nfits = len(rois)
 
                         # extract guess values
@@ -219,14 +211,12 @@ for round in [0, 1, 2, 3, 4, 5, 6, 7]:
                         sds = np.array([np.std(r) for r in img_rois])
 
                         amps = np.array([np.percentile(r, 90) for r in img_rois]) - bgs
-
                         amps[amps < sds] = 0
 
                         sxs = np.array([np.sqrt(np.sum(ir * (xr - cg[2]) ** 2) / np.sum(ir)) for ir, xr, cg in zip(img_rois, xrois, centers_guess)])
                         sys = np.array([np.sqrt(np.sum(ir * (yr - cg[1]) ** 2) / np.sum(ir)) for ir, yr, cg in zip(img_rois, yrois, centers_guess)])
                         sxys = np.expand_dims(0.5 * sxs + sys, axis=1)
                         szs = np.expand_dims(np.array([np.sqrt(np.sum(ir * (zr - cg[0]) ** 2) / np.sum(ir)) for ir, zr, cg in zip(img_rois, zrois, centers_guess)]), axis=1)
-
 
 
                         init_params = np.concatenate((np.expand_dims(amps, axis=1),

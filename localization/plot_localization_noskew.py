@@ -14,6 +14,8 @@ plot_centers = True
 plot_centers_guess = True
 plot_fit_filters = False
 
+figsize = (16, 8)
+
 # round = 2
 #
 # img_fnames = [r"\\10.206.26.21\opm2\20210503a\r1_atto565_r2_alexa647_1\r1_atto565_r2_alexa647_1_MMStack_Default.ome.tif",
@@ -59,9 +61,14 @@ plot_fit_filters = False
 # channel = 0
 # imgs = np.squeeze(tifffile.imread(img_fname)[:, channel])
 
-img_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\img_TL0_Ch0_Tile0.tif"
-data_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\2021_06_27_11;08;01_localization\img_TL0_Ch1_Tile0_round=0_ch=1_tile=0_vol=0.pkl"
-channel = 0
+round = 7
+channel = 1
+tile = 0
+# img_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\img_TL0_Ch0_Tile0.tif" # cell outlines
+img_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\img_TL%d_Ch%d_Tile%d.tif" % (round, channel, tile)
+# data_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\2021_06_27_11;08;01_localization\img_TL0_Ch1_Tile0_round=0_ch=1_tile=0_vol=0.pkl"
+data_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\2021_06_27_14;02;39_localization\img_TL%d_Ch%d_Tile%d_round=%d_ch=%d_tile=%d_vol=0.pkl" % \
+             (round, channel, tile, round, channel, tile)
 imgs = tifffile.imread(img_fname)
 
 # get coordinates
@@ -89,18 +96,18 @@ centers_guess_napari = centers_guess / np.expand_dims(np.array([dc, dc, dc]), ax
 if False:
     num_plotted = 0
     ind = 0
-    while num_plotted < 20:
+    while num_plotted < 40:
         if to_keep[ind]:
             figa = localize.plot_roi(fps[ind], rois[ind], imgs, x, y, z,
                                                   init_params=ips[ind],
-                                                  figsize=(16, 8), same_color_scale=False)
+                                                  figsize=(16, 8), same_color_scale=True)
             num_plotted += 1
         ind += 1
 
 
 # maximum intensity projection
-figh2 = plt.figure(figsize=(16, 8))
-plt.suptilte("Maximum intensity projection")
+figh2 = plt.figure(figsize=figsize)
+plt.suptitle("Maximum intensity projection")
 grid = plt.GridSpec(1, 2)
 
 ax = plt.subplot(grid[0, 0])
@@ -118,9 +125,11 @@ plt.plot(centers_guess[:, 2], centers_guess[:, 1], 'gx')
 
 # fit statistics
 try:
-    figh3 = plt.figure()
-    plt.suptitle("Fit statistics")
-    grid = plt.GridSpec(2, 2)
+    figh3 = plt.figure(figsize=figsize)
+    plt.suptitle("Fit statistics\nmedians: amp = %0.3f, $\sigma_{xy}$ = %0.3f, $\sigma_z$ = %0.3f, bg = %0.3f" %
+                 (np.median(fps[:, 0][to_keep]), np.median(fps[:, 4][to_keep]), np.median(fps[:, 5][to_keep]),
+                  np.median(fps[:, 6][to_keep])))
+    grid = plt.GridSpec(2, 2, wspace=0.5, hspace=0.5)
 
     ax = plt.subplot(grid[0, 0])
     ax.set_title("amp vs. $\sigma_{xy}$")
@@ -152,7 +161,7 @@ try:
     plt.xlabel("Amp")
     plt.ylabel("background")
     plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
-    plt.ylim([np.min([np.percentile(fps[:, 6][to_keep], 1), 0]), np.percentile(fps[:, 6][to_keep], 99) * 1.2])
+    plt.ylim([np.percentile(fps[:, 6][to_keep], 1) - 5, np.percentile(fps[:, 6][to_keep], 99) + 5])
 except:
     pass
 

@@ -1523,11 +1523,11 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     # ################################
     figh_interp = plt.figure(figsize=figsize)
     st_str = "Fit, max projections, interpolated, ROI = [%d, %d, %d, %d, %d, %d]\n" \
-             "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+             "      A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
              (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
               fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
     if init_params is not None:
-        st_str += "\nguess A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+        st_str += "\nguess A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
                   (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5], init_params[6])
     plt.suptitle(st_str)
     grid = plt.GridSpec(2, 3)
@@ -1716,11 +1716,11 @@ def plot_roi(fit_params, roi, imgs, x, y, z, init_params=None, same_color_scale=
     # ################################
     figh_interp = plt.figure(figsize=figsize)
     st_str = "Fit, max projections, interpolated, ROI = [%d, %d, %d, %d, %d, %d]\n" \
-             "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+             "         A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
              (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
               fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
     if init_params is not None:
-        st_str += "\nguess A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+        st_str += "\nguess A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
                   (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5],
                    init_params[6])
     plt.suptitle(st_str)
