@@ -59,8 +59,8 @@ def acquire_data():
 
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
-        channel_states = [False, True, False, False, False] # true -> active, false -> inactive
-        channel_powers = [0, 10, 30, 20, 100] # (0 -> 100%)
+        channel_states = [False, False, True, False, False] # true -> active, false -> inactive
+        channel_powers = [0, 10, 100, 20, 100] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -73,7 +73,7 @@ def acquire_data():
         print("")
 
         # exposure time
-        exposure_ms = 10.0 #unit: ms
+        exposure_ms = 2.0 #unit: ms
 
         # scan axis range
         scan_axis_range_um = 10.0 # unit: microns
@@ -313,7 +313,7 @@ def acquire_data():
         deskew_parameters[0] = 30         # (degrees)
         deskew_parameters[1] = 400        # (nm)
         deskew_parameters[2] = 115        # (nm)
-        deskewed_image = deskew(np.flipud(image_stack),deskew_parameters)
+        deskewed_image = deskew(np.flipud(image_stack),*deskew_parameters)
 
         yield deskewed_image.astype(np.uint16)
 
