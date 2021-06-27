@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210430f\glycerol_40_1", "2021_05_20_16;20;04_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210518k", "glycerol40_1", "2021_05_06_17;28;06_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210521s", "glycerol_70_1", "2021_05_31_10;39;05_localization")
+# loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210622a", "glycerol90_1", "2021_06_22_23;18;29_localization")
 loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210622a", "glycerol90_1", "2021_06_22_23;18;29_localization")
 
 data_dir, _ = os.path.split(loc_data_dir)
@@ -35,6 +36,7 @@ loc_data_str = "localization_results_vol_%d.pkl"
 deskew_fname = os.path.join(root_dir, "full_deskew_only.h5")
 md_fname = os.path.join(root_dir, "scan_metadata.csv")
 track_fname = os.path.join(loc_data_dir, "tracks.pkl")
+
 plot_centers = True
 plot_centers_guess = True
 plot_fit_filters = False
@@ -99,14 +101,7 @@ if plot_centers:
 
             with open(data_fname, "rb") as f:
                 dat = pickle.load(f)
-            # centers.append(np.concatenate((ii * np.ones((len(dat["centers"]), 1)),
-            #                                dat["centers"][:, 0][:, None] / pix_sizes[0],
-            #                                dat["centers"][:, 1][:, None] / pix_sizes[1],
-            #                                dat["centers"][:, 2][:, None] / pix_sizes[2]), axis=1))
-            # centers_guess.append(np.concatenate((ii * np.ones((len(dat["centers_guess"]), 1)),
-            #                                dat["centers_guess"][:, 0][:, None] / pix_sizes[0],
-            #                                dat["centers_guess"][:, 1][:, None] / pix_sizes[1],
-            #                                dat["centers_guess"][:, 2][:, None] / pix_sizes[2]), axis=1))
+
             tk = dat["to_keep"]
             cd = dat["conditions"]
             cd_names = dat["condition_names"]

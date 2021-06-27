@@ -12,7 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import data_io
 
-use_every_nth_frame = 4
+use_every_nth_frame = 1
 figsize = (16, 8)
 nmin_traj = 5
 
@@ -42,14 +42,27 @@ nmin_traj = 5
 # data_files = glob.glob(os.path.join(root_dir, "localization_results*.pkl"))
 # inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
 
-root_dirs = [r"\\10.206.26.21\opm2\20210622a\glycerol90_1\2021_06_22_23;18;29_localization",
-            r"\\10.206.26.21\opm2\20210622b\glycerol90_1\2021_06_23_01;17;29_localization",
-            r"\\10.206.26.21\opm2\20210622c\glycerol80_1\2021_06_23_03;16;34_localization",
-            r"\\10.206.26.21\opm2\20210622d\glycerol80_1\2021_06_23_05;33;50_localization",
-            r"\\10.206.26.21\opm2\20210622e\glycerol60_1\2021_06_23_07;42;08_localization",
-            r"\\10.206.26.21\opm2\20210622f\glycerol60_1\2021_06_23_09;56;27_localization",
-            r"\\10.206.26.21\opm2\20210622g\glycerol50_1\2021_06_23_17;45;54_localization",
-            r"\\10.206.26.21\opm2\20210622h\glycerol50_1\2021_06_23_20;09;39_localization"]
+# root_dirs = [r"\\10.206.26.21\opm2\20210622a\glycerol90_1\2021_06_22_23;18;29_localization",
+#             r"\\10.206.26.21\opm2\20210622b\glycerol90_1\2021_06_23_01;17;29_localization",
+#             r"\\10.206.26.21\opm2\20210622c\glycerol80_1\2021_06_23_03;16;34_localization",
+#             r"\\10.206.26.21\opm2\20210622d\glycerol80_1\2021_06_23_05;33;50_localization",
+#             r"\\10.206.26.21\opm2\20210622e\glycerol60_1\2021_06_23_07;42;08_localization",
+#             r"\\10.206.26.21\opm2\20210622f\glycerol60_1\2021_06_23_09;56;27_localization",
+#             r"\\10.206.26.21\opm2\20210622g\glycerol50_1\2021_06_23_17;45;54_localization",
+#             r"\\10.206.26.21\opm2\20210622h\glycerol50_1\2021_06_23_20;09;39_localization"]
+
+# root_dirs = [r"\\10.206.26.21\opm2\20210624a\glycerol80_1\2021_06_24_16;37;59_localization",
+root_dirs = [r"\\10.206.26.21\opm2\20210624b\glycerol80_1\2021_06_24_17;19;23_localization",
+             r"\\10.206.26.21\opm2\20210624c\glycerol80_1\2021_06_24_17;53;35_localization",
+             r"\\10.206.26.21\opm2\20210624d\glycerol80_1\2021_06_24_18;27;45_localization",
+             r"\\10.206.26.21\opm2\20210624e\glycerol60_1\2021_06_24_18;56;45_localization",
+             r"\\10.206.26.21\opm2\20210624f\glycerol60_1\2021_06_24_19;26;29_localization",
+             r"\\10.206.26.21\opm2\20210624g\glycerol60_1\2021_06_24_19;53;54_localization",
+             r"\\10.206.26.21\opm2\20210624h\glycerol60_1\2021_06_24_20;28;11_localization",
+             r"\\10.206.26.21\opm2\20210624i\glycerol50_1\2021_06_24_21;08;45_localization",
+             r"\\10.206.26.21\opm2\20210624j\glycerol50_1\2021_06_24_21;41;37_localization",
+             r"\\10.206.26.21\opm2\20210624k\glycerol50_1\2021_06_24_22;14;02_localization",
+             r"\\10.206.26.21\opm2\20210624l\glycerol50_1\2021_06_24_22;48;05_localization"]
 
 for root_dir in root_dirs:
     print(root_dir)
@@ -214,9 +227,6 @@ for root_dir in root_dirs:
     ax.plot(msd.index, msd, 'o')
 
     ax.plot(t_plaw_fit, plaw_fit, "magenta", label=r"$At^\alpha$, $\alpha$=%0.3f, A=%0.3f" % (results_plaw["x"][0], results_plaw["x"][1]))
-
-    t_inerp_full = np.linspace(0, msd.index.max(), 300)
-    ax.plot(t_inerp_full, full_msd_slope * t_inerp_full, 'orange', label=r"full time, D=%0.3g $\mu m^2/s$" % (full_msd_slope / 6))
 
     t_interp_short = np.linspace(0, tshort_cutoff, 300)
     ax.plot(t_interp_short, short_msd_slope * t_interp_short, "red", label=r"short time, D=%0.3g $\mu m^2/s$" % (short_msd_slope / 6))

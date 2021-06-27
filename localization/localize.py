@@ -1042,8 +1042,13 @@ def filter_convolve(imgs, kernel, use_gpu=CUPY_AVAILABLE):
     if use_gpu:
         kernel_cp = cp.asarray(kernel, dtype=cp.float32)
         imgs_cp = cp.asarray(imgs, dtype=cp.float32)
-        imgs_filtered = cp.asnumpy(cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")/
-                                   cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same"))
+        imgs_filtered_cp = cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")/ \
+                           cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same")
+        imgs_filtered = cp.asnumpy(imgs_filtered_cp)
+
+        del kernel_cp
+        del imgs_cp
+        del imgs_filtered_cp
     else:
         imgs_filtered = scipy.signal.fftconvolve(imgs, kernel, mode="same") / \
                         scipy.signal.fftconvolve(np.ones(imgs.shape), kernel, mode="same")
@@ -1670,7 +1675,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     return figh_interp, figh_raw
 
 
-def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale=True, figsize=(16, 8),
+def plot_roi(fit_params, roi, imgs, x, y, z, init_params=None, same_color_scale=True, figsize=(16, 8),
              prefix="", save_dir=None):
     """
     plot results from fit_roi()
@@ -1689,9 +1694,8 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     dc = x[0, 0, 1] - x[0, 0, 0]
     dz = z[1, 0, 0] - z[0, 0, 0]
 
-    if center_guess is not None:
-        if center_guess.ndim == 1:
-            center_guess = center_guess[None, :]
+    if init_params is not None:
+        center_guess = np.array([init_params[3], init_params[2], init_params[1]])
 
     center_fit = np.array([fit_params[3], fit_params[2], fit_params[1]])
 
@@ -1711,10 +1715,16 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     # plot results interpolated on regular grid
     # ################################
     figh_interp = plt.figure(figsize=figsize)
-    plt.suptitle("Fit, max projections, interpolated\nROI = [%d, %d, %d, %d, %d, %d]\n"
-                 "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" %
-                 (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
-                  fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6]))
+    st_str = "Fit, max projections, interpolated, ROI = [%d, %d, %d, %d, %d, %d]\n" \
+             "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+             (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
+              fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
+    if init_params is not None:
+        st_str += "\nguess A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
+                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5],
+                   init_params[6])
+    plt.suptitle(st_str)
+
     grid = plt.GridSpec(2, 4)
 
     ax = plt.subplot(grid[0, 1])
@@ -1722,8 +1732,8 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     plt.imshow(np.nanmax(img_roi, axis=0).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
                extent=extent)
     plt.plot(center_fit[1], center_fit[2], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 2], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[1], center_guess[2], 'gx')
     ax.set_ylim(extent[2:4])
     ax.set_xlim(extent[0:2])
     plt.xlabel("Y (um)")
@@ -1735,8 +1745,8 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     plt.imshow(np.nanmax(img_roi, axis=1).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
                extent=extent)
     plt.plot(center_fit[0], center_fit[2], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 0], center_guess[:, 2], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[0], center_guess[2], 'gx')
     ax.set_ylim(extent[2:4])
     ax.set_xlim(extent[0:2])
     plt.xlabel("Z (um)")
@@ -1750,8 +1760,8 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
 
         plt.imshow(np.nanmax(img_roi, axis=2), vmin=vmin_roi, vmax=vmax_roi, origin="lower", extent=extent)
     plt.plot(center_fit[1], center_fit[0], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 0], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[1], center_guess[0], 'gx')
     ax.set_ylim(extent[2:4])
     ax.set_xlim(extent[0:2])
     plt.xlabel("Y (um)")
@@ -1769,8 +1779,8 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     extent = [y_roi[0, 0, 0] - 0.5 * dc, y_roi[0, -1, 0] + 0.5 * dc, x_roi[0, 0, 0] - 0.5 * dc, x_roi[0, 0, -1] + 0.5 * dc]
     plt.imshow(np.nanmax(img_fit, axis=0).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower", extent=extent)
     plt.plot(center_fit[1], center_fit[2], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 2], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[1], center_guess[2], 'gx')
     ax.set_ylim(extent[2:4])
     ax.set_xlim(extent[0:2])
     plt.xlabel("Y (um)")
@@ -1780,8 +1790,8 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     extent = [z_roi[0, 0, 0] - 0.5 * dz, z_roi[-1, 0, 0] + 0.5 * dz, x_roi[0, 0, 0] - 0.5 * dc, x_roi[0, 0, -1] + 0.5 * dc]
     plt.imshow(np.nanmax(img_fit, axis=1).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower", extent=extent)
     plt.plot(center_fit[0], center_fit[2], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 0], center_guess[:, 2], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[0], center_guess[2], 'gx')
     ax.set_ylim(extent[2:4])
     ax.set_xlim(extent[0:2])
     plt.xlabel("Z (um)")
@@ -1791,8 +1801,8 @@ def plot_roi(fit_params, roi, imgs, x, y, z, center_guess=None, same_color_scale
     extent = [y_roi[0, 0, 0] - 0.5 * dc, y_roi[0, -1, 0] + 0.5 * dc, z_roi[0, 0, 0] - 0.5 * dz, z_roi[-1, 0, 0] + 0.5 * dz]
     plt.imshow(np.nanmax(img_fit, axis=2), vmin=vmin_fit, vmax=vmax_fit, origin="lower", extent=extent)
     plt.plot(center_fit[1], center_fit[0], 'mx')
-    if center_guess is not None:
-        plt.plot(center_guess[:, 1], center_guess[:, 0], 'gx')
+    if init_params is not None:
+        plt.plot(center_guess[1], center_guess[0], 'gx')
     ax.set_ylim(extent[2:4])
     ax.set_xlim(extent[0:2])
     plt.xlabel("Y (um)")
@@ -1979,7 +1989,7 @@ def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_
     these ranges
     :param amp_min: exclude fits with smaller amplitude
     :param dist_boundary_min: (dz_min, dxy_min)
-    :return to_keep, conditions, condition_names:
+    :return to_keep, conditions, condition_names, filter_settings:
     """
 
     filter_settings = {"fit_dist_max_err": fit_dist_max_err, "min_spot_sep": min_spot_sep,
