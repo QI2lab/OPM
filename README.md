@@ -10,6 +10,12 @@ On the instrument side, we have added galvo scanning, returned to a cylindrical 
 
 A new parts lists is in-progress.
 
+# 3D (near) real time viewing
+* run_opm_galvoscan_realtime_display.py
+  * Run and display a single position, timelapse, multicolor galvo mirror scan using the qi2lab OPM.
+  * Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup size of galvo sweep (max 200 micrometers), exposure time (galvo stability and laser blanking verified to work down to 1.5 ms exposure time in 256x2304 ROI with OrcaFusion BT), laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Napari is work-in-progress. Once setup, call python script and it will open Napari. Click "start" to start data display
+  * Depends on: [Napari](https://napari.org/), [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
+
 # Stage scan operation
 * run_opm_stagescan.py
   * Run a multiposition, multicolor stage scan using the qi2lab OPM. Push data to a network drive during acquisition using 10G fiber connection for post-processing.
@@ -31,12 +37,6 @@ A new parts lists is in-progress.
   * Depends on: [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/), [Numba](http://numba.pydata.org/), [npy2bdv](https://github.com/nvladimus/npy2bdv), [scikit-image](https://scikit-image.org/), image_post_processing.py (in this repo), and various standard Python libraries.
   * Optional dependencies for GPU deconvolution and retrospective flatfield correction: [Microvolution](https://www.microvolution.com/) (commerical software! Can replace with [pyCUDAdecon](https://pycudadecon.readthedocs.io/en/latest/) for open-source GPU deconvolution), [pyimagej](https://github.com/imagej/pyimagej), and local [FIJI](https://imagej.net/Fiji/Downloads) w/ [BaSiC](https://github.com/marrlab/BaSiC) plugin JAR.
   *  Usage: python recon_opm_galvoscan.py -i < inputdirectory > -d <0: no deconvolution (DEFAULT), 1: deconvolution> -f <0: no flatfield (DEFAULT), 1: PyImageJ-FIJI based flatfield, 2: Python GPU based flatfield>, -s <0: save as TIFF (DEFAULT), 1: save as BDV H5, 2: save as Zarr> -z <integer level of coverslip z axis downsampling. 1 = no downsampling (DEFAULT)>
-
-# 3D (near) real time viewing
-* run_opm_galvoscan_realtime_display.py
-* Run and display a single position, timelapse, multicolor galvo mirror scan using the qi2lab OPM.
-* Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup size of galvo sweep (max 200 micrometers), exposure time (galvo stability and laser blanking verified to work down to 1.5 ms exposure time in 256x2304 ROI with OrcaFusion BT), laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Napari is work-in-progress. Once setup, call python script and it will open Napari. Click "start" to start data display
-* Depends on: [Napari](https://napari.org/), [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), and various standard Python libraries.
 
 # Contributions / Acknowledgements
 Peter Brown (ASU), Franky Djutanta (ASU), Doug Shepherd (ASU), Nikita Vladimirov (BIMSB_MDC),  Henry Pinkard (UCB), Adam Glaser (UW), Jon Daniels (ASI), Reto Fiolka (UTSW), Kevin Dean (UTSW), Alfred Millett-Sikking (Calico), and Andrew York (Calico).
