@@ -20,6 +20,7 @@ import ctypes as ct
 import napari
 from magicgui import magicgui
 from image_post_processing import deskew
+from skimage.measure import block_reduce
 from napari.qt.threading import thread_worker
 import warnings
 import gc
@@ -27,14 +28,20 @@ import gc
 def img_process_fn(image, metadata):
 
     global image_stack
-    global counter
+    global ch_counter
+    global z_counter
     global images_to_grab
     global scan_finished
     
-    image_stack[counter,:,:]=image
-    counter = counter + 1
+    image_stack[ch_counter,z_counter,:,:]=image
+    
+    ch_counter = ch_counter + 1
+    
+    if ch_counter == 3:
+        z_counter = z_counter + 1
+        ch_counter = 0
 
-    if counter == images_to_grab:
+    if z_counter == images_to_grab:
         scan_finished = True
 
 @thread_worker
@@ -42,16 +49,11 @@ def acquire_data():
 
     while True:
         
-        global counter
+        global z_counter
+        global ch_counter
         global image_stack
-        global first_iteration
         global images_to_grab
         global scan_finished
-
-        if first_iteration:
-            first_iteration = False
-        else:
-            time.sleep(.5)
 
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -59,8 +61,8 @@ def acquire_data():
 
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
-        channel_states = [False, True, False, False, False] # true -> active, false -> inactive
-        channel_powers = [0, 30, 100, 20, 100] # (0 -> 100%)
+        channel_states = [False, True, True, True, False] # true -> active, false -> inactive
+        channel_powers = [0, 5, 5, 15, 0] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -73,10 +75,10 @@ def acquire_data():
         print("")
 
         # exposure time
-        exposure_ms = 2.0 #unit: ms
+        exposure_ms = 20.0 #unit: ms
 
         # scan axis range
-        scan_axis_range_um = 200.0 # unit: microns
+        scan_axis_range_um = 150.0 # unit: microns
         
         # galvo voltage at neutral
         galvo_neutral_volt = 0 # unit: volts
@@ -271,8 +273,9 @@ def acquire_data():
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)
 
-        counter = 0
-        image_stack = np.empty([scan_steps,y_pixels,x_pixels]).astype(np.uint16)
+        ch_counter = 0
+        z_counter = 0
+        image_stack = np.empty([3,scan_steps,y_pixels,x_pixels]).astype(np.uint16)
         images_to_grab = scan_steps
         scan_finished = False
 
@@ -281,10 +284,10 @@ def acquire_data():
                         max_multi_res_index=0, saving_queue_size=1000, image_process_fn=img_process_fn) as acq:
             acq.acquire(events)
 
-        acq = None
-
         while not(scan_finished):
-            time.sleep(0.25)
+            time.sleep(0.5)
+
+        acq = None
 
         acq_deleted = False
         while not(acq_deleted):
@@ -313,7 +316,25 @@ def acquire_data():
         deskew_parameters[0] = 30         # (degrees)
         deskew_parameters[1] = 400        # (nm)
         deskew_parameters[2] = 115        # (nm)
-        deskewed_image = deskew(np.flipud(image_stack),*deskew_parameters)
+
+        # calculate size of one volume
+        # change step size from physical space (nm) to camera space (pixels)
+        pixel_step = deskew_parameters[1]/deskew_parameters[2]    # (pixels)
+
+        # calculate the number of pixels scanned during stage scan 
+        scan_end = image_stack.shape[1] * pixel_step  # (pixels)
+        y_pixels = image_stack.shape[2]
+        x_pixels = image_stack.shape[3]
+
+        # calculate properties for final image
+        ny = np.int64(np.ceil(scan_end+y_pixels*np.cos(deskew_parameters[0]*np.pi/180))) # (pixels)
+        nz = np.int64(np.ceil(y_pixels*np.sin(deskew_parameters[0]*np.pi/180)))          # (pixels)
+        nx = np.int64(x_pixels)      
+
+        deskewed_image = np.empty([3,nz,ny,nx]).astype(np.uint16)
+        deskewed_image[0,:]= deskew(np.flipud(image_stack[0,:]),*deskew_parameters)
+        deskewed_image[1,:]= deskew(np.flipud(image_stack[1,:]),*deskew_parameters)
+        deskewed_image[2,:]= deskew(np.flipud(image_stack[2,:]),*deskew_parameters)
 
         yield deskewed_image.astype(np.uint16)
 
@@ -321,7 +342,6 @@ def main():
 
     global counter
     global image_stack
-    global first_iteration
     global images_to_grab
     global scan_finished
     global acq_running
@@ -342,9 +362,13 @@ def main():
 
     def update_layer(new_image):
         try:
-            viewer.layers['acquisition'].data = new_image
+            viewer.layers['ch1'].data = new_image[0,:]
+            viewer.layers['ch2'].data = new_image[1,:]
+            viewer.layers['ch3'].data = new_image[2,:]
         except KeyError:
-            viewer.add_image(new_image, name='acquisition')
+            viewer.add_image(new_image[0,:], name='ch1', colormap='bop blue', contrast_limits=[200,7000], scale=[2,1,1])
+            viewer.add_image(new_image[1,:], name='ch2', colormap='bop orange', contrast_limits=[200,2000], scale=[2,1,1], blending='additive')
+            viewer.add_image(new_image[2,:], name='ch3', colormap='red', contrast_limits=[200,2000], scale=[2,1,1], blending='additive')
 
     worker = acquire_data()
     worker.yielded.connect(update_layer)
@@ -363,7 +387,6 @@ def main():
         global acq_running
 
         acq_running = False
-        first_iteration = True
         worker.pause()
 
     viewer.window.add_dock_widget(start_acq)

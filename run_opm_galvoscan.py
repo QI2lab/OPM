@@ -31,7 +31,7 @@ def main():
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
     channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 10, 90, 20, 100] # (0 -> 100%)
+    channel_powers = [0, 10, 100, 40, 100] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -44,7 +44,7 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 2.0 #unit: ms
+    exposure_ms = 1.5 #unit: ms
 
     # scan axis range
     scan_axis_range_um = 10.0 # unit: microns
@@ -53,11 +53,11 @@ def main():
     galvo_neutral_volt = 0 # unit: volts
 
     # timepoints
-    timepoints = 2000
+    timepoints = 3000
 
     # setup file name
-    save_directory=Path('D:/20210621y/')
-    save_name = '50suc_z26um'
+    save_directory=Path('D:/20210624l/')
+    save_name = 'glycerol50'
 
     # automatically transfer files to NAS at end of dataset
     transfer_files = False
