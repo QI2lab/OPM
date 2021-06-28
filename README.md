@@ -12,8 +12,8 @@ A new parts lists is in-progress.
 
 # 3D (near) real time viewing
 * run_opm_galvoscan_realtime_display.py
-  * Run and display a single position, timelapse, multicolor galvo mirror scan using the qi2lab OPM.
-  * Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup size of galvo sweep (max 200 micrometers), exposure time (galvo stability and laser blanking verified to work down to 1.5 ms exposure time in 256x2304 ROI with OrcaFusion BT), laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Napari is work-in-progress. Once setup, call python script and it will open Napari. Click "start" to start data display
+  * Run and display a single position, timelapse, multicolor galvo mirror scan using the qi2lab OPM on the OPM computer itself. This does not transfer data to the NAS / server and currently cannot save multiposition or timelapse data. It can save the current volume of interest.
+  * Usage: Setup ROI cropping on camera in Micromanager 2.0. Setup size of galvo sweep (max 200 micrometers), exposure time (galvo stability and laser blanking verified to work down to 1.5 ms exposure time in 256x2304 ROI with OrcaFusion BT), laser lines, and laser powers in the initial block of the main() function. Setting all of these up directly in Napari is work-in-progress. Once setup, call python script and it will open Napari. Click "start" to start data display.
   * Depends on: [Napari](https://napari.org/), [Micro-manager 2.0 gamma](https://micro-manager.org/wiki/Download_Micro-Manager_Latest_Release), [Pycro-manager](https://pycro-manager.readthedocs.io/en/latest/),  [PyDAQmx](https://github.com/clade/PyDAQmx), [Numba](http://numba.pydata.org/), and various standard Python libraries.
 
 # Stage scan operation
