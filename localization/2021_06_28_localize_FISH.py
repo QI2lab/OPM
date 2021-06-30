@@ -89,7 +89,7 @@ for round in [0]:
                 md = dset.read_metadata(z=0, channel=0)
                 frame_time_ms = float(md["OrcaFusionBT-Exposure"])
 
-                nimgs_per_vol = len(md.axes["z"])
+                nimgs_per_vol = len(dset.axes["z"])
                 # trapezoid volume
                 volume_um3 = (dstage * nimgs_per_vol) * (dc * np.sin(theta) * nyp) * (dc * nxp)
 
