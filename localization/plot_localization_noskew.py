@@ -2,13 +2,18 @@
 Plot data and localizations
 """
 import os
+import time
+
 import numpy as np
 import pickle
+
+import pycromanager
 import tifffile
 import napari
 from napari_animation import AnimationWidget
-import localize
 import matplotlib.pyplot as plt
+import localize
+import image_post_processing as pp
 
 plot_centers = True
 plot_centers_guess = True
@@ -61,20 +66,38 @@ figsize = (16, 8)
 # channel = 0
 # imgs = np.squeeze(tifffile.imread(img_fname)[:, channel])
 
-round = 0
-channel = 1
-tile = 0
-# img_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\img_TL0_Ch0_Tile0.tif" # cell outlines
-img_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\img_TL%d_Ch%d_Tile%d.tif" % (round, channel, tile)
-# data_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\2021_06_27_11;08;01_localization\img_TL0_Ch1_Tile0_round=0_ch=1_tile=0_vol=0.pkl"
-data_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\2021_06_27_14;02;39_localization\img_TL%d_Ch%d_Tile%d_round=%d_ch=%d_tile=%d_vol=0.pkl" % \
-             (round, channel, tile, round, channel, tile)
-imgs = tifffile.imread(img_fname)
-
+# round = 0
+# channel = 1
+# tile = 0
+# img_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\img_TL%d_Ch%d_Tile%d.tif" % (round, channel, tile)
+# # data_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\2021_06_27_11;08;01_localization\img_TL0_Ch1_Tile0_round=0_ch=1_tile=0_vol=0.pkl"
+# data_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\2021_06_27_14;02;39_localization\img_TL%d_Ch%d_Tile%d_round=%d_ch=%d_tile=%d_vol=0.pkl" % \
+#              (round, channel, tile, round, channel, tile)
+# imgs = tifffile.imread(img_fname)
 # get coordinates
-dc = 0.065
-dz = 0.25
+# dc = 0.065
+# dz = 0.25
+# x, y, z = localize.get_coords(imgs.shape, dc, dz)
+
+data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_29_18;31;00_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
+img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0002_1"
+dset = pycromanager.Dataset(img_fname)
+dc = 0.115
+dz = 0.115
+
+tstart = time.perf_counter()
+imgs_raw = []
+for ii in range(len(dset.axes["z"])):
+    imgs_raw.append(dset.read_image(channel=0, z=ii))
+print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
+imgs_raw = np.flip(np.asarray(imgs_raw), axis=0)
+
+tstart = time.perf_counter()
+imgs = pp.deskew(imgs_raw, np.array([30, 0.4, 0.115]))
+print("deskewed in %0.2fs" % (time.perf_counter() - tstart))
+
 x, y, z = localize.get_coords(imgs.shape, dc, dz)
+
 
 # load localization data
 with open(data_fname, "rb") as f:

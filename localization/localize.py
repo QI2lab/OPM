@@ -1626,7 +1626,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     plt.suptitle(st_str)
     grid = plt.GridSpec(3, roi[1] - roi[0])
 
-    xp = np.arange(imgs.shape[2]) * dc
+    # todo: need to correct these coordinates for offsets
+    xp = np.arange(imgs.shape[2]) * dc + x.min()
     yp = np.arange(imgs.shape[1]) * dc
     extent_roi = [xp[roi[4]] - 0.5 * dc, xp[roi[5] - 1] + 0.5 * dc,
                   yp[roi[2]] - 0.5 * dc, yp[roi[3] - 1] + 0.5 * dc]
@@ -2058,7 +2059,7 @@ def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_
     to_keep_temp = np.logical_and.reduce(conditions, axis=1)
 
     # ###################################################
-    # check again for unique points
+    # check for unique points
     # ###################################################
 
     dz, dxy = min_spot_sep
@@ -2066,11 +2067,17 @@ def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_
 
         # only keep unique center if close enough
         _, unique_inds = combine_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
-        # convert to indices into full array
-        unique_inds_full = np.arange(len(to_keep_temp), dtype=np.int)[to_keep_temp][unique_inds]
-        # boolean array showing which elements unique
-        unique = np.zeros(len(fit_params), dtype=np.bool)
-        unique[unique_inds_full] = True
+
+        # unique mask for those in to_keep_temp
+        is_unique = np.zeros(np.sum(to_keep_temp), dtype=np.bool)
+        is_unique[unique_inds] = True
+
+        # get indices of non-unique points among all points
+        not_unique_inds_full = np.arange(len(to_keep_temp), dtype=np.int)[to_keep_temp][np.logical_not(is_unique)]
+
+        # get mask in full space
+        unique = np.ones(len(fit_params), dtype=np.bool)
+        unique[not_unique_inds_full] = False
     else:
         unique = np.ones(len(fit_params), dtype=np.bool)
 

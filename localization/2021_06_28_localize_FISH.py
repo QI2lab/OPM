@@ -99,12 +99,13 @@ for round in [0]:
                 filter_sigma_small = (0.5 * sigma_z, 0.25 * sigma_xy, 0.25 * sigma_xy)
                 filter_sigma_large = (5 * sigma_z, 5 * sigma_xy, 5 * sigma_xy)
                 # fit roi size
-                roi_size = (3 * sigma_z, 8 * sigma_xy, 8 * sigma_xy)
+                # roi_size = (3 * sigma_z, 8 * sigma_xy, 8 * sigma_xy)
+                roi_size = (5 * sigma_z, 12 * sigma_xy, 12 * sigma_xy)
                 # assume points closer together than this come from a single bead
                 min_spot_sep = (5 * sigma_z, 4 * sigma_xy)
                 # exclude points with sigmas outside these ranges
                 sigmas_min = (0.25 * sigma_z, 0.25 * sigma_xy)
-                sigmas_max = (2 * sigma_z, 3 * sigma_xy)
+                sigmas_max = (3 * sigma_z, 4 * sigma_xy)
 
                 # ###############################
                 # loop over volumes
@@ -129,7 +130,7 @@ for round in [0]:
                     chunk_counter_p = 0
                     chunk_counter_x = 0
                     while more_chunks:
-                        print("Chunk %d/%d" % (ichunk + 1, nchunks))
+                        print("Chunk %d/%d, x index = %d, step index = %d" % (ichunk + 1, nchunks, chunk_counter_x, chunk_counter_p))
                         # load images
                         tstart_load = time.perf_counter()
                         ix_start = int(np.max([chunk_counter_x * chunk_size_x - chunk_overlap, 0]))
@@ -193,31 +194,6 @@ for round in [0]:
 
                         print("Found %d points above threshold in %0.2fs" % (
                         len(centers_guess), time.perf_counter() - tstart))
-
-                        # ###################################################
-                        # check fits
-                        # ###################################################
-                        if debug:
-                            imgs_filtered_deskewed = pp.deskew(imgs_filtered, [theta * 180/np.pi, dstage, dc])
-                            # imgs_filtered_deskewed = pp.deskew(imgs, [theta * 180 / np.pi, dstage, dc])
-
-                            figh = plt.figure()
-                            extent = [-0.5 * dc + x_offset, dc * imgs_filtered_deskewed.shape[2] + 0.5 * dc + x_offset,
-                                      -0.5 * dc + y_offset, dc * imgs_filtered_deskewed.shape[1] + + 0.5 * dc + y_offset]
-                            max_proj = np.max(imgs_filtered_deskewed, axis=0)
-                            plt.imshow(max_proj, extent=extent, origin="lower",
-                                       vmin=np.percentile(max_proj, 1), vmax=np.percentile(max_proj, 99.9))
-                            plt.plot(centers_guess[:, 2], centers_guess[:, 1], 'rx')
-
-                            with napari.gui_qt():
-                                viewer = napari.view_image(imgs_filtered_deskewed, colormap="bone",
-                                                           contrast_limits=[np.percentile(imgs_filtered_deskewed, 1),
-                                                                            np.percentile(imgs_filtered_deskewed, 99.99)],
-                                                           multiscale=False)
-
-                                centers_napari = (centers_guess - np.expand_dims(np.array([0, y_offset, x_offset]), axis=0)) / dc
-                                viewer.add_points(centers_napari, size=2, face_color="red", name="fits", opacity=0.75,
-                                                  n_dimensional=True)
 
                         if len(centers_guess) != 0:
                             # ###################################################
@@ -302,19 +278,93 @@ for round in [0]:
 
                             to_keep, conditions, condition_names, filter_settings = localize.filter_localizations(
                                 fit_params, init_params, (z, y, x),
-                                (sigma_z, sigma_xy), min_spot_sep,
+                                (sigma_z, 3*sigma_xy), min_spot_sep,
                                 (sigmas_min, sigmas_max),
                                 fit_thresholds[ch],
                                 dist_boundary_min=(0.5 * sigma_z, sigma_xy))
 
                             print("identified %d/%d localizations in %0.3f" % (np.sum(to_keep), to_keep.size, time.perf_counter() - tstart))
 
-                            if debug:
-                                ind = len(to_keep) // 2
-                                x, y, z = localize.get_skewed_coords(imgs.shape, dc, dstage, theta)
-                                x += x_offset
-                                y += y_offset
+                        # ###################################################
+                        # check fits and guesses
+                        # ###################################################
+                        if debug:
+                            imgs_filtered_deskewed = pp.deskew(imgs_filtered, [theta * 180 / np.pi, dstage, dc])
+                            imgs_deskewed = pp.deskew(imgs, [theta * 180 / np.pi, dstage, dc])
+
+                            centers_guess_napari = (centers_guess - np.expand_dims(np.array([0, y_offset, x_offset]), axis=0)) / dc
+
+                            cs = np.stack((fit_params[:, 3][to_keep], fit_params[:, 2][to_keep], fit_params[:, 1][to_keep]), axis=1)
+                            centers_napari = (cs - np.expand_dims(np.array([0, y_offset, x_offset]), axis=0)) / dc
+
+                            # plot individual rois
+                            to_plot = 1
+                            plotted = 0
+                            ind = 0
+                            plot_any = False
+                            while plotted < to_plot:
+                                if to_keep[ind] or plot_any:
+                                    localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
+
+                                    plotted += 1
+                                ind += 1
+
+                            # plot nearest fit to some point
+                            if False:
+                                arr_ind = [107, 289, 112]
+                                xa = x[0, 0, arr_ind[2]]
+                                ya = y[arr_ind[0], arr_ind[1], 0]
+                                za = z[0, arr_ind[1], 0]
+                                ind = np.argmin((centers_guess[:, 2] - xa)**2 + (centers_guess[:, 1] - ya)**2 + (centers_guess[:, 0] - za)**2)
                                 localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
+
+                            if len(centers_guess) > 1:
+                                # max projection
+                                figh = plt.figure(figsize=(16, 8))
+                                plt.suptitle("Max projection, fits")
+                                extent = [-0.5 * dc + x_offset, dc * imgs_deskewed.shape[2] + 0.5 * dc + x_offset,
+                                          -0.5 * dc + y_offset, dc * imgs_deskewed.shape[1] + + 0.5 * dc + y_offset]
+                                max_proj = np.max(imgs_deskewed, axis=0)
+
+                                ax = plt.subplot(1, 2, 1)
+                                plt.imshow(max_proj, extent=extent, origin="lower",
+                                           vmin=np.percentile(max_proj, 1), vmax=np.percentile(max_proj, 99.9))
+                                plt.plot(cs[:, 2], cs[:, 1], 'rx')
+
+                                ax = plt.subplot(1, 2, 2)
+                                plt.imshow(max_proj, extent=extent, origin="lower",
+                                           vmin=np.percentile(max_proj, 1), vmax=np.percentile(max_proj, 99.9))
+                                plt.plot(centers_guess[:, 2], centers_guess[:, 1], 'gx')
+
+
+                            with napari.gui_qt():
+                                viewer = napari.Viewer(title="round=%d, channel=%d, tile=%d, xblock=%d, step block=%d" %
+                                                             (round, ch, tl, chunk_counter_x, chunk_counter_p))
+                                viewer.add_image(imgs_deskewed, colormap="bone",
+                                                           contrast_limits=[
+                                                               np.percentile(imgs_deskewed, 1),
+                                                               np.percentile(imgs_deskewed, 99.99)],
+                                                           multiscale=False)
+
+                                viewer.add_image(imgs_filtered_deskewed, colormap="bone",
+                                                           contrast_limits=[
+                                                               np.percentile(imgs_filtered_deskewed, 1),
+                                                               np.percentile(imgs_filtered_deskewed, 99.99)],
+                                                           multiscale=False, visible=False)
+
+                                viewer.add_points(centers_guess_napari, size=2, face_color="green", name="guesses",
+                                                  opacity=0.75, n_dimensional=True, visible=True)
+
+                                if len(centers_guess) > 1:
+                                    viewer.add_points(centers_napari, size=2, face_color="red", name="fits",
+                                                      opacity=0.75, n_dimensional=True)
+
+                                    colors = ["purple", "blue", "yellow", "orange"] * int(np.ceil(len(conditions) / 4))
+                                    for c, cn, col in zip(conditions.transpose(), condition_names, colors):
+                                        ct = centers_guess[np.logical_not(c)] / np.expand_dims(np.array([dc, dc, dc]),
+                                                                                               axis=0)
+                                        viewer.add_points(ct, size=2, face_color=col, opacity=0.5, n_dimensional=True, visible=False,
+                                                          name="not %s" % cn.replace("_", " "))
 
                             # store results
                             fit_params_vol.append(fit_params)
