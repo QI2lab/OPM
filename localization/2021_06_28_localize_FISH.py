@@ -285,6 +285,16 @@ for round in [0]:
 
                             print("identified %d/%d localizations in %0.3f" % (np.sum(to_keep), to_keep.size, time.perf_counter() - tstart))
 
+                            # ###################################################
+                            # store results
+                            # ###################################################
+                            fit_params_vol.append(fit_params)
+                            init_params_vol.append(init_params)
+                            rois_vol.append(rois)
+                            fit_results_vol.append(fit_results)
+                            conditions_vol.append(conditions)
+                            to_keep_vol.append(to_keep)
+
                         # ###################################################
                         # check fits and guesses
                         # ###################################################
@@ -366,13 +376,6 @@ for round in [0]:
                                         viewer.add_points(ct, size=2, face_color=col, opacity=0.5, n_dimensional=True, visible=False,
                                                           name="not %s" % cn.replace("_", " "))
 
-                            # store results
-                            fit_params_vol.append(fit_params)
-                            init_params_vol.append(init_params)
-                            rois_vol.append(rois)
-                            fit_results_vol.append(fit_results)
-                            conditions_vol.append(conditions)
-                            to_keep_vol.append(to_keep)
 
                         # update chunk counters
                         if ix_end < nxp:
