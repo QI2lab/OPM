@@ -20,9 +20,9 @@ import image_post_processing as pp
 import data_io
 import localize
 
-debug = False
-# root_dir = r"\\10.206.26.21\opm2\20210628"
-root_dir = r"/mnt/opm2/20210628"
+debug = True
+root_dir = r"\\10.206.26.21\opm2\20210628"
+# root_dir = r"/mnt/opm2/20210628"
 dir_format = "bDNA_stiff_gel_human_lung_r%04d_y%04d_z%04d_ch%04d_1"
 scan_data_path = os.path.join(root_dir, "scan_metadata.csv")
 
@@ -92,6 +92,12 @@ for round in [0]:
                 md = dset.read_metadata(z=0, channel=0)
                 frame_time_ms = float(md["OrcaFusionBT-Exposure"])
 
+                # load all images
+                imgs = []
+                for kk in range(nimgs_per_vol):
+                    imgs.append(dset.read_image(z=kk, channel=0))
+                imgs = np.flip(np.asarray(imgs), axis=0)
+
                 # ###############################
                 # identify candidate points in opm data
                 # ###############################
@@ -139,22 +145,20 @@ for round in [0]:
                         ip_start = int(np.max([chunk_counter_p * chunk_size_planes - chunk_overlap, 0]))
                         ip_end = int(np.min([ip_start + chunk_size_planes, nimgs_per_vol]))
 
-                        imgs = []
-                        for kk in range(ip_start, ip_end):
-                            imgs.append(dset.read_image(z=kk, channel=0)[:, ix_start:ix_end])
-                        imgs = np.asarray(imgs)
+                        # todo: there was a problem here ... need to account for fact am flipping the images but was not
+                        # todo: so loadinga ll images and slicing here, which also avoids loading one image multiple times
+                        # imgs = []
+                        # for kk in range(ip_start, ip_end):
+                        #     imgs.append(dset.read_image(z=kk, channel=0)[:, ix_start:ix_end])
+                        # imgs = np.flip(np.asarray(imgs), axis=0) # to match deskew convention...
 
-                        # if no images returned, we are done
-                        # if imgs.shape[0] == 0:
-                        #     break
-
-                        imgs = np.flip(imgs, axis=0)  # to match deskew convention...
+                        imgs_chunk = imgs[ip_start:ip_end, :, ix_start:ix_end]
 
                         tend_load = time.perf_counter()
                         print("loaded images in %0.2fs" % (tend_load - tstart_load))
 
                         # get image coordinates
-                        npos, ny, nx = imgs.shape
+                        npos, ny, nx = imgs_chunk.shape
                         y_offset = ip_start * dstage
                         x_offset = ix_start * dc
 
@@ -170,8 +174,8 @@ for round in [0]:
 
                         ks = localize.get_filter_kernel_skewed(filter_sigma_small, dc, theta, dstage, sigma_cutoff=2)
                         kl = localize.get_filter_kernel_skewed(filter_sigma_large, dc, theta, dstage, sigma_cutoff=2)
-                        imgs_hp = localize.filter_convolve(imgs, ks)
-                        imgs_lp = localize.filter_convolve(imgs, kl, use_gpu=True)
+                        imgs_hp = localize.filter_convolve(imgs_chunk, ks)
+                        imgs_lp = localize.filter_convolve(imgs_chunk, kl, use_gpu=True)
                         imgs_filtered = imgs_hp - imgs_lp
 
                         print("Filtered images in %0.2fs" % (time.perf_counter() - tstart))
@@ -218,7 +222,7 @@ for round in [0]:
 
                             # cut rois out
                             roi_size_skew = localize.get_skewed_roi_size(roi_size, theta, dc, dstage, ensure_odd=True)
-                            rois, img_rois, xrois, yrois, zrois = zip(*[localize.get_skewed_roi(c, imgs, x, y, z, roi_size_skew) for c in centers_guess])
+                            rois, img_rois, xrois, yrois, zrois = zip(*[localize.get_skewed_roi(c, imgs_chunk, x, y, z, roi_size_skew) for c in centers_guess])
                             rois = np.asarray(rois)
 
                             # exclude some regions of roi
@@ -300,7 +304,7 @@ for round in [0]:
                         # ###################################################
                         if debug:
                             imgs_filtered_deskewed = pp.deskew(imgs_filtered, [theta * 180 / np.pi, dstage, dc])
-                            imgs_deskewed = pp.deskew(imgs, [theta * 180 / np.pi, dstage, dc])
+                            imgs_deskewed = pp.deskew(imgs_chunk, [theta * 180 / np.pi, dstage, dc])
 
                             centers_guess_napari = (centers_guess - np.expand_dims(np.array([0, y_offset, x_offset]), axis=0)) / dc
 
@@ -314,7 +318,7 @@ for round in [0]:
                             plot_any = False
                             while plotted < to_plot:
                                 if to_keep[ind] or plot_any:
-                                    localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
+                                    localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs_chunk, theta, x, y, z, init_params[ind])
 
                                     plotted += 1
                                 ind += 1
@@ -326,7 +330,7 @@ for round in [0]:
                                 ya = y[arr_ind[0], arr_ind[1], 0]
                                 za = z[0, arr_ind[1], 0]
                                 ind = np.argmin((centers_guess[:, 2] - xa)**2 + (centers_guess[:, 1] - ya)**2 + (centers_guess[:, 0] - za)**2)
-                                localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
+                                localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs_chunk, theta, x, y, z, init_params[ind])
 
                             if len(centers_guess) > 1:
                                 # max projection

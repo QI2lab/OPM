@@ -79,7 +79,8 @@ figsize = (16, 8)
 # dz = 0.25
 # x, y, z = localize.get_coords(imgs.shape, dc, dz)
 
-data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_29_18;31;00_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
+# data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_29_18;31;00_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
+data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_13;40;29_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
 img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0002_1"
 dset = pycromanager.Dataset(img_fname)
 dc = 0.115
@@ -93,11 +94,10 @@ print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
 imgs_raw = np.flip(np.asarray(imgs_raw), axis=0)
 
 tstart = time.perf_counter()
-imgs = pp.deskew(imgs_raw, np.array([30, 0.4, 0.115]))
+imgs = pp.deskew(imgs_raw, [30., 0.4, 0.115])
 print("deskewed in %0.2fs" % (time.perf_counter() - tstart))
 
 x, y, z = localize.get_coords(imgs.shape, dc, dz)
-
 
 # load localization data
 with open(data_fname, "rb") as f:
@@ -110,16 +110,16 @@ to_keep = data["to_keep"]
 
 # massage data into plottable format
 centers = np.stack((fps[:, 3][to_keep], fps[:, 2][to_keep], fps[:, 1][to_keep]), axis=1)
-centers_napari = centers / np.expand_dims(np.array([dc, dc, dc]), axis=0)
+centers_napari = centers / dc
 
 centers_guess = np.stack((ips[:, 3], ips[:, 2], ips[:, 1]), axis=1)
-centers_guess_napari = centers_guess / np.expand_dims(np.array([dc, dc, dc]), axis=0)
+centers_guess_napari = centers_guess / dc
 
 # plot some fits
 if False:
     num_plotted = 0
     ind = 0
-    while num_plotted < 40:
+    while num_plotted < 20:
         if to_keep[ind]:
             figa = localize.plot_roi(fps[ind], rois[ind], imgs, x, y, z,
                                                   init_params=ips[ind],
@@ -147,46 +147,43 @@ plt.imshow(maxproj, vmin=vmin, vmax=vmax, origin="lower",
 plt.plot(centers_guess[:, 2], centers_guess[:, 1], 'gx')
 
 # fit statistics
-try:
-    figh3 = plt.figure(figsize=figsize)
-    plt.suptitle("Fit statistics\nmedians: amp = %0.3f, $\sigma_{xy}$ = %0.3f, $\sigma_z$ = %0.3f, bg = %0.3f" %
-                 (np.median(fps[:, 0][to_keep]), np.median(fps[:, 4][to_keep]), np.median(fps[:, 5][to_keep]),
-                  np.median(fps[:, 6][to_keep])))
-    grid = plt.GridSpec(2, 2, wspace=0.5, hspace=0.5)
+figh3 = plt.figure(figsize=figsize)
+plt.suptitle("Fit statistics\nmedians: amp = %0.3f, $\sigma_{xy}$ = %0.3f, $\sigma_z$ = %0.3f, bg = %0.3f" %
+             (np.median(fps[:, 0][to_keep]), np.median(fps[:, 4][to_keep]), np.median(fps[:, 5][to_keep]),
+              np.median(fps[:, 6][to_keep])))
+grid = plt.GridSpec(2, 2, wspace=0.5, hspace=0.5)
 
-    ax = plt.subplot(grid[0, 0])
-    ax.set_title("amp vs. $\sigma_{xy}$")
-    plt.plot(fps[:, 0][to_keep], fps[:, 4][to_keep], '.')
-    plt.xlabel("Amp")
-    plt.ylabel("$\sigma_{xy}$ (um)")
-    plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
-    plt.ylim([-0.01, np.percentile(fps[:, 4][to_keep], 99) * 1.2])
+ax = plt.subplot(grid[0, 0])
+ax.set_title("amp vs. $\sigma_{xy}$")
+plt.plot(fps[:, 0][to_keep], fps[:, 4][to_keep], '.')
+plt.xlabel("Amp")
+plt.ylabel("$\sigma_{xy}$ (um)")
+plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
+plt.ylim([-0.01, np.percentile(fps[:, 4][to_keep], 99) * 1.2])
 
-    ax = plt.subplot(grid[0, 1])
-    ax.set_title("amp vs. $\sigma_z$")
-    plt.plot(fps[:, 0][to_keep], fps[:, 5][to_keep], '.')
-    plt.xlabel("Amp")
-    plt.ylabel("$\sigma_z$ (um)")
-    plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
-    plt.ylim([0, np.percentile(fps[:, 5][to_keep], 99) * 1.2])
+ax = plt.subplot(grid[0, 1])
+ax.set_title("amp vs. $\sigma_z$")
+plt.plot(fps[:, 0][to_keep], fps[:, 5][to_keep], '.')
+plt.xlabel("Amp")
+plt.ylabel("$\sigma_z$ (um)")
+plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
+plt.ylim([0, np.percentile(fps[:, 5][to_keep], 99) * 1.2])
 
-    ax = plt.subplot(grid[1, 0])
-    ax.set_title("$\sigma_{xy}$ vs. $\sigma_z$")
-    plt.plot(fps[:, 4][to_keep], fps[:, 5][to_keep], '.')
-    plt.xlabel("$\sigma_{xy} (um)$")
-    plt.ylabel("$\sigma_z$ (um)")
-    plt.xlim([0, np.percentile(fps[:, 4][to_keep], 99) * 1.2])
-    plt.ylim([0, np.percentile(fps[:, 5][to_keep], 99) * 1.2])
+ax = plt.subplot(grid[1, 0])
+ax.set_title("$\sigma_{xy}$ vs. $\sigma_z$")
+plt.plot(fps[:, 4][to_keep], fps[:, 5][to_keep], '.')
+plt.xlabel("$\sigma_{xy} (um)$")
+plt.ylabel("$\sigma_z$ (um)")
+plt.xlim([0, np.percentile(fps[:, 4][to_keep], 99) * 1.2])
+plt.ylim([0, np.percentile(fps[:, 5][to_keep], 99) * 1.2])
 
-    ax = plt.subplot(grid[1, 1])
-    ax.set_title("amp vs. bg")
-    plt.plot(fps[:, 0][to_keep], fps[:, 6][to_keep], '.')
-    plt.xlabel("Amp")
-    plt.ylabel("background")
-    plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
-    plt.ylim([np.percentile(fps[:, 6][to_keep], 1) - 5, np.percentile(fps[:, 6][to_keep], 99) + 5])
-except:
-    pass
+ax = plt.subplot(grid[1, 1])
+ax.set_title("amp vs. bg")
+plt.plot(fps[:, 0][to_keep], fps[:, 6][to_keep], '.')
+plt.xlabel("Amp")
+plt.ylabel("background")
+plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
+plt.ylim([np.percentile(fps[:, 6][to_keep], 1) - 5, np.percentile(fps[:, 6][to_keep], 99) + 5])
 
 # plot with napari
 # with napari.gui_qt():
@@ -206,7 +203,7 @@ if plot_centers_guess:
 if plot_fit_filters:
     conditions = data["conditions"].transpose()
     condition_names = data["conditions_names"]
-    colors = ["purple", "blue", "green", "yellow", "orange"] * int(np.ceil(len(conditions) / 5))
+    colors = ["purple", "blue", "yellow", "orange"] * int(np.ceil(len(conditions) / 4))
     for c, cn, col in zip(conditions, condition_names, colors):
-        ct = centers_guess[np.logical_not(c)] / np.expand_dims(np.array([dz, dc, dc]), axis=0)
+        ct = centers_guess[np.logical_not(c)] / dc
         viewer.add_points(ct, size=2, face_color=col, opacity=0.5, name="not %s" % cn.replace("_", " "), n_dimensional=True)
