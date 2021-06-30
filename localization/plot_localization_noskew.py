@@ -21,40 +21,6 @@ plot_fit_filters = False
 
 figsize = (16, 8)
 
-# round = 2
-#
-# img_fnames = [r"\\10.206.26.21\opm2\20210503a\r1_atto565_r2_alexa647_1\r1_atto565_r2_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r1_atto565_r2_alexa647_1\r1_atto565_r2_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r3_atto565_r4_alexa647_1\r3_atto565_r4_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r3_atto565_r4_alexa647_1\r3_atto565_r4_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r5_atto565_r6_alexa647_1\r5_atto565_r6_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r5_atto565_r6_alexa647_1\r5_atto565_r6_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r7_atto565_r8_alexa647_1\r7_atto565_r8_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r7_atto565_r8_alexa647_1\r7_atto565_r8_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r9_atto565_r10_alexa647_1\r9_atto565_r10_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r9_atto565_r10_alexa647_1\r9_atto565_r10_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r11_atto565_r12_alexa647_1\r11_atto565_r12_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r11_atto565_r12_alexa647_1\r11_atto565_r12_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r13_atto565_r14_alexa647_1\r13_atto565_r14_alexa647_1_MMStack_Default.ome.tif",
-#               r"\\10.206.26.21\opm2\20210503a\r13_atto565_r14_alexa647_1\r13_atto565_r14_alexa647_1_MMStack_Default.ome.tif"
-#               ]
-# data_root = os.path.join(r"\\10.206.26.21\opm2\20210503a", "2021_05_10_13;53;02_localization")
-# data_fnames = ["r1_atto565_r2_alexa647_1_ch=1_vol=0.pkl",
-#                "r1_atto565_r2_alexa647_1_ch=2_vol=0.pkl",
-#                "r3_atto565_r4_alexa647_1_ch=1_vol=0.pkl",
-#                "r3_atto565_r4_alexa647_1_ch=2_vol=0.pkl",
-#                "r5_atto565_r6_alexa647_1_ch=1_vol=0.pkl",
-#                "r5_atto565_r6_alexa647_1_ch=2_vol=0.pkl",
-#                "r7_atto565_r8_alexa647_1_ch=1_vol=0.pkl",
-#                "r7_atto565_r8_alexa647_1_ch=2_vol=0.pkl",
-#                "r9_atto565_r10_alexa647_1_ch=1_vol=0.pkl",
-#                "r9_atto565_r10_alexa647_1_ch=2_vol=0.pkl",
-#                "r11_atto565_r12_alexa647_1_ch=1_vol=0.pkl",
-#                "r11_atto565_r12_alexa647_1_ch=2_vol=0.pkl",
-#                "r13_atto565_r14_alexa647_1_ch=1_vol=0.pkl",
-#                "r13_atto565_r14_alexa647_1_ch=2_vol=0.pkl"]
-# data_fnames = [os.path.join(data_root, fn) for fn in data_fnames]
-# channels = [1, 2] * 7
 #
 #
 # img_fname = img_fnames[round - 1]
@@ -80,7 +46,7 @@ figsize = (16, 8)
 # x, y, z = localize.get_coords(imgs.shape, dc, dz)
 
 # data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_29_18;31;00_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
-data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_13;40;29_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
+data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_15;00;19_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
 img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0002_1"
 dset = pycromanager.Dataset(img_fname)
 dc = 0.115

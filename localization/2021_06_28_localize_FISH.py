@@ -47,16 +47,13 @@ ni = 1.4
 scan_data = data_io.read_metadata(scan_data_path)
 
 nt = scan_data["num_t"]
-nimgs_per_vol = scan_data["scan_axis_positions"]
+# nimgs_per_vol = scan_data["scan_axis_positions"]
 nyp = scan_data["y_pixels"]
 nxp = scan_data["x_pixels"]
 dc = scan_data["pixel_size"] / 1000
 dstage = scan_data["scan_step"] / 1000
 theta = scan_data["theta"] * np.pi / 180
 normal = np.array([0, -np.sin(theta), np.cos(theta)])  # normal of camera pixel
-
-# trapezoid volume
-volume_um3 = (dstage * nimgs_per_vol) * (dc * np.sin(theta) * nyp) * (dc * nxp)
 
 # ###############################
 # build save dir
@@ -91,6 +88,10 @@ for round in [0]:
 
                 md = dset.read_metadata(z=0, channel=0)
                 frame_time_ms = float(md["OrcaFusionBT-Exposure"])
+
+                nimgs_per_vol = len(md.axes["z"])
+                # trapezoid volume
+                volume_um3 = (dstage * nimgs_per_vol) * (dc * np.sin(theta) * nyp) * (dc * nxp)
 
                 # load all images
                 imgs = []
