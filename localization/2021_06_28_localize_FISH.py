@@ -4,6 +4,7 @@ Localize OPM RNA-FISH data
 import matplotlib.pyplot as plt
 import glob
 import os
+import sys
 import datetime
 import time
 import numpy as np
@@ -12,12 +13,16 @@ import pycromanager
 import tifffile
 import napari
 
+fdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
+sys.path.append(fdir)
+
 import image_post_processing as pp
 import data_io
 import localize
 
 debug = False
-root_dir = r"\\10.206.26.21\opm2\20210628"
+# root_dir = r"\\10.206.26.21\opm2\20210628"
+root_dir = r"/mnt/opm2/20210628"
 dir_format = "bDNA_stiff_gel_human_lung_r%04d_y%04d_z%04d_ch%04d_1"
 scan_data_path = os.path.join(root_dir, "scan_metadata.csv")
 
@@ -139,8 +144,8 @@ for round in [0]:
                         imgs = np.asarray(imgs)
 
                         # if no images returned, we are done
-                        if imgs.shape[0] == 0:
-                            break
+                        # if imgs.shape[0] == 0:
+                        #     break
 
                         imgs = np.flip(imgs, axis=0)  # to match deskew convention...
 
@@ -318,8 +323,6 @@ for round in [0]:
                             fit_results_vol.append(fit_results)
                             conditions_vol.append(conditions)
                             to_keep_vol.append(to_keep)
-
-                        chunk_counter_p += 1
 
                         # update chunk counters
                         if ix_end < nxp:
