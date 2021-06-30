@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 # cv = 0.9
 cvs = np.array([0.9, 0.8, 0.7, 0.6, 0.5])
 Ts = np.array([17, 22.5, 25, 30]) + 273
-# T = 22.5 + 273
 kb = 1.38e-23
 R = 50e-9
 
@@ -37,7 +36,7 @@ def D(cm, t, R): return kb * t / (6 * np.pi * visc_mix(cm, t) * R)
 # print(r"@cv=%.02f (cm=%0.2f) and t=%0.1f deg C, dynamic viscos=%0.3e Pa.s, R=%.0fnm: %0.3g um^2/s" %
 #       (cv, cm_fn(cv, T), T - 273, visc_mix(cm_fn(cv, T), T), R * 1e9, D(cm_fn(cv, T), T, R) * 1e12))
 
-cvs_all = np.linspace(0, 1, 100)
+cvs_all = np.linspace(0, 1, 11)
 temps_all = np.linspace(20, 30, 100) + 273
 
 figh = plt.figure(figsize=(16, 8))
@@ -82,5 +81,7 @@ plt.ylabel("Mass fraction")
 plt.title("Volume fraction vs. mass fraction at fixed T")
 plt.legend(["T = %0.2fC" % (T-273) for T in Ts])
 
+Troom = 22.5 + 273
+print("T = %0.3fC" % (Troom - 273))
 for volume_conc in cvs_all:
-    print("%0.3f volume concentration, D=%0.3f $\mu^2/s$" % (volume_conc, D(cm_fn(volume_conc, T), T, R) * 1e12))
+    print("%0.3f volume concentration, D=%0.3f $\mu^2/s$" % (volume_conc, D(cm_fn(volume_conc, Troom), Troom, R) * 1e12))

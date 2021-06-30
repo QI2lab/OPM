@@ -4,6 +4,7 @@ Load data analyzed by the script localize_diffusion.py and use trackpy to track 
 import glob
 import os
 import re
+import datetime
 import numpy as np
 import pickle
 import scipy.optimize
@@ -12,9 +13,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import data_io
 
-use_every_nth_frame = 1
+use_every_nth_frame = 2
 figsize = (16, 8)
 nmin_traj = 5
+
+now = datetime.datetime.now()
+time_stamp = '%04d_%02d_%02d_%02d;%02d;%02d' % (now.year, now.month, now.day, now.hour, now.minute, now.second)
 
 # root_dir = r"\\10.206.26.21\opm2\20210203\beads_50glyc_1000dilution_1\2021_02_21_12;56;10_localization"
 # root_dir = r"\\10.206.26.21\opm2\20210203\beads_0glyc_1000dilution_1\2021_02_23_08;07;45_localization"
@@ -42,27 +46,27 @@ nmin_traj = 5
 # data_files = glob.glob(os.path.join(root_dir, "localization_results*.pkl"))
 # inds = np.argsort([int(re.match(".*_(\d+)", d).group(1)) for d in data_files])
 
-# root_dirs = [r"\\10.206.26.21\opm2\20210622a\glycerol90_1\2021_06_22_23;18;29_localization",
-#             r"\\10.206.26.21\opm2\20210622b\glycerol90_1\2021_06_23_01;17;29_localization",
-#             r"\\10.206.26.21\opm2\20210622c\glycerol80_1\2021_06_23_03;16;34_localization",
-#             r"\\10.206.26.21\opm2\20210622d\glycerol80_1\2021_06_23_05;33;50_localization",
-#             r"\\10.206.26.21\opm2\20210622e\glycerol60_1\2021_06_23_07;42;08_localization",
-#             r"\\10.206.26.21\opm2\20210622f\glycerol60_1\2021_06_23_09;56;27_localization",
-#             r"\\10.206.26.21\opm2\20210622g\glycerol50_1\2021_06_23_17;45;54_localization",
-#             r"\\10.206.26.21\opm2\20210622h\glycerol50_1\2021_06_23_20;09;39_localization"]
+root_dirs = [r"\\10.206.26.21\opm2\20210622a\glycerol90_1\2021_06_22_23;18;29_localization",
+            r"\\10.206.26.21\opm2\20210622b\glycerol90_1\2021_06_23_01;17;29_localization",
+            r"\\10.206.26.21\opm2\20210622c\glycerol80_1\2021_06_23_03;16;34_localization",
+            r"\\10.206.26.21\opm2\20210622d\glycerol80_1\2021_06_23_05;33;50_localization",
+            r"\\10.206.26.21\opm2\20210622e\glycerol60_1\2021_06_23_07;42;08_localization",
+            r"\\10.206.26.21\opm2\20210622f\glycerol60_1\2021_06_23_09;56;27_localization",
+            r"\\10.206.26.21\opm2\20210622g\glycerol50_1\2021_06_23_17;45;54_localization",
+            r"\\10.206.26.21\opm2\20210622h\glycerol50_1\2021_06_23_20;09;39_localization"]
 
 # root_dirs = [r"\\10.206.26.21\opm2\20210624a\glycerol80_1\2021_06_24_16;37;59_localization",
-root_dirs = [r"\\10.206.26.21\opm2\20210624b\glycerol80_1\2021_06_24_17;19;23_localization",
-             r"\\10.206.26.21\opm2\20210624c\glycerol80_1\2021_06_24_17;53;35_localization",
-             r"\\10.206.26.21\opm2\20210624d\glycerol80_1\2021_06_24_18;27;45_localization",
-             r"\\10.206.26.21\opm2\20210624e\glycerol60_1\2021_06_24_18;56;45_localization",
-             r"\\10.206.26.21\opm2\20210624f\glycerol60_1\2021_06_24_19;26;29_localization",
-             r"\\10.206.26.21\opm2\20210624g\glycerol60_1\2021_06_24_19;53;54_localization",
-             r"\\10.206.26.21\opm2\20210624h\glycerol60_1\2021_06_24_20;28;11_localization",
-             r"\\10.206.26.21\opm2\20210624i\glycerol50_1\2021_06_24_21;08;45_localization",
-             r"\\10.206.26.21\opm2\20210624j\glycerol50_1\2021_06_24_21;41;37_localization",
-             r"\\10.206.26.21\opm2\20210624k\glycerol50_1\2021_06_24_22;14;02_localization",
-             r"\\10.206.26.21\opm2\20210624l\glycerol50_1\2021_06_24_22;48;05_localization"]
+#              r"\\10.206.26.21\opm2\20210624b\glycerol80_1\2021_06_24_17;19;23_localization",
+#              r"\\10.206.26.21\opm2\20210624c\glycerol80_1\2021_06_24_17;53;35_localization",
+#              r"\\10.206.26.21\opm2\20210624d\glycerol80_1\2021_06_24_18;27;45_localization",
+#              r"\\10.206.26.21\opm2\20210624e\glycerol60_1\2021_06_24_18;56;45_localization",
+#              r"\\10.206.26.21\opm2\20210624f\glycerol60_1\2021_06_24_19;26;29_localization",
+#              r"\\10.206.26.21\opm2\20210624g\glycerol60_1\2021_06_24_19;53;54_localization",
+#              r"\\10.206.26.21\opm2\20210624h\glycerol60_1\2021_06_24_20;28;11_localization",
+#              r"\\10.206.26.21\opm2\20210624i\glycerol50_1\2021_06_24_21;08;45_localization",
+#              r"\\10.206.26.21\opm2\20210624j\glycerol50_1\2021_06_24_21;41;37_localization",
+#              r"\\10.206.26.21\opm2\20210624k\glycerol50_1\2021_06_24_22;14;02_localization",
+#              r"\\10.206.26.21\opm2\20210624l\glycerol50_1\2021_06_24_22;48;05_localization"]
 
 for root_dir in root_dirs:
     print(root_dir)
@@ -85,7 +89,7 @@ for root_dir in root_dirs:
     except KeyError:
         raw_frame_period = d["physical_data"]["frame_time_ms"] * 1e-3
 
-    frames_per_sec = 1 / (frames_per_vol * raw_frame_period * use_every_nth_frame)
+    frames_per_sec = 1 / (frames_per_vol * raw_frame_period)
     vol = d["volume_um3"]
 
     vol = (scan_data["pixel_size"] / 1e3 * scan_data["x_pixels"]) * \
@@ -101,24 +105,48 @@ for root_dir in root_dirs:
             dat = pickle.load(f)
 
         fp = dat["fit_params"][dat["to_keep"]]
-        if len(fp) < 500 and np.mod(ii, use_every_nth_frame) == 0:
+        if len(fp) < 500:
             centers.append(np.stack((fp[:, 3], fp[:, 2], fp[:, 1]), axis=1))
-            frame_inds.append(np.ones(len(fp)) * ii // use_every_nth_frame)
+            frame_inds.append(np.ones(len(fp)) * ii)
         else:
             pass
 
     frame_inds = np.concatenate(frame_inds)
     centers = np.concatenate(centers, axis=0)
-    data = np.concatenate((frame_inds[:, None], centers, centers), axis=1)
+    data = np.concatenate((np.expand_dims(frame_inds, axis=1), centers, centers), axis=1)
 
     # put data in dataframe format expected by TrackPy
     df = pd.DataFrame(data, columns=["frame", "z", "y", "x", "zum", "yum", "xum"])
 
     # do linking
     print("linking")
-    linked = tp.link_df(df, search_range=(1.0, 1.0, 1.0), memory=3, pos_columns=["xum", "yum", "zum"])
+    # linked = tp.link_df(df, search_range=(1.0, 1.0, 1.0), memory=3, pos_columns=["xum", "yum", "zum"])
+    linked = tp.link_df(df, search_range=(1.0, 1.0, 1.0), memory=0, pos_columns=["xum", "yum", "zum"])
     # filter trajectories shorter than a certain length
     linked = tp.filter_stubs(linked, nmin_traj)
+
+    # find stationary particles and remove from further analysis
+    # particle_inds = np.unique(linked["particle"])
+    # to_keep = linked["particle"] > -1
+    # for pi in particle_inds:
+    #     a = np.asarray(linked[linked["particle"] == pi])
+    #     # steps = np.sqrt((a[1:, 1] - a[:-1, 1])**2 +
+    #     #                 (a[1:, 2] - a[:-1, 2])**2 +
+    #     #                 (a[1:, 3] - a[:-1, 3])**2)
+    #     # disp = np.sqrt((a[:, 1] - a[0, 1])**2 +
+    #     #                (a[:, 2] - a[0, 2])**2 +
+    #     #                (a[:, 3] - a[0, 3])**2)
+    #     full_disp = np.sqrt((a[-1, 1] - a[0, 1])**2 +
+    #                    (a[-1, 2] - a[0, 2])**2 +
+    #                    (a[-1, 3] - a[0, 3])**2)
+    #     if np.mean(full_disp < 0.5) and len(a) > 100:
+    #         print("%d" % pi)
+    #         to_keep = to_keep * (linked["particle"] != pi)
+    # linked = linked[to_keep]
+    #
+    # # only keep every nth frame
+    # to_keep = np.mod(linked["frame"], use_every_nth_frame) == 0
+    # linked = linked[to_keep]
 
     # #######################
     # MSD
@@ -127,6 +155,35 @@ for root_dir in root_dirs:
     # mpp = microns per pixel
     msd_per_traj = tp.imsd(linked, mpp=1.0, fps=frames_per_sec, max_lagtime=np.inf, pos_columns=["xum", "yum", "zum"])
     msd_per_traj_arr = msd_per_traj.to_numpy()
+
+    # filter out beads that appear stationary
+    pis = list(msd_per_traj.columns.values)
+    nums = np.nansum(np.logical_not(np.isnan(msd_per_traj_arr)), axis=0)
+    short_msd = np.nanmean(msd_per_traj_arr, axis=0) < 0.1
+    to_lose = np.logical_and(short_msd, nums > 100)
+
+    # for full linked object
+    to_keep = linked["particle"] > -1
+    for ii, pi in enumerate(pis):
+        if to_lose[ii]:
+            to_keep = to_keep * (linked["particle"] != pi)
+    linked = linked[to_keep]
+
+    # for per-particle msd's
+    cols_to_drop = np.arange(len(to_lose), dtype=np.int)[to_lose]
+    msd_per_traj.drop(msd_per_traj.columns[cols_to_drop], axis=1, inplace=True)
+    # msd_per_traj = msd_per_traj[np.tile(np.logical_not(to_lose), [msd_per_traj_arr.shape[0], 1])]
+
+    # msd_per_traj[np.tile(np.logical_not(to_lose), [msd_per_traj_arr.shape[0], 1])]
+
+    msd_per_traj_arr = msd_per_traj_arr[:, np.logical_not(to_lose)]
+
+    # only keep every nth frame
+    to_keep = np.mod(linked["frame"], use_every_nth_frame) == 0
+    linked = linked[to_keep]
+
+    linked.loc[:, "frame"] = linked.loc[:, "frame"] / use_every_nth_frame
+    msd_per_traj_arr = msd_per_traj_arr[:, ::use_every_nth_frame]
 
     # get step sizes
     pos_x = linked.set_index(['frame', 'particle'])['xum'].unstack() # particles as columns
@@ -189,18 +246,20 @@ for root_dir in root_dirs:
     results_z = scipy.optimize.least_squares(fit_fn, init_params_z)
     gauss_fit_z = gauss(results_z["x"], bin_centers)
 
-
     # ensemble averaged
-    msd = tp.emsd(linked, mpp=1.0, fps=frames_per_sec, max_lagtime=np.inf, pos_columns=["xum", "yum", "zum"])
+    msd = tp.emsd(linked, mpp=1.0, fps=frames_per_sec / use_every_nth_frame, max_lagtime=np.inf, pos_columns=["xum", "yum", "zum"])
+    msd_x = tp.emsd(linked, mpp=1.0, fps=frames_per_sec / use_every_nth_frame, max_lagtime=np.inf, pos_columns=["xum"])
+    msd_y = tp.emsd(linked, mpp=1.0, fps=frames_per_sec / use_every_nth_frame, max_lagtime=np.inf, pos_columns=["yum"])
+    msd_z = tp.emsd(linked, mpp=1.0, fps=frames_per_sec / use_every_nth_frame, max_lagtime=np.inf, pos_columns=["zum"])
 
     n_traj_contributing = np.sum(np.logical_not(np.isnan(msd_per_traj_arr)), axis=1)
 
     # linear fit of ensemble averaged MSD
-    full_msd_slope = np.linalg.lstsq(msd.index[:, np.newaxis], msd, rcond=None)[0][0]
+    full_msd_slope = np.linalg.lstsq(np.expand_dims(msd.index, axis=1), msd, rcond=None)[0][0]
 
     tshort_cutoff = 2
     to_use = msd.index < tshort_cutoff
-    short_msd_slope = np.linalg.lstsq(msd.index[to_use, None], msd[to_use], rcond=None)[0][0]
+    short_msd_slope = np.linalg.lstsq(np.expand_dims(msd.index[to_use], axis=1), msd[to_use], rcond=None)[0][0]
 
     # power law fit
     t_plaw_cutoff = 10
@@ -220,11 +279,14 @@ for root_dir in root_dirs:
     nparticles_start = len(df[df["frame"] == 0])
     density_um3 = nparticles_start / vol
     plt.suptitle("%s\n" % root_dir + r"N=%d in first frame, $\rho$~%0.3g particles/$\mu m^3$ = %0.3g particle/ml $\to$ %0.3g $\mu m^3/particle$"
-                 % (nparticles_start, density_um3, density_um3 * 1e12, 1/density_um3))
+                 % (nparticles_start, density_um3, density_um3 * 1e12, 1/density_um3) + "\nusing ever %dth frame" % use_every_nth_frame)
 
     # ensemble average MSD
     ax = plt.subplot(grid[0, 0])
-    ax.plot(msd.index, msd, 'o')
+    ax.plot(msd_x.index, msd_x, "g", label="x")
+    ax.plot(msd_y.index, msd_y, "b", label="y")
+    ax.plot(msd_z.index, msd_z, "m", label="Z")
+    ax.plot(msd.index, msd, 'ko')
 
     ax.plot(t_plaw_fit, plaw_fit, "magenta", label=r"$At^\alpha$, $\alpha$=%0.3f, A=%0.3f" % (results_plaw["x"][0], results_plaw["x"][1]))
 
@@ -246,9 +308,10 @@ for root_dir in root_dirs:
 
     # number of contributing trajectories
     ax = plt.subplot(grid[1, 0])
-    plt.plot(msd.index, n_traj_contributing)
+    plt.semilogy(msd.index, n_traj_contributing[:len(msd.index)])
 
-    ax.set_title("Contributing trajectories")
+    median_length = np.median(np.sum(np.logical_not(np.isnan(msd_per_traj_arr)), axis=0))
+    ax.set_title("Contributing trajectories, median length = %.1f" % (median_length))
     ax.set_ylabel("number of trajs")
     ax.set_xlabel('lag time (s)')
 
@@ -263,7 +326,7 @@ for root_dir in root_dirs:
     plt.plot(bin_centers, steps_z_hist, '.', color=np.array([0, 0.25, 0]), label="z")
     plt.plot(bin_centers, gauss_fit_z, 'g')
 
-    ax.set_xlim([-0.5, 0.5])
+    ax.set_xlim([-0.75, 0.75])
 
     ax.set_title("Step size distribution (ensemble avg)\n" +
                  r"$\mu_x$=%0.3f $\mu m$, $\sigma_x$=%0.3f $\mu m$" % (results_x["x"][1], results_x["x"][2]) +
@@ -282,10 +345,10 @@ for root_dir in root_dirs:
     # #######################
     # save results
     # #######################
-    fname = os.path.join(root_dir, "msd.png")
+    fname = os.path.join(root_dir, "%s_msd.png" % time_stamp)
     figh.savefig(fname)
 
     # save track data
-    fname = os.path.join(root_dir, "tracks.pkl")
+    fname = os.path.join(root_dir, "%s_tracks.pkl" % time_stamp)
     with open(fname, "wb") as f:
         pickle.dump(linked, f)

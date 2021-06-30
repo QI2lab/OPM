@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210518k", "glycerol40_1", "2021_05_06_17;28;06_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210521s", "glycerol_70_1", "2021_05_31_10;39;05_localization")
 # loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210622a", "glycerol90_1", "2021_06_22_23;18;29_localization")
-loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210622a", "glycerol90_1", "2021_06_22_23;18;29_localization")
+loc_data_dir = os.path.join(r"\\10.206.26.21\opm2\20210624a", "glycerol80_1", "2021_06_24_16;37;59_localization")
 
 data_dir, _ = os.path.split(loc_data_dir)
 root_dir, _ = os.path.split(data_dir)
@@ -40,7 +40,7 @@ track_fname = os.path.join(loc_data_dir, "tracks.pkl")
 plot_centers = True
 plot_centers_guess = True
 plot_fit_filters = False
-plot_tracks = False
+plot_tracks = True
 
 # #######################################
 # load metadata
@@ -137,7 +137,7 @@ if plot_centers:
 # #######################################
 # load tracks
 # #######################################
-if os.path.exists(track_fname):
+if os.path.exists(track_fname) and plot_tracks:
     with open(track_fname, "rb") as f:
         track_data_pd = pickle.load(f)
 

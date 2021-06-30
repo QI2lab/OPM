@@ -5,6 +5,7 @@ import os
 import numpy as np
 import scipy.optimize
 import scipy.ndimage
+import scipy.signal
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import warnings
@@ -1027,7 +1028,9 @@ def get_filter_kernel(sigmas, dc, dz, sigma_cutoff=2):
 
 def filter_convolve(imgs, kernel, use_gpu=CUPY_AVAILABLE):
     """
-    Gaussian filter accounting for OPM geometry
+    Convolution fitler using kernel with GPU support
+
+    # todo: how much memory does convolution require? Much more than I expect...
 
     :param imgs:
     :param sigmas: (sigma_z, sigma_y, sigma_x)
@@ -1042,12 +1045,18 @@ def filter_convolve(imgs, kernel, use_gpu=CUPY_AVAILABLE):
     if use_gpu:
         kernel_cp = cp.asarray(kernel, dtype=cp.float32)
         imgs_cp = cp.asarray(imgs, dtype=cp.float32)
-        imgs_filtered_cp = cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")/ \
-                           cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same")
+        imgs_filtered_cp = cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")
         imgs_filtered = cp.asnumpy(imgs_filtered_cp)
 
+        norm_cp = cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same")
+        norm = cp.asnumpy(norm_cp)
+
+        imgs_filtered = imgs_filtered / norm
+
+        # todo: unclear if this matters, or if these should be immediately after each variable is consummed
         del kernel_cp
         del imgs_cp
+        del norm_cp
         del imgs_filtered_cp
     else:
         imgs_filtered = scipy.signal.fftconvolve(imgs, kernel, mode="same") / \
@@ -1809,7 +1818,7 @@ def plot_roi(fit_params, roi, imgs, x, y, z, init_params=None, same_color_scale=
     plt.ylabel("Z (um)")
 
     if save_dir is not None:
-        figh_interp.savefig(os.path.join(save_dir, "%smax_projection.png" % prefix))
+        figh_interp.savefig(os.path.join(save_dir, "%s.png" % prefix))
         plt.close(figh_interp)
 
     return figh_interp

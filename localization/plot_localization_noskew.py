@@ -61,7 +61,7 @@ figsize = (16, 8)
 # channel = 0
 # imgs = np.squeeze(tifffile.imread(img_fname)[:, channel])
 
-round = 7
+round = 0
 channel = 1
 tile = 0
 # img_fname = r"\\10.206.26.21\opm2\20210610\output\fused_tiff\img_TL0_Ch0_Tile0.tif" # cell outlines
