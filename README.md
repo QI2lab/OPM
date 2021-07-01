@@ -1,6 +1,6 @@
 ![image](https://user-images.githubusercontent.com/26783318/124163887-eb04cb00-da54-11eb-9db8-87c5269d3996.png)
 
-# qi2lab-OPM | High performance control, reconstruction, analysis code for multiplexed imaging using oblique plane microscopy (OPM)
+# qi2lab-OPM | Control, reconstruction, analysis code for multiplexed imaging using oblique plane microscopy (OPM)
 Control and analysis code for the qi2lab @ ASU OPM using a solid immersion tertiary objective (aka [Mr. Snouty](https://andrewgyork.github.io/high_na_single_objective_lightsheet/)). Original instrument details, performance, and verification found in joint [eLife publication ](https://elifesciences.org/articles/57681) with York and Fiolka labs. Codebase and wavefront data from the as-publsihed "stage scanning" high NA OPM are in the "elife-publication-frozen" branch of this repo.
 
 The tools developed here can be used with stage scanning or galvo scanning OPM designs.
