@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
 from numba import njit, prange
-import scyjava
-from scyjava import jimport
+
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)

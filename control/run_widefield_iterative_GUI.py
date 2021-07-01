@@ -43,6 +43,41 @@ def main():
     pump_COM_port = 'COM5'
     valve_COM_port = 'COM6'
 
+    # setup pump parameters
+    pump_parameters = {'pump_com_port': pump_COM_port,
+                    'pump_ID': 30,
+                    'verbose': True,
+                    'simulate_pump': False,
+                    'serial_verbose': False,
+                    'flip_flow_direction': False}
+
+    # connect to pump
+    pump_controller = APump(pump_parameters)
+
+    # set pump to remote control
+    pump_controller.enableRemoteControl(True)
+
+    # connect to valves
+    valve_controller = HamiltonMVP(com_port=valve_COM_port)
+
+    # initialize valves
+    valve_controller.autoAddress()
+
+    # load user defined program from hard disk 
+    df_program = pd.read_csv(program_name)
+    iterative_rounds = df_program['round'].max()
+    print('Number of iterative rounds: '+str(iterative_rounds))
+
+    if flush_system:
+        # run fluidics program for this round
+        success_fluidics = False
+        success_fluidics = run_fluidic_program(0, df_program, valve_controller, pump_controller)
+        if not(success_fluidics):
+            print('Error in fluidics! Stopping scan.')
+            sys.exit()
+        print('Flushed fluidic system.')
+        sys.exit()
+
     # connect to Micromanager instance
     bridge = Bridge()
     core = bridge.get_core()
@@ -85,41 +120,6 @@ def main():
 
     # set output trigger to be HIGH when all rows are active ("Rolling Shutter")
     #core.set_property('BSIExpress','ExposeOutMode','Rolling Shutter')
-
-    # setup pump parameters
-    pump_parameters = {'pump_com_port': pump_COM_port,
-                    'pump_ID': 30,
-                    'verbose': True,
-                    'simulate_pump': False,
-                    'serial_verbose': False,
-                    'flip_flow_direction': False}
-
-    # connect to pump
-    pump_controller = APump(pump_parameters)
-
-    # set pump to remote control
-    pump_controller.enableRemoteControl(True)
-
-    # connect to valves
-    valve_controller = HamiltonMVP(com_port=valve_COM_port)
-
-    # initialize valves
-    valve_controller.autoAddress()
-
-    # load user defined program from hard disk 
-    df_program = pd.read_csv(program_name)
-    iterative_rounds = df_program['round'].max()
-    print('Number of iterative rounds: '+str(iterative_rounds))
-
-    if flush_system:
-        # run fluidics program for this round
-        success_fluidics = False
-        success_fluidics = run_fluidic_program(0, df_program, valve_controller, pump_controller)
-        if not(success_fluidics):
-            print('Error in fluidics! Stopping scan.')
-            sys.exit()
-        print('Flushed fluidic system.')
-        sys.exit()
 
     # iterate over user defined program
     for r_idx in range(iterative_rounds):

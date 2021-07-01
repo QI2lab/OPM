@@ -1,5 +1,6 @@
 import re
 import pandas as pd
+import numpy as np
 
 def read_metadata(fname):
     """
@@ -45,7 +46,7 @@ def write_metadata(data_dict, save_path):
     """
     pd.DataFrame([data_dict]).to_csv(save_path)
 
-def return_data_numpy(dataset, channel_axis, axis_range,y_pixels,x_pixels):
+def return_data_numpy(dataset, channel_axis, num_images,y_pixels,x_pixels):
     """
     :param dataset: pycromanager dataset object
     :param channel_axis: integer channel index
@@ -55,9 +56,9 @@ def return_data_numpy(dataset, channel_axis, axis_range,y_pixels,x_pixels):
     :return data_numpy: 3D numpy array of requested data
     """
 
-    data_numpy = np.empty([axis_range[1]-axis_range[0],y_pixels,x_pixels]).astype(np.uint16)
+    data_numpy = np.empty([num_images,y_pixels,x_pixels]).astype(np.uint16)
 
-    for i in range(axis_range):
+    for i in range(num_images):
         if (channel_axis is None):
             data_numpy[i,:,:] = dataset.read_image(z=i)
         else:

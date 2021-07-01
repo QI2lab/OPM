@@ -3,6 +3,7 @@
 '''
 OPM stage control with iterative fluidics.
 
+Shepherd 06/21 - clean up code and bring inline with widefield bypass GUI code
 Shepherd 05/21 - pull all settings from MM GUI and prompt user to setup experiment that way using "easygui" package
 Shepherd 05/21 - add in fluidics control. Recently refactored into seaprate files
 Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading to server for simultaneous reconstruction
@@ -17,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import time
 import sys
-import msvcrt
+import gc
 import pandas as pd
 import subprocess
 import PyDAQmx as daq
@@ -43,84 +44,16 @@ def main():
     fluidics_path = easygui.fileopenbox('Load fluidics program')
     program_name = Path(fluidics_path)
 
+    # check if user wants to flush system?
+    run_type = easygui.choicebox('Type of run?', 'Iterative multiplexing setup', ['Flush fluidics (no imaging)', 'Iterative imaging'])
+    if run_type == str('Flush fluidics (no imaging)'):
+        flush_system = True
+    else:
+        flush_system = False
+
     # define ports for pumps and valves
-    pump_COM_port = 'COM3'
-    valve_COM_port = 'COM4'
-
-    # connect to Micromanager instance
-    bridge = Bridge()
-    core = bridge.get_core()
-    studio = bridge.get_studio()
-
-    # get handle to xy and z stages
-    xy_stage = core.get_xy_stage_device()
-    z_stage = core.get_focus_device()
-
-    # turn off lasers
-    core.set_config('Laser','Off')
-    core.wait_for_config('Laser','Off')
-
-    # set all lasers to software control
-    core.set_config('Trigger-405','CW (constant power)')
-    core.wait_for_config('Trigger-405','CW (constant power)')
-    core.set_config('Trigger-488','CW (constant power)')
-    core.wait_for_config('Trigger-488','CW (constant power)')
-    core.set_config('Trigger-561','CW (constant power)')
-    core.wait_for_config('Trigger-561','CW (constant power)')
-    core.set_config('Trigger-637','CW (constant power)')
-    core.wait_for_config('Trigger-637','CW (constant power)')
-    core.set_config('Trigger-730','CW (constant power)')
-    core.wait_for_config('Trigger-730','CW (constant power)')
-
-    # set camera to fast readout mode
-    core.set_config('Camera-Setup','ScanMode3')
-    core.wait_for_config('Camera-Setup','ScanMode3')
-
-    # set camera to START mode upon input trigger
-    core.set_config('Camera-TriggerType','START')
-    core.wait_for_config('Camera-TriggerType','START')
-
-    # set camera to positive input trigger
-    core.set_config('Camera-TriggerPolarity','POSITIVE')
-    core.wait_for_config('Camera-TriggerPolarity','POSITIVE')
-
-    # set camera to internal control
-    core.set_config('Camera-TriggerSource','INTERNAL')
-    core.wait_for_config('Camera-TriggerSource','INTERNAL')
-
-    # set camera to output positive triggers on all lines for exposure
-    core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[1]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[2]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
-
-    # change core timeout for long stage moves
-    core.set_property('Core','TimeoutMs',100000)
-    time.sleep(1)
-
-    # flags for metadata and processing
-    setup_processing=True
-    setup_metadata=True
-    
-    # galvo voltage at neutral
-    galvo_neutral_volt = 0.0 # unit: volts
-
-    # setup digital trigger buffer on DAQ
-    samples_per_ch = 2
-    DAQ_sample_rate_Hz = 10000
-    num_DI_channels = 8
-
-    # set the galvo to the neutral position if it is not already
-    try: 
-        taskAO_first = daq.Task()
-        taskAO_first.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
-        taskAO_first.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
-        taskAO_first.StopTask()
-        taskAO_first.ClearTask()
-    except:
-        print("DAQmx Error %s"%err)
+    pump_COM_port = 'COM5'
+    valve_COM_port = 'COM6'
 
     # setup pump parameters
     pump_parameters = {'pump_com_port': pump_COM_port,
@@ -148,8 +81,98 @@ def main():
     iterative_rounds = df_program['round'].max()
     print('Number of iterative rounds: '+str(iterative_rounds))
 
+    if flush_system:
+        # run fluidics program for this round
+        success_fluidics = False
+        success_fluidics = run_fluidic_program(0, df_program, valve_controller, pump_controller)
+        if not(success_fluidics):
+            print('Error in fluidics! Stopping scan.')
+            sys.exit()
+        print('Flushed fluidic system.')
+        sys.exit()
+
+    # connect to Micromanager instance
+    bridge = Bridge()
+    core = bridge.get_core()
+    studio = bridge.get_studio()
+
+    # get handle to xy and z stages
+    xy_stage = core.get_xy_stage_device()
+    z_stage = core.get_focus_device()
+
+    # turn off lasers
+    core.set_config('Laser','Off')
+    core.wait_for_config('Laser','Off')
+
+    # set all lasers to software control
+    core.set_config('Modulation-405','CW (constant power)')
+    core.wait_for_config('Modulation-405','CW (constant power)')
+    core.set_config('Modulation-488','CW (constant power)')
+    core.wait_for_config('Modulation-488','CW (constant power)')
+    core.set_config('Modulation-561','CW (constant power)')
+    core.wait_for_config('Modulation-561','CW (constant power)')
+    core.set_config('Modulation-637','CW (constant power)')
+    core.wait_for_config('Modulation-637','CW (constant power)')
+    core.set_config('Modulation-730','CW (constant power)')
+    core.wait_for_config('Modulation-730','CW (constant power)')
+
+    # set camera to fast readout mode
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
+
+    # set camera to START mode upon input trigger
+    core.set_config('Camera-TriggerType','START')
+    core.wait_for_config('Camera-TriggerType','START')
+
+    # set camera to positive input trigger
+    core.set_config('Camera-TriggerPolarity','POSITIVE')
+    core.wait_for_config('Camera-TriggerPolarity','POSITIVE')
+
+    # set camera to internal control
+    core.set_config('Camera-TriggerSource','INTERNAL')
+    core.wait_for_config('Camera-TriggerSource','INTERNAL')
+
+    # set camera to output positive triggers on all lines for exposure
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[0]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[1]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[2]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+
+    # enable joystick
+    core.set_property('XYStage:XY:31','JoystickEnabled','Yes')
+    core.set_property('ZStage:M:37','JoystickInput','22 - right wheel')
+
+    # change core timeout for long stage moves
+    core.set_property('Core','TimeoutMs',500000)
+    time.sleep(1)
+
+    # flags for metadata and processing
+    setup_processing=True
+    setup_metadata=True
+    copy_data = False
+    
+    # galvo voltage at neutral
+    galvo_neutral_volt = 0.0 # unit: volts
+
+    # setup digital trigger buffer on DAQ
+    samples_per_ch = 2
+    DAQ_sample_rate_Hz = 10000
+    num_DI_channels = 8
+
+    # set the galvo to the neutral position if it is not already
+    try: 
+        taskAO_first = daq.Task()
+        taskAO_first.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+        taskAO_first.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
+        taskAO_first.StopTask()
+        taskAO_first.ClearTask()
+    except daq.DAQError as err:
+        print("DAQmx Error %s"%err)
+
     # iterate over user defined program
-    for r_idx in range(iterative_rounds):
+    for r_idx in range(8,iterative_rounds):
 
         # set motors to on to actively maintain position during fluidics run
         # TO DO: figure out how to make this work
@@ -169,7 +192,7 @@ def main():
         #core.set_property('ZStage:M:37','MaintainState-MA',0)
 
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
-        if r_idx == 0:
+        if r_idx == 8:
             
             # setup imaging parameters using MM GUI
             run_imaging = False
@@ -266,7 +289,7 @@ def main():
                 true_exposure = core.get_exposure()
 
                 # get actual framerate from micromanager properties
-                actual_readout_ms = true_exposure+float(core.get_property('Camera','ReadoutTime')) #unit: ms
+                actual_readout_ms = true_exposure+float(core.get_property('OrcaFusionBT','ReadoutTime')) #unit: ms
 
                 # scan axis setup
                 scan_axis_step_um = 0.4  # unit: um
@@ -276,7 +299,7 @@ def main():
                 scan_axis_range_um = np.abs(scan_axis_end_um-scan_axis_start_um)  # unit: um
                 scan_axis_range_mm = scan_axis_range_um / 1000 #unit: mm
                 actual_exposure_s = actual_readout_ms / 1000. #unit: s
-                scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s,2) #unit: mm/s
+                scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s,4) #unit: mm/s
                 scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
 
                 # tile axis setup
@@ -343,7 +366,14 @@ def main():
             active_channel_indices = [ind for ind, st in zip(do_ch_pins, channel_states) if st]
             n_active_channels = len(active_channel_indices)
 
-            channel_powers[0] = 5
+            channel_powers[0] = 3
+            channel_powers[1] = 10
+            channel_powers[2] = 0
+            channel_powers[3] = 0
+            channel_powers[4] = 0
+
+            exposure_ms = 50
+            core.set_exposure(exposure_ms)
 
              # set flag to change configuration
             config_changed = True
@@ -444,20 +474,27 @@ def main():
             core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
             # set all laser to external triggering
-            core.set_config('Trigger-405','External-Digital')
-            core.wait_for_config('Trigger-405','External-Digital')
-            core.set_config('Trigger-488','External-Digital')
-            core.wait_for_config('Trigger-488','External-Digital')
-            core.set_config('Trigger-561','External-Digital')
-            core.wait_for_config('Trigger-561','External-Digital')
-            core.set_config('Trigger-637','External-Digital')
-            core.wait_for_config('Trigger-637','External-Digital')
-            core.set_config('Trigger-730','External-Digital')
-            core.wait_for_config('Trigger-730','External-Digital')
+            core.set_config('Modulation-405','External-Digital')
+            core.wait_for_config('Modulation-405','External-Digital')
+            core.set_config('Modulation-488','External-Digital')
+            core.wait_for_config('Modulation-488','External-Digital')
+            core.set_config('Modulation-561','External-Digital')
+            core.wait_for_config('Modulation-561','External-Digital')
+            core.set_config('Modulation-637','External-Digital')
+            core.wait_for_config('Modulation-637','External-Digital')
+            core.set_config('Modulation-730','External-Digital')
+            core.wait_for_config('Modulation-730','External-Digital')
 
             # turn all lasers on
             core.set_config('Laser','AllOn')
             core.wait_for_config('Laser','AllOn')
+
+            # create events to execute scan
+            excess_scan_positions = 0
+            events = []
+            for x in range(scan_axis_positions+excess_scan_positions):
+                evt = { 'axes': {'z': x}}
+                events.append(evt)
 
         for y_idx in range(tile_axis_positions):
                 # calculate tile axis position
@@ -478,168 +515,168 @@ def main():
                     # TO DO: set Z stage to constantly hold position
                     # TO DO: figure out autofocusing solution!
 
-                    # update save_name with current tile information
-                    save_name_ryz = str(save_name) +'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)
+                    for ch_idx in active_channel_indices:
 
-                    # use one Acquisition object for all channels at this RYZ position.
-                    # see: https://github.com/micro-manager/pycro-manager/issues/286
-                    # would be better to go back to one Acquisition per laser line to aid reconstruction and transferring data
-                    with Acquisition(directory=str(save_directory), name=save_name_ryz, saving_queue_size=5000,
-                                     post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
-                        for ch_idx in active_channel_indices:
+                        # create DAQ pattern for laser strobing controlled via rolling shutter
+                        dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
+                        dataDO[0,ch_idx]=1
+                        dataDO[1,ch_idx]=0
+                        #print(dataDO)
+                    
+                        # update save_name with current tile information
+                        save_name_ryzc = Path(str(save_name)+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4))
 
-                            # create events to execute scan for this channel and all stage scan positions
-                            events = []
-                            for x in range(scan_axis_positions):
-                                evt = { 'axes': {'c': ch_idx, 'z': x}}
-                                events.append(evt)
+                        # turn on 'transmit repeated commands' for Tiger
+                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
-                            # create DAQ pattern for laser strobing controlled via rolling shutter
-                            dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
-                            dataDO[0,ch_idx]=1
-                            dataDO[1,ch_idx]=0
+                        # check to make sure Tiger is not busy
+                        ready='B'
+                        while(ready!='N'):
+                            command = 'STATUS'
+                            core.set_property('TigerCommHub','SerialCommand',command)
+                            ready = core.get_property('TigerCommHub','SerialResponse')
+                            time.sleep(.500)
 
-                            # turn on 'transmit repeated commands' for Tiger
-                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+                        # turn off 'transmit repeated commands' for Tiger
+                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
-                            # check to make sure Tiger is not busy
-                            ready='B'
-                            while(ready!='N'):
-                                command = 'STATUS'
-                                core.set_property('TigerCommHub','SerialCommand',command)
-                                ready = core.get_property('TigerCommHub','SerialResponse')
-                                time.sleep(.500)
+                        # save actual stage positions
+                        xy_pos = core.get_xy_stage_position()
+                        stage_x = xy_pos.x
+                        stage_y = xy_pos.y
+                        stage_z = core.get_position()
+                        current_stage_data = [{'stage_x': stage_x, 
+                                               'stage_y': stage_y, 
+                                               'stage_z': stage_z}]
 
-                            # turn off 'transmit repeated commands' for Tiger
-                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+                        # setup DAQ for laser strobing
+                        try:    
+                            # ----- DIGITAL input -------
+                            taskDI = daq.Task()
+                            taskDI.CreateDIChan("/Dev1/PFI0","",daq.DAQmx_Val_ChanForAllLines)
+                            
+                            ## Configure change detection timing (from wave generator)
+                            taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
+                            taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
 
-                            # save actual stage positions
-                            xy_pos = core.get_xy_stage_position()
-                            stage_x = xy_pos.x
-                            stage_y = xy_pos.y
-                            stage_z = core.get_position()
-                            current_stage_data = [{'stage_x': stage_x, 
-                                                   'stage_y': stage_y, 
-                                                   'stage_z': stage_z}]
+                            ## Set where the starting trigger 
+                            taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0",daq.DAQmx_Val_Rising)
+                            
+                            ## Export DI signal to unused PFI pins, for clock and start
+                            taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
+                            taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger,"/Dev1/PFI1")
+                            
+                            # ----- DIGITAL output ------   
+                            taskDO = daq.Task()
+                            taskDO.CreateDOChan("/Dev1/port0/line0:7","",daq.DAQmx_Val_ChanForAllLines)
 
-                            # setup DAQ for laser strobing
-                            try:    
-                                # ----- DIGITAL input -------
-                                taskDI = daq.Task()
-                                taskDI.CreateDIChan("/Dev1/PFI0","",daq.DAQmx_Val_ChanForAllLines)
-                                
-                                ## Configure change detection timing (from wave generator)
-                                taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
-                                taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
+                            ## Configure timing (from DI task) 
+                            taskDO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
+                            
+                            ## Write the output waveform
+                            samples_per_ch_ct_digital = ct.c_int32()
+                            taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
 
-                                ## Set where the starting trigger 
-                                taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0",daq.DAQmx_Val_Rising)
-                                
-                                ## Export DI signal to unused PFI pins, for clock and start
-                                taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
-                                taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger,"/Dev1/PFI1")
-                                
-                                # ----- DIGITAL output ------   
-                                taskDO = daq.Task()
-                                taskDO.CreateDOChan("/Dev1/port0/line0:7","",daq.DAQmx_Val_ChanForAllLines)
+                            ## ------ Start digital input and output tasks ----------
+                            taskDO.StartTask()    
+                            taskDI.StartTask()
 
-                                ## Configure timing (from DI task) 
-                                taskDO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
-                                
-                                ## Write the output waveform
-                                samples_per_ch_ct_digital = ct.c_int32()
-                                taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
+                        except daq.DAQError as err:
+                            print("DAQmx Error %s"%err)
 
-                                ## ------ Start digital input and output tasks ----------
-                                taskDO.StartTask()    
-                                taskDI.StartTask()
+                        # set camera to external control
+                        # DCAM sets the camera back to INTERNAL mode after each acquisition
+                        core.set_config('Camera-TriggerSource','EXTERNAL')
+                        core.wait_for_config('Camera-TriggerSource','EXTERNAL')
 
-                            except daq.DAQError as err:
-                                print("DAQmx Error %s"%err)
+                        # verify that camera actually switched back to external trigger mode
+                        trigger_state = core.get_property('OrcaFusionBT','TRIGGER SOURCE')
 
-                            # set camera to external control
-                            # DCAM sets the camera back to INTERNAL mode after each acquisition
+                        # if not in external control, keep trying until camera changes settings
+                        while not(trigger_state =='EXTERNAL'):
+                            time.sleep(2.0)
                             core.set_config('Camera-TriggerSource','EXTERNAL')
                             core.wait_for_config('Camera-TriggerSource','EXTERNAL')
+                            trigger_state = core.get_property('OrcaFusionBT','TRIGGER SOURCE')
+ 
+                        print('R: '+str(r_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx)+' C: '+str(ch_idx))
+                        # run acquisition for this ryzc combination
+                        with Acquisition(directory=str(save_directory), name=str(save_name_ryzc),
+                                        post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
 
-                            # verify that camera actually switched back to external trigger mode
-                            trigger_state = core.get_property('Camera','TRIGGER SOURCE')
-
-                            # if not in external control, keep trying until camera changes settings
-                            while not(trigger_state =='EXTERNAL'):
-                                time.sleep(2.0)
-                                core.set_config('Camera-TriggerSource','EXTERNAL')
-                                core.wait_for_config('Camera-TriggerSource','EXTERNAL')
-                                trigger_state = core.get_property('Camera','TRIGGER SOURCE')
-
-                            # run acquisition for this tyzc combination
-                            print('R: '+str(r_idx+1)+' Y: '+str(y_idx)+' Z: '+str(z_idx)+' C: '+str(ch_idx))
                             acq.acquire(events)
 
-                            # stop DAQ and make sure it is at zero
+                        # clean up acquisition so that AcqEngJ releases directory.
+                        acq = None
+                        acq_deleted = False
+                        while not(acq_deleted):
                             try:
-                                ## Stop and clear both tasks
-                                taskDI.StopTask()
-                                taskDO.StopTask()
-                                taskDI.ClearTask()
-                                taskDO.ClearTask()
-                            except daq.DAQError as err:
-                                print("DAQmx Error %s"%err)
+                                del acq
+                            except:
+                                time.sleep(5)
+                                acq_deleted = False
+                            else:
+                                gc.collect()
+                                acq_deleted = True
+                    
+                        # stop DAQ and make sure it is at zero
+                        try:
+                            ## Stop and clear both tasks
+                            taskDI.StopTask()
+                            taskDO.StopTask()
+                            taskDI.ClearTask()
+                            taskDO.ClearTask()
+                        except daq.DAQError as err:
+                            print("DAQmx Error %s"%err)
 
-                            # save experimental info after first acquistion. 
-                            if (setup_metadata):
-                                # save acquistion parameters
-                                scan_param_data = [{'root_name': str(save_name),
-                                                    'scan_type': str('ierative-stage'),
-                                                    'theta': float(30.0), 
-                                                    'scan_step_um': float(scan_axis_step_um*1000.), 
-                                                    'pixel_size_um': float(pixel_size_um*1000.),
-                                                    'axial_step_um': str(''),
-                                                    'y_pixels': int(y_pixels),
-                                                    'x_pixels': int(x_pixels),
-                                                    'exposure_ms': float(exposure_ms),
-                                                    'camera': str('Orca_FusionBT'),
-                                                    'readout_mode': str('16bit_mode3'),
-                                                    'num_r': int(iterative_rounds),
-                                                    'num_y': int(tile_axis_positions),
-                                                    'num_z': int(height_axis_positions),
-                                                    'num_ch': int(n_active_channels),
-                                                    'scan_axis_positions': int(scan_axis_positions),
-                                                    '405_active': channel_states[0],
-                                                    '488_active': channel_states[1],
-                                                    '561_active': channel_states[2],
-                                                    '635_active': channel_states[3],
-                                                    '730_active': channel_states[4],
-                                                    '405_power': float(channel_powers[0]),
-                                                    '488_power': float(channel_powers[1]),
-                                                    '561_power': float(channel_powers[2]),
-                                                    '635_power': float(channel_powers[3]),
-                                                    '730_power': float(channel_powers[4])}]
+                        # save experimental info after first tile. 
+                        # we do it this way so that Pycromanager can manage the directories.
+                        if (setup_metadata):
+                            # save stage scan parameters
+                            scan_param_data = [{'root_name': str(save_name),
+                                                'scan_type': str('OPM-stage'),
+                                                'theta': float(30.0), 
+                                                'scan_step': float(scan_axis_step_um*1000.), 
+                                                'pixel_size': float(pixel_size_um*1000.),
+                                                'num_t': int(1),
+                                                'num_r': int(iterative_rounds),
+                                                'num_y': int(tile_axis_positions),
+                                                'num_z': int(height_axis_positions),
+                                                'num_ch': int(n_active_channels),
+                                                'scan_axis_positions': int(scan_axis_positions),
+                                                'excess_scan_positions': int(excess_scan_positions),
+                                                'y_pixels': int(y_pixels),
+                                                'x_pixels': int(x_pixels),
+                                                '405_active': bool(channel_states[0]),
+                                                '488_active': bool(channel_states[1]),
+                                                '561_active': bool(channel_states[2]),
+                                                '635_active': bool(channel_states[3]),
+                                                '730_active': bool(channel_states[4])}]
+                            scan_metadata_path = save_directory / Path('scan_metadata.csv')
+                            data_io.write_metadata(scan_param_data[0], scan_metadata_path)
 
-                                save_name_metdata = save_directory / 'scan_metadata.csv'
-                                data_io.write_metadata(scan_param_data[0], save_name_metdata)
+                            setup_metadata=False
 
-                                setup_metadata=False
+                        # save stage scan positions after each tile
+                        save_name_stage_positions = Path(str(save_name)+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)+'_stage_positions.csv')
+                        save_name_stage_path = save_directory / save_name_stage_positions
+                        data_io.write_metadata(current_stage_data[0], save_name_stage_path)
 
-                            # save stage scan positions after each run. This allows for alignment of individual channels better
-                            save_name_stage_positions = Path('r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_ch'+str(ch_idx).zfill(4)+'_stage_positions.csv')
-                            save_name_stage_positions = save_directory / save_name_stage_positions
-                            data_io.write_metadata(current_stage_data[0], save_name_stage_positions)
+                        # turn on 'transmit repeated commands' for Tiger
+                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
-                            # turn on 'transmit repeated commands' for Tiger
-                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+                        # check to make sure Tiger is not busy
+                        ready='B'
+                        while(ready!='N'):
+                            command = 'STATUS'
+                            core.set_property('TigerCommHub','SerialCommand',command)
+                            ready = core.get_property('TigerCommHub','SerialResponse')
+                            time.sleep(.500)
 
-                            # check to make sure Tiger is not busy
-                            ready='B'
-                            while(ready!='N'):
-                                command = 'STATUS'
-                                core.set_property('TigerCommHub','SerialCommand',command)
-                                ready = core.get_property('TigerCommHub','SerialResponse')
-                                time.sleep(.500)
-
-                            # turn off 'transmit repeated commands' for Tiger
-                            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
-                            
+                        # turn off 'transmit repeated commands' for Tiger
+                        core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+                        
+                        if copy_data:
                             # if first tile, make parent directory on NAS and start reconstruction script on the server
                             if setup_processing:
                                 # make home directory on NAS
@@ -655,22 +692,19 @@ def main():
 
                                 setup_processing=False
                             
-                            # copy current ryzc stage position metadata to NAS
+                            # copy current ryzc metadata to NAS
                             save_directory_path = Path(save_directory)
                             remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
                             src= Path(save_directory) / Path(save_name_stage_positions.parts[2])
                             dst= Path(remote_directory) / Path(save_name_stage_positions.parts[2])
                             Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
 
-                    # clean up acquisition so that AcqEngJ releases directory.
-                    acq = None
-                            
-                    # copy just acquired ryz data to NAS
-                    save_directory_path = Path(save_directory)
-                    remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
-                    src= Path(save_directory) / Path(save_name_ryz+ '_1') 
-                    dst= Path(remote_directory) / Path(save_name_ryz+ '_1') 
-                    Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
+                            # copy current ryzc data to NAS
+                            save_directory_path = Path(save_directory)
+                            remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
+                            src= Path(save_directory) / Path(save_name_ryzc+ '_1') 
+                            dst= Path(remote_directory) / Path(save_name_ryzc+ '_1') 
+                            Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
 
     # set lasers to zero power
     channel_powers = [0.,0.,0.,0.,0.]
@@ -685,16 +719,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all lasers back to software control
-    core.set_config('Trigger-405','CW (constant power)')
-    core.wait_for_config('Trigger-405','CW (constant power)')
-    core.set_config('Trigger-488','CW (constant power)')
-    core.wait_for_config('Trigger-488','CW (constant power)')
-    core.set_config('Trigger-561','CW (constant power)')
-    core.wait_for_config('Trigger-561','CW (constant power)')
-    core.set_config('Trigger-637','CW (constant power)')
-    core.wait_for_config('Trigger-637','CW (constant power)')
-    core.set_config('Trigger-730','CW (constant power)')
-    core.wait_for_config('Trigger-730','CW (constant power)')
+    core.set_config('Modulation-405','CW (constant power)')
+    core.wait_for_config('Modulation-405','CW (constant power)')
+    core.set_config('Modulation-488','CW (constant power)')
+    core.wait_for_config('Modulation-488','CW (constant power)')
+    core.set_config('Modulation-561','CW (constant power)')
+    core.wait_for_config('Modulation-561','CW (constant power)')
+    core.set_config('Modulation-637','CW (constant power)')
+    core.wait_for_config('Modulation-637','CW (constant power)')
+    core.set_config('Modulation-730','CW (constant power)')
+    core.wait_for_config('Modulation-730','CW (constant power)')
 
     # set camera to internal control
     core.set_config('Camera-TriggerSource','INTERNAL')
@@ -703,6 +737,9 @@ def main():
     # enable joystick
     core.set_property('XYStage:XY:31','JoystickEnabled','Yes')
     core.set_property('ZStage:M:37','JoystickInput','22 - right wheel')
+
+    # delete bridge object
+    bridge.close()
 
 #-----------------------------------------------------------------------------
 
