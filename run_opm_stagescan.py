@@ -21,6 +21,7 @@ from itertools import compress
 import shutil
 from threading import Thread
 import data_io
+import gc
 
 def camera_hook_fn(event,bridge,event_queue):
 
@@ -39,8 +40,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [False, True, True, True, True] # true -> active, false -> inactive
-    channel_powers = [0, 25, 50, 75, 95] # (0 -> 100%)
+    channel_states = [True, True, True, True, False] # true -> active, false -> inactive
+    channel_powers = [2, 10, 10, 20, 95] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -53,7 +54,7 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 20.0
+    exposure_ms = 10.0
 
     # excess scan positions
     excess_scan_positions = 10
@@ -450,6 +451,17 @@ def main():
                     # NOTE: This currently does not work. 
                     acq = None
 
+                    acq_deleted = False
+                    while not(acq_deleted):
+                        try:
+                            del acq
+                        except:
+                            time.sleep(0.1)
+                            acq_deleted = False
+                        else:
+                            gc.collect()
+                            acq_deleted = True
+
                     # stop DAQ and make sure it is at zero
                     try:
                         ## Stop and clear both tasks
@@ -486,7 +498,7 @@ def main():
                         # df_stage_scan_params = pd.DataFrame(scan_param_data)
                         # save_name_stage_params = save_directory / 'scan_metadata.csv'
                         # df_stage_scan_params.to_csv(save_name_stage_params)
-                        data_io.write_metadata(scan_param_data[0], save_directory / 'scan_metadata.csv')
+                        data_io.write_metadata(scan_param_data[0], save_directory / Path('scan_metadata.csv'))
 
                         setup_metadata=False
 
@@ -509,6 +521,7 @@ def main():
 
                     # turn off 'transmit repeated commands' for Tiger
                     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+                    
                     
                     # if first tile, make parent directory on NAS and start reconstruction script on the server
                     if setup_processing:
@@ -538,6 +551,7 @@ def main():
                     src= Path(save_directory) / Path(save_name_tyzc+ '_1') 
                     dst= Path(remote_directory) / Path(save_name_tyzc+ '_1') 
                     Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
+                    
                     
     # set lasers to zero power
     channel_powers = [0.,0.,0.,0.,0.]

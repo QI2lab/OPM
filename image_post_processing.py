@@ -2,28 +2,30 @@
 import sys
 import numpy as np
 from numba import njit, prange
+from scyjava import jimport
+import itertools
+from flat_field import calc_flatfield
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
-def deskew(data,parameters):
+def deskew(data,theta,distance,pixel_size):
     """
     Perform parallelized orthogonal interpolation into a uniform pixel size grid.
     
     :param data: ndarray
         image stack of uniformly spaced OPM planes
-    :param parameters: dict
-        theta - tilt angle above coverslip
-        distance - step between image planes in OPM coordinates
-        pizel_size - in-plane pixel size
+    :param theta: float 
+        angle relative to coverslip
+    :param distance: float 
+        step between image planes along coverslip
+    :param pizel_size: float 
+        in-plane camera pixel size in OPM coordinates
 
     :return output: ndarray
         image stack of deskewed OPM planes on uniform grid
     """
 
     # unwrap parameters 
-    theta = parameters[0]             # (degrees)
-    distance = parameters[1]          # (nm)
-    pixel_size = parameters[2]        # (nm)
     [num_images,ny,nx]=data.shape     # (pixels)
 
     # change step size from physical space (nm) to camera space (pixels)
@@ -100,6 +102,32 @@ def deskew(data,parameters):
     # return output
     return output
 
+
+def manage_flat_field_py(stack):
+    """
+    Manage performing flat and dark-field using python adapation of BaSiC algorithm.
+
+    Returns flat- and darkfield corrected image
+    
+    :param stack: ndarray
+        matrix of OPM planes
+
+    :return corrected_stack: ndarray of deskewed OPM planes on uniform grid
+    """
+
+    print('Calculating flat-field correction using python BaSiC adaption.')
+    if stack.shape[0] > 100:
+        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 100, replace=False)]
+    else:
+        stack_for_flat_field = stack
+
+    flat_field, dark_field = calc_flatfield(images=stack_for_flat_field)
+
+    print('Performing flat-field correction.')
+    corrected_stack = perform_flat_field(flat_field,dark_field,stack)
+
+    return corrected_stack
+
 def manage_flat_field(stack,ij):
     """
     Manage performing flat and dark-field using BaSiC algorithm via pyimagej. 
@@ -108,7 +136,7 @@ def manage_flat_field(stack,ij):
 
     Returns flat- and darkfield corrected image
     
-    :param stack: dask.array
+    :param stack: ndarray
         matrix of OPM planes
     :param ij: imagej
         imagej object
@@ -128,7 +156,7 @@ def calculate_flat_field(stack,ij):
     """
     Calculate flat- and darkfield using BaSiC algorithm via pyimagej. Returns flat- and darkfield images.
     
-    :param stack: dask.array
+    :param stack: ndarray
         matrix of OPM planes
     :param ij: imagej
         imagej object
@@ -144,10 +172,10 @@ def calculate_flat_field(stack,ij):
         stack_for_flat_field = stack[np.random.choice(stack.shape[0], 50, replace=False)]
     else:
         stack_for_flat_field = stack
-    stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(stack_for_flat_field.compute()))
+    stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(stack_for_flat_field))
 
     # show image in imagej since BaSiC plugin cannot be run headless
-    ij.ui().show(sub_stack_iterable)
+    ij.ui().show(stack_iterable)
     WindowManager = jimport('ij.WindowManager')
     current_image = WindowManager.getCurrentImage()
 
@@ -209,9 +237,6 @@ def calculate_flat_field(stack,ij):
     """
     ij.py.run_macro(macro4)
 
-    del sub_stack_iterable
-    del sub_stack
-
     return flat_field, dark_field
 
 def perform_flat_field(flat_field,dark_field,stack):
@@ -233,7 +258,7 @@ def perform_flat_field(flat_field,dark_field,stack):
     corrected_stack[corrected_stack<0] = 0 
     corrected_stack = corrected_stack/flat_field
 
-    return corrected_stack.compute()
+    return corrected_stack
 
 def mv_decon(image,ch_idx,dr,dz):
     '''
@@ -262,7 +287,7 @@ def mv_decon(image,ch_idx,dr,dz):
     params.ny = image.shape[1]
     params.nz = image.shape[0]
     params.generatePsf = True
-    params.lightSheetNA = 0.24
+    params.lightSheetNA = 0.16
     params.blind=False
     params.NA = 1.2
     params.RI = 1.4

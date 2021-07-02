@@ -31,7 +31,7 @@ def main():
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
     channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 10, 20, 20, 100] # (0 -> 100%)
+    channel_powers = [0, 10, 100, 40, 100] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -44,20 +44,23 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 20.0 #unit: ms
+    exposure_ms = 1.5 #unit: ms
 
     # scan axis range
-    scan_axis_range_um = 200.0 # unit: microns
+    scan_axis_range_um = 10.0 # unit: microns
     
     # galvo voltage at neutral
     galvo_neutral_volt = 0 # unit: volts
 
     # timepoints
-    timepoints = 1
+    timepoints = 3000
 
     # setup file name
-    save_directory=Path('E:/20210504b/')
-    save_name = 'bead_test'
+    save_directory=Path('D:/20210624l/')
+    save_name = 'glycerol50'
+
+    # automatically transfer files to NAS at end of dataset
+    transfer_files = False
  
     # display data
     display_flag = False
@@ -79,12 +82,12 @@ def main():
     
     # set camera to internal trigger
     # give camera time to change modes if necessary
-    core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[1]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[2]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[0]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[1]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[2]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
     # set exposure time
     core.set_exposure(exposure_ms)
@@ -99,16 +102,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all laser to external triggering
-    core.set_config('Trigger-405','External-Digital')
-    core.wait_for_config('Trigger-405','External-Digital')
-    core.set_config('Trigger-488','External-Digital')
-    core.wait_for_config('Trigger-488','External-Digital')
-    core.set_config('Trigger-561','External-Digital')
-    core.wait_for_config('Trigger-561','External-Digital')
-    core.set_config('Trigger-637','External-Digital')
-    core.wait_for_config('Trigger-637','External-Digital')
-    core.set_config('Trigger-730','External-Digital')
-    core.wait_for_config('Trigger-730','External-Digital')
+    core.set_config('Modulation-405','External-Digital')
+    core.wait_for_config('Modulation-405','External-Digital')
+    core.set_config('Modulation-488','External-Digital')
+    core.wait_for_config('Modulation-488','External-Digital')
+    core.set_config('Modulation-561','External-Digital')
+    core.wait_for_config('Modulation-561','External-Digital')
+    core.set_config('Modulation-637','External-Digital')
+    core.wait_for_config('Modulation-637','External-Digital')
+    core.set_config('Modulation-730','External-Digital')
+    core.wait_for_config('Modulation-730','External-Digital')
 
     # turn all lasers on
     core.set_config('Laser','AllOn')
@@ -125,18 +128,23 @@ def main():
 
     # galvo scan setup
     scan_axis_step_um = 0.4  # unit: um
-    scan_axis_calibration = 0.034 # unit: V / um
-    min_volt = -(scan_axis_range_um*scan_axis_calibration/2.) + galvo_neutral_volt # unit: volts
+    #scan_axis_calibration = 0.039 # unit: V / um
+    scan_axis_calibration = 0.0453 # unit: V / um
+
+    min_volt = -(scan_axis_range_um * scan_axis_calibration / 2.) + galvo_neutral_volt # unit: volts
     scan_axis_step_volts = scan_axis_step_um * scan_axis_calibration # unit: V
     scan_axis_range_volts = scan_axis_range_um * scan_axis_calibration # unit: V
     scan_steps = np.rint(scan_axis_range_volts / scan_axis_step_volts).astype(np.int16) # galvo steps
     
+    # handle case where no scan steps
+    if scan_steps == 0:
+        scan_steps = 1
+    
     # output experiment info
-    print('Scan axis range (um): '+str(scan_axis_range_um)+
-    ', Scan axis step (nm): '+str(scan_axis_step_um*1000)+
-    ', Number of galvo positions: '+str(scan_steps))
-    print('Time points:  '+str(timepoints))
-    print('Galvo neutral (Volt): '+str(galvo_neutral_volt)+', Min voltage (volt): '+str(min_volt))
+    print("Scan axis range: %.1f um = %0.3fV, Scan axis step: %.1f nm = %0.3fV , Number of galvo positions: %d" % 
+          (scan_axis_range_um, scan_axis_range_volts, scan_axis_step_um * 1000, scan_axis_step_volts, scan_steps))
+    print('Galvo neutral (Volt): ' + str(galvo_neutral_volt)+', Min voltage (volt): '+str(min_volt))
+    print('Time points:  ' + str(timepoints))
 
     # create events to execute scan
     events = []
@@ -169,9 +177,6 @@ def main():
         dataDO[2*ii::2*n_active_channels, ind] = 1
     dataDO[-1, :] = 0
 
-    #print("Digital output array:")
-    #print(dataDO)
-
     # generate voltage steps
     max_volt = min_volt + scan_axis_range_volts  # 2
     voltage_values = np.linspace(min_volt, max_volt, nvoltage_steps)
@@ -180,66 +185,62 @@ def main():
     waveform = np.zeros(samples_per_ch)
     # one less voltage value for first frame
     waveform[0:2*n_active_channels - 1] = voltage_values[0]
-    # (2 * # active channels) voltage values for all other frames
-    waveform[2*n_active_channels - 1:-1] = np.kron(voltage_values[1:], np.ones(2 * n_active_channels))
-    # set back to right value at end
+
+    if len(voltage_values) > 1:
+        # (2 * # active channels) voltage values for all other frames
+        waveform[2*n_active_channels - 1:-1] = np.kron(voltage_values[1:], np.ones(2 * n_active_channels))
+    
+    # set back to initial value at end
     waveform[-1] = voltage_values[0]
-    #print("Analog output voltage array:")
-    #print(waveform)
 
     #def read_di_hook(event):
     try:    
         # ----- DIGITAL input -------
         taskDI = daq.Task()
-        taskDI.CreateDIChan("/Dev1/PFI0","",daq.DAQmx_Val_ChanForAllLines)
-        #taskDI.CreateDIChan("OnboardClock","",daq.DAQmx_Val_ChanForAllLines)
+        taskDI.CreateDIChan("/Dev1/PFI0", "", daq.DAQmx_Val_ChanForAllLines)
         
         ## Configure change detectin timing (from wave generator)
         taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
-        taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
-        #taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_FiniteSamps,samples_per_ch)
+        taskDI.CfgChangeDetectionTiming("/Dev1/PFI0", "/Dev1/PFI0", daq.DAQmx_Val_ContSamps, 0)
 
         ## Set where the starting trigger 
-        taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0",daq.DAQmx_Val_Rising)
-        #taskDI.SetTrigAttribute(daq.DAQmx_StartTrig_Retriggerable,retriggerable) # only available for finite task sampling
+        taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0", daq.DAQmx_Val_Rising)
         
         ## Export DI signal to unused PFI pins, for clock and start
         taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
-        taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger,"/Dev1/PFI1")
+        taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger, "/Dev1/PFI1")
         
         # ----- DIGITAL output ------   
         taskDO = daq.Task()
         # TO DO: Write each laser line separately!
-        taskDO.CreateDOChan("/Dev1/port0/line0:7","",daq.DAQmx_Val_ChanForAllLines)
+        taskDO.CreateDOChan("/Dev1/port0/line0:7", "", daq.DAQmx_Val_ChanForAllLines)
 
         ## Configure timing (from DI task) 
-        taskDO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
+        taskDO.CfgSampClkTiming("/Dev1/PFI2", DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, samples_per_ch)
         
         ## Write the output waveform
         samples_per_ch_ct_digital = ct.c_int32()
-        taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
-        #print("WriteDigitalLines sample per channel count = %d" % samples_per_ch_ct_digital.value)
+        taskDO.WriteDigitalLines(samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByChannel, dataDO, ct.byref(samples_per_ch_ct_digital), None)
 
         # ------- ANALOG output -----------
 
         # first, set the galvo to the initial point if it is not already
         taskAO_first = daq.Task()
-        taskAO_first.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+        taskAO_first.CreateAOVoltageChan("/Dev1/ao0", "", -4.0, 4.0, daq.DAQmx_Val_Volts, None)
         taskAO_first.WriteAnalogScalarF64(True, -1, waveform[0], None)
         taskAO_first.StopTask()
         taskAO_first.ClearTask()
 
         # now set up the task to ramp the galvo
         taskAO = daq.Task()
-        taskAO.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+        taskAO.CreateAOVoltageChan("/Dev1/ao0", "", -4.0, 4.0, daq.DAQmx_Val_Volts, None)
 
         ## Configure timing (from DI task)
-        taskAO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
+        taskAO.CfgSampClkTiming("/Dev1/PFI2", DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, samples_per_ch)
         
         ## Write the output waveform
         samples_per_ch_ct = ct.c_int32()
-        taskAO.WriteAnalogF64(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByScanNumber,waveform,ct.byref(samples_per_ch_ct),None)
-        #print("WriteAnalogF64 sample per channel count = %d" % samples_per_ch_ct.value)
+        taskAO.WriteAnalogF64(samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByScanNumber, waveform, ct.byref(samples_per_ch_ct), None)
 
         ## ------ Start both tasks ----------
         taskAO.StartTask()    
@@ -298,16 +299,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all lasers back to software control
-    core.set_config('Trigger-405','CW (constant power)')
-    core.wait_for_config('Trigger-405','CW (constant power)')
-    core.set_config('Trigger-488','CW (constant power)')
-    core.wait_for_config('Trigger-488','CW (constant power)')
-    core.set_config('Trigger-561','CW (constant power)')
-    core.wait_for_config('Trigger-561','CW (constant power)')
-    core.set_config('Trigger-637','CW (constant power)')
-    core.wait_for_config('Trigger-637','CW (constant power)')
-    core.set_config('Trigger-730','CW (constant power)')
-    core.wait_for_config('Trigger-730','CW (constant power)')
+    core.set_config('Modulation-405','CW (constant power)')
+    core.wait_for_config('Modulation-405','CW (constant power)')
+    core.set_config('Modulation-488','CW (constant power)')
+    core.wait_for_config('Modulation-488','CW (constant power)')
+    core.set_config('Modulation-561','CW (constant power)')
+    core.wait_for_config('Modulation-561','CW (constant power)')
+    core.set_config('Modulation-637','CW (constant power)')
+    core.wait_for_config('Modulation-637','CW (constant power)')
+    core.set_config('Modulation-730','CW (constant power)')
+    core.wait_for_config('Modulation-730','CW (constant power)')
 
     # set all laser to zero power
     channel_powers=[0,0,0,0,0]
@@ -325,24 +326,25 @@ def main():
     taskAO_last.StopTask()
     taskAO_last.ClearTask()
 
-    # make parent directory on NAS and start reconstruction script on the server
-    # make home directory on NAS
-    save_directory_path = Path(save_directory)
-    remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
-    cmd='mkdir ' + str(remote_directory)
-    status_mkdir = subprocess.run(cmd, shell=True)
+    if transfer_files:
+        # make parent directory on NAS and start reconstruction script on the server
+        # make home directory on NAS
+        save_directory_path = Path(save_directory)
+        remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
+        cmd='mkdir ' + str(remote_directory)
+        status_mkdir = subprocess.run(cmd, shell=True)
 
-    # copy full experiment metadata to NAS
-    src= Path(save_directory) / Path('scan_metadata.csv') 
-    dst= Path(remote_directory) / Path('scan_metadata.csv') 
-    Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
+        # copy full experiment metadata to NAS
+        src= Path(save_directory) / Path('scan_metadata.csv') 
+        dst= Path(remote_directory) / Path('scan_metadata.csv') 
+        Thread(target=shutil.copy, args=[str(src), str(dst)]).start()
 
-    # copy data to NAS
-    save_directory_path = Path(save_directory)
-    remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
-    src= Path(save_directory) / Path(save_name+ '_1') 
-    dst= Path(remote_directory) / Path(save_name+ '_1') 
-    Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
+        # copy data to NAS
+        save_directory_path = Path(save_directory)
+        remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
+        src= Path(save_directory) / Path(save_name+ '_1') 
+        dst= Path(remote_directory) / Path(save_name+ '_1') 
+        Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
 
 # run
 if __name__ == "__main__":
