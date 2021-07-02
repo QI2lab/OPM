@@ -3,10 +3,8 @@ Plot data and localizations
 """
 import os
 import time
-
 import numpy as np
 import pickle
-
 import pycromanager
 import tifffile
 import napari
@@ -47,8 +45,13 @@ figsize = (16, 8)
 
 # data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_16;39;37_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
 # img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0002_1"
-data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_16;39;37_localization\localization_round=0_ch=3_tile=7_z=1_t=0.pkl"
-img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0003_1"
+# data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_16;39;37_localization\localization_round=0_ch=3_tile=7_z=1_t=0.pkl"
+# img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0003_1"
+# data_fname = r"\\10.206.26.21\opm2\20210628\new area\2021_07_01_17;27;16_localization\localization_round=1_ch=2_tile=14_z=0_t=0.pkl"
+# img_fname = r"\\10.206.26.21\opm2\20210628\new area\bDNA_stiff_gel_human_lung_r0001_y0014_z0000_ch0002_1"
+
+data_fname = r"\\10.206.26.21\opm2\20210628\new area\2021_07_01_17;27;16_localization\localization_round=1_ch=3_tile=14_z=0_t=0.pkl"
+img_fname = r"\\10.206.26.21\opm2\20210628\new area\bDNA_stiff_gel_human_lung_r0001_y0014_z0000_ch0003_1"
 dset = pycromanager.Dataset(img_fname)
 dc = 0.115
 dz = 0.115
