@@ -45,9 +45,10 @@ figsize = (16, 8)
 # dz = 0.25
 # x, y, z = localize.get_coords(imgs.shape, dc, dz)
 
-# data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_29_18;31;00_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
-data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_15;00;19_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
-img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0002_1"
+# data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_16;39;37_localization\localization_round=0_ch=2_tile=7_z=1_t=0.pkl"
+# img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0002_1"
+data_fname = r"\\10.206.26.21\opm2\20210628\2021_06_30_16;39;37_localization\localization_round=0_ch=3_tile=7_z=1_t=0.pkl"
+img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0003_1"
 dset = pycromanager.Dataset(img_fname)
 dc = 0.115
 dz = 0.115

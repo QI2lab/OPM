@@ -21,8 +21,9 @@ import data_io
 import localize
 
 debug = True
-root_dir = r"\\10.206.26.21\opm2\20210628"
+# root_dir = r"\\10.206.26.21\opm2\20210628"
 # root_dir = r"/mnt/opm2/20210628"
+root_dir = r"\\10.206.26.21\opm2\20210628\new area"
 dir_format = "bDNA_stiff_gel_human_lung_r%04d_y%04d_z%04d_ch%04d_1"
 scan_data_path = os.path.join(root_dir, "scan_metadata.csv")
 
@@ -68,7 +69,7 @@ if not os.path.exists(save_dir):
 # do localizations
 # ###############################
 tstart_all = time.perf_counter()
-for round in [0]:
+for round in list(range(8)):
     for ch in range(3):
         if not channel_to_use[ch]:
             continue
@@ -76,8 +77,8 @@ for round in [0]:
         sigma_xy = 0.22 * emission_wavelengths[ch] / na
         sigma_z = np.sqrt(6) / np.pi * ni * emission_wavelengths[ch] / na ** 2
 
-        for tl in [7]:
-            for iz in [1]:
+        for tl in [14]:
+            for iz in [0]:
                 tstart_folder = time.perf_counter()
 
                 # ###############################
