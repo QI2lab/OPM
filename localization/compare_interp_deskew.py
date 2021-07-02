@@ -47,7 +47,7 @@ tend = time.perf_counter()
 print("unvectorized deskew ran in %0.5gs" % (tend - tstart))
 
 tstart = time.perf_counter()
-deskew2 = deskew(img, [theta * 180/np.pi, dstep, dc])
+deskew2 = deskew(img, theta * 180/np.pi, dstep, dc)
 x2 = np.arange(deskew2.shape[2]) * dc
 y2 = np.arange(deskew2.shape[1]) * dc
 z2 = np.arange(deskew2.shape[0]) * dc

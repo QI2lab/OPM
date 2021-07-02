@@ -64,7 +64,7 @@ print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
 imgs_raw = np.flip(np.asarray(imgs_raw), axis=0)
 
 tstart = time.perf_counter()
-imgs = pp.deskew(imgs_raw, [30., 0.4, 0.115])
+imgs = pp.deskew(imgs_raw, 30., 0.4, 0.115)
 print("deskewed in %0.2fs" % (time.perf_counter() - tstart))
 
 x, y, z = localize.get_coords(imgs.shape, dc, dz)

@@ -305,8 +305,8 @@ for round in list(range(8)):
                         # check fits and guesses
                         # ###################################################
                         if debug:
-                            imgs_filtered_deskewed = pp.deskew(imgs_filtered, [theta * 180 / np.pi, dstage, dc])
-                            imgs_deskewed = pp.deskew(imgs_chunk, [theta * 180 / np.pi, dstage, dc])
+                            imgs_filtered_deskewed = pp.deskew(imgs_filtered, theta * 180 / np.pi, dstage, dc)
+                            imgs_deskewed = pp.deskew(imgs_chunk, theta * 180 / np.pi, dstage, dc)
 
                             centers_guess_napari = (centers_guess - np.expand_dims(np.array([0, y_offset, x_offset]), axis=0)) / dc
 
