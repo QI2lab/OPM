@@ -172,7 +172,7 @@ def main():
         print("DAQmx Error %s"%err)
 
     # iterate over user defined program
-    for r_idx in range(8,iterative_rounds):
+    for r_idx in range(0,iterative_rounds):
 
         # set motors to on to actively maintain position during fluidics run
         # TO DO: figure out how to make this work
@@ -192,7 +192,7 @@ def main():
         #core.set_property('ZStage:M:37','MaintainState-MA',0)
 
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
-        if r_idx == 8:
+        if r_idx == 0:
             
             # setup imaging parameters using MM GUI
             run_imaging = False
