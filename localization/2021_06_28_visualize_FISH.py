@@ -93,8 +93,8 @@ cmap = plt.cm.get_cmap('gist_rainbow')
 colors = cmap(np.arange(nrounds * nchannels) / nrounds / nchannels)
 colors[:, -1] = 0.25
 
-figh = plt.figure(figsize=(16, 8))
-ymax_ind = imgs.shape[1] - 1
+figh = plt.figure(figsize=(20, 8))
+ymax_ind = 3000 #imgs.shape[1] - 1
 
 ax = plt.gca()
 extent = [y.min() - 0.5 * dy, y[0, ymax_ind, 0] + 0.5 * dy, x.min() - 0.5 * dx, x.max() + 0.5 * dx]
@@ -107,19 +107,21 @@ for ii in range(len(data_fnames)):
 ax.set_xticks([])
 ax.set_yticks([])
 ax.set_xlim([extent[0], extent[1]])
+plt.legend(["P63", "ETV5", "MYC", "GRHL1", "LTF", "KLK10", "FOXJ1", "ETV1", "CLDN18", "SPDEF", "SFTPB", "PITX1"],
+           markerscale=2, framealpha=1)
 
 fname = os.path.join(data_dir, "FISH_maxproj_z.png")
 figh.savefig(fname)
 
+if False:
+    viewer = napari.Viewer(title=img_fname)
+    animation_widget = AnimationWidget(viewer)
+    viewer.window.add_dock_widget(animation_widget, area='right')
 
-viewer = napari.Viewer(title=img_fname)
-animation_widget = AnimationWidget(viewer)
-viewer.window.add_dock_widget(animation_widget, area='right')
+    # viewer = napari.view_image(imgs, colormap="bone", contrast_limits=[0, 750], multiscale=False, title=img_fname)
+    viewer.add_image(imgs, scale=(1, 1, 1), colormap="gray_r", contrast_limits=[120, 2000], multiscale=False)
 
-# viewer = napari.view_image(imgs, colormap="bone", contrast_limits=[0, 750], multiscale=False, title=img_fname)
-viewer.add_image(imgs, scale=(1, 1, 1), colormap="gray_r", contrast_limits=[120, 2000], multiscale=False)
-
-if plot_centers:
-    for ii in range(len(centers_napari)):
-        to_plot = mask[tuple(centers_pixel[ii].transpose())]
-        viewer.add_points(centers_napari[ii][to_plot], size=3, face_color=colors[ii], opacity=0.9, name="round %d" % ii, n_dimensional=True)
+    if plot_centers:
+        for ii in range(len(centers_napari)):
+            to_plot = mask[tuple(centers_pixel[ii].transpose())]
+            viewer.add_points(centers_napari[ii][to_plot], size=3, face_color=colors[ii], opacity=0.9, name="round %d" % ii, n_dimensional=True)

@@ -292,6 +292,12 @@ for round in list(range(8)):
                             print("identified %d/%d localizations in %0.3f" % (np.sum(to_keep), to_keep.size, time.perf_counter() - tstart))
 
                             # ###################################################
+                            # correct ROIs for full volume
+                            # ###################################################
+                            rois[:, :2] += ip_start
+                            rois[:, 4:] += ix_start
+
+                            # ###################################################
                             # store results
                             # ###################################################
                             fit_params_vol.append(fit_params)
@@ -320,7 +326,7 @@ for round in list(range(8)):
                             plot_any = False
                             while plotted < to_plot:
                                 if to_keep[ind] or plot_any:
-                                    localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs_chunk, theta, x, y, z, init_params[ind])
+                                    localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
 
                                     plotted += 1
                                 ind += 1

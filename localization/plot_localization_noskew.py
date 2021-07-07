@@ -62,6 +62,7 @@ for ii in range(len(dset.axes["z"])):
     imgs_raw.append(dset.read_image(channel=0, z=ii))
 print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
 imgs_raw = np.flip(np.asarray(imgs_raw), axis=0)
+xskew, yskew, zskew = localize.get_skewed_coords(imgs_raw.shape, 0.115, 0.4, 30 * np.pi/180)
 
 tstart = time.perf_counter()
 imgs = pp.deskew(imgs_raw, 30., 0.4, 0.115)
@@ -91,12 +92,24 @@ if False:
     ind = 0
     while num_plotted < 20:
         if to_keep[ind]:
+            # figa = localize.plot_skewed_roi(fps[ind], rois[ind], imgs_raw, 30 * np.pi/180, xskew, yskew, zskew,
+            #                                 init_params=ips[ind], figsize=(16, 8), same_color_scale=True)
             figa = localize.plot_roi(fps[ind], rois[ind], imgs, x, y, z,
                                                   init_params=ips[ind],
-                                                  figsize=(16, 8), same_color_scale=True)
+                                                  figsize=(16, 8), same_color_scale=False)
             num_plotted += 1
         ind += 1
 
+# plot fits with large amps
+if False:
+    num_plotted = 0
+    ind = 0
+    while num_plotted < 20 and ind < len(fps):
+        if to_keep[ind] and fps[ind, 6] > 1000:
+            figa = localize.plot_skewed_roi(fps[ind], rois[ind], imgs_raw, 30 * np.pi / 180, xskew, yskew, zskew,
+                                            init_params=ips[ind], figsize=(16, 8), same_color_scale=True)
+            num_plotted += 1
+        ind += 1
 
 # maximum intensity projection
 figh2 = plt.figure(figsize=figsize)
@@ -116,64 +129,173 @@ plt.imshow(maxproj, vmin=vmin, vmax=vmax, origin="lower",
            extent=[x[0, 0, 0] - 0.5 * dc, x[0, 0, -1] + 0.5 * dc, y[0, 0, 0] - 0.5 * dc, y[0, -1, 0] + 0.5 * dc])
 plt.plot(centers_guess[:, 2], centers_guess[:, 1], 'gx')
 
-# fit statistics
-figh3 = plt.figure(figsize=figsize)
-plt.suptitle("Fit statistics\nmedians: amp = %0.3f, $\sigma_{xy}$ = %0.3f, $\sigma_z$ = %0.3f, bg = %0.3f" %
-             (np.median(fps[:, 0][to_keep]), np.median(fps[:, 4][to_keep]), np.median(fps[:, 5][to_keep]),
-              np.median(fps[:, 6][to_keep])))
-grid = plt.GridSpec(2, 2, wspace=0.5, hspace=0.5)
+# scatter plot of fit statistics
+# 2D histograms of fit statistics
+plot_all = False
+if not plot_all:
+    to_plot = to_keep
+else:
+    to_plot = np.ones(to_keep.shape, dtype=np.bool)
+
+# calculate medians
+amp_med = np.median(fps[:, 0][to_plot])
+sxy_med = np.median(fps[:, 4][to_plot])
+sz_med = np.median(fps[:, 5][to_plot])
+bg_med = np.median(fps[:, 6][to_plot])
+
+# calculate coeffs var
+amp_cov = np.std(fps[:, 0][to_plot]) / np.mean(fps[:, 0][to_plot])
+sxy_cov = np.std(fps[:, 4][to_plot]) / np.mean(fps[:, 4][to_plot])
+sz_cov = np.std(fps[:, 5][to_plot]) / np.mean(fps[:, 5][to_plot])
+bg_cov = np.std(fps[:, 6][to_plot]) / np.mean(fps[:, 6][to_plot])
+
+
+figh4 = plt.figure(figsize=figsize)
+plt.suptitle("Fit statistics, scatterplots and 2D histograms\n"
+             "medians: amp = %0.3f, $\sigma_{xy}$ = %0.3f, $\sigma_z$ = %0.3f, bg = %0.3f\n"
+             "coeffs var: amp = %0.3f, $\sigma_{xy}$ = %0.3f, $\sigma_z$ = %0.3f, bg = %0.3f" % \
+             (amp_med, sxy_med, sz_med, bg_med,
+              amp_cov, sxy_cov, sz_cov, bg_cov))
+grid = plt.GridSpec(2, 4, wspace=0.5, hspace=0.5)
+
+nbins = int(np.ceil(np.sqrt(np.sum(to_plot))))
+sxy_bin_edges = np.linspace(0, np.percentile(fps[:, 4][to_plot], 98) * 1.2, nbins + 1)
+sz_bin_edges = np.linspace(0, np.percentile(fps[:, 5][to_plot], 98) * 1.2, nbins + 1)
+amp_bin_edges = np.linspace(np.min([np.percentile(fps[:, 0][to_plot], 1), 0]),
+                                   np.percentile(fps[:, 0][to_plot], 98) * 1.2, nbins + 1)
+bg_bin_edges = np.linspace(np.min([np.percentile(fps[:, 6][to_plot], 1), 0]),
+                           np.percentile(fps[:, 6][to_plot], 98) * 1.2, nbins + 1)
+
+# amp vs sxy
+h, xedges, yedges = np.histogram2d(fps[:, 0][to_plot], fps[:, 4][to_plot], bins=(amp_bin_edges, sxy_bin_edges))
 
 ax = plt.subplot(grid[0, 0])
 ax.set_title("amp vs. $\sigma_{xy}$")
-plt.plot(fps[:, 0][to_keep], fps[:, 4][to_keep], '.')
+plt.imshow(h.transpose(), extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin="lower",
+           aspect=(xedges[-1] - xedges[0]) / (yedges[-1] - yedges[0]), cmap="bone")
 plt.xlabel("Amp")
 plt.ylabel("$\sigma_{xy}$ (um)")
-plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
-plt.ylim([-0.01, np.percentile(fps[:, 4][to_keep], 99) * 1.2])
 
 ax = plt.subplot(grid[0, 1])
+ax.set_title("amp vs. $\sigma_{xy}$")
+plt.plot(fps[:, 0][to_plot], fps[:, 4][to_plot], '.')
+plt.xlabel("Amp")
+plt.ylabel("$\sigma_{xy}$ (um)")
+plt.xlim([0, np.percentile(fps[:, 0][to_plot], 99) * 1.2])
+plt.ylim([-0.01, np.percentile(fps[:, 4][to_plot], 99) * 1.2])
+
+# amp vs sz
+h, xedges, yedges = np.histogram2d(fps[:, 0][to_plot], fps[:, 5][to_plot], bins=(amp_bin_edges, sz_bin_edges))
+
+ax = plt.subplot(grid[0, 2])
 ax.set_title("amp vs. $\sigma_z$")
-plt.plot(fps[:, 0][to_keep], fps[:, 5][to_keep], '.')
+plt.imshow(h.transpose(), extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin="lower",
+           aspect=(xedges[-1]- xedges[0]) / (yedges[-1] - yedges[0]), cmap="bone")
 plt.xlabel("Amp")
 plt.ylabel("$\sigma_z$ (um)")
-plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
-plt.ylim([0, np.percentile(fps[:, 5][to_keep], 99) * 1.2])
+
+ax = plt.subplot(grid[0, 3])
+ax.set_title("amp vs. $\sigma_z$")
+plt.plot(fps[:, 0][to_plot], fps[:, 5][to_plot], '.')
+plt.xlabel("Amp")
+plt.ylabel("$\sigma_z$ (um)")
+plt.xlim([0, np.percentile(fps[:, 0][to_plot], 99) * 1.2])
+plt.ylim([0, np.percentile(fps[:, 5][to_plot], 99) * 1.2])
+
+# sxy vs sz
+h, xedges, yedges = np.histogram2d(fps[:, 4][to_plot], fps[:, 5][to_plot], bins=(sxy_bin_edges, sz_bin_edges))
 
 ax = plt.subplot(grid[1, 0])
 ax.set_title("$\sigma_{xy}$ vs. $\sigma_z$")
-plt.plot(fps[:, 4][to_keep], fps[:, 5][to_keep], '.')
+plt.imshow(h.transpose(), extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin="lower",
+           aspect=(xedges[-1]- xedges[0]) / (yedges[-1] - yedges[0]), cmap="bone")
 plt.xlabel("$\sigma_{xy} (um)$")
 plt.ylabel("$\sigma_z$ (um)")
-plt.xlim([0, np.percentile(fps[:, 4][to_keep], 99) * 1.2])
-plt.ylim([0, np.percentile(fps[:, 5][to_keep], 99) * 1.2])
 
 ax = plt.subplot(grid[1, 1])
+ax.set_title("$\sigma_{xy}$ vs. $\sigma_z$")
+plt.plot(fps[:, 4][to_plot], fps[:, 5][to_plot], '.')
+plt.xlabel("$\sigma_{xy} (um)$")
+plt.ylabel("$\sigma_z$ (um)")
+plt.xlim([0, np.percentile(fps[:, 4][to_plot], 99) * 1.2])
+plt.ylim([0, np.percentile(fps[:, 5][to_plot], 99) * 1.2])
+
+# amps vs bg
+h, xedges, yedges = np.histogram2d(fps[:, 0][to_plot], fps[:, 6][to_plot], bins=(amp_bin_edges, bg_bin_edges))
+
+ax = plt.subplot(grid[1, 2])
 ax.set_title("amp vs. bg")
-plt.plot(fps[:, 0][to_keep], fps[:, 6][to_keep], '.')
+plt.imshow(h.transpose(), extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin="lower",
+           aspect=(xedges[-1]- xedges[0]) / (yedges[-1] - yedges[0]), cmap="bone")
 plt.xlabel("Amp")
 plt.ylabel("background")
-plt.xlim([0, np.percentile(fps[:, 0][to_keep], 99) * 1.2])
-plt.ylim([np.percentile(fps[:, 6][to_keep], 1) - 5, np.percentile(fps[:, 6][to_keep], 99) + 5])
+
+ax = plt.subplot(grid[1, 3])
+ax.set_title("amp vs. bg")
+plt.plot(fps[:, 0][to_plot], fps[:, 6][to_plot], '.')
+plt.xlabel("Amp")
+plt.ylabel("background")
+plt.xlim([0, np.percentile(fps[:, 0][to_plot], 99) * 1.2])
+plt.ylim([np.percentile(fps[:, 6][to_plot], 1) - 5, np.percentile(fps[:, 6][to_plot], 99) + 5])
+
+# histogram
+figh5 = plt.figure(figsize=figsize)
+plt.suptitle("histograms")
+grid = plt.GridSpec(1, 4, hspace=0.5, wspace=0.5)
+
+# amps
+h, _ = np.histogram(fps[:, 0][to_plot], bins=amp_bin_edges)
+amp_bin_centers = 0.5 * (amp_bin_edges[1:] + amp_bin_edges[:-1])
+
+ax = plt.subplot(grid[0, 0])
+ax.plot(amp_bin_centers, h, '.-')
+plt.xlabel("Amp (ADU)")
+
+# sxy
+h, _ = np.histogram(fps[:, 4][to_plot], bins=sxy_bin_edges)
+sxy_bin_centers = 0.5 * (sxy_bin_edges[1:] + sxy_bin_edges[:-1])
+
+ax = plt.subplot(grid[0, 1])
+ax.plot(sxy_bin_centers, h, '.-')
+plt.xlabel("$\sigma_{xy}$ ($\mu m$)")
+
+# sz
+h, _ = np.histogram(fps[:, 5][to_plot], bins=sz_bin_edges)
+sz_bin_centers = 0.5 * (sz_bin_edges[1:] + sz_bin_edges[: -1])
+
+ax = plt.subplot(grid[0, 2])
+ax.plot(sz_bin_centers, h, '.-')
+plt.xlabel('$\sigma_z$ ($\mu m$)')
+
+# bg
+h, _ = np.histogram(fps[:, 6][to_plot], bins=bg_bin_edges)
+bg_bin_centers = 0.5 * (bg_bin_edges[1:] + bg_bin_edges[: -1])
+
+ax = plt.subplot(grid[0, 3])
+ax.plot(bg_bin_centers, h, '.-')
+plt.xlabel('bacgrkound (ADU)')
+
 
 # plot with napari
-# with napari.gui_qt():
-# specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
-viewer = napari.Viewer(title=img_fname)
-animation_widget = AnimationWidget(viewer)
-viewer.window.add_dock_widget(animation_widget, area='right')
+# don't try this over remote desktop or x-windows as will fail. Some story with OpenGL
+if False:
+    # specify contrast_limits and is_pyramid=False with big data to avoid unnecessary computations
+    viewer = napari.Viewer(title=img_fname)
+    animation_widget = AnimationWidget(viewer)
+    viewer.window.add_dock_widget(animation_widget, area='right')
 
-# viewer = napari.view_image(imgs, colormap="bone", contrast_limits=[0, 750], multiscale=False, title=img_fname)
-viewer.add_image(imgs, scale=(dz/dc, 1, 1), colormap="bone", contrast_limits=[0, 750], multiscale=False)
+    # viewer = napari.view_image(imgs, colormap="bone", contrast_limits=[0, 750], multiscale=False, title=img_fname)
+    viewer.add_image(imgs, scale=(dz/dc, 1, 1), colormap="bone", contrast_limits=[0, 750], multiscale=False)
 
-if plot_centers:
-    viewer.add_points(centers_napari, size=2, face_color="red", opacity=0.75, name="fits", n_dimensional=True)
-if plot_centers_guess:
-    viewer.add_points(centers_guess_napari, size=2, face_color="green", opacity=0.5, name="guesses", n_dimensional=True)
+    if plot_centers:
+        viewer.add_points(centers_napari, size=2, face_color="red", opacity=0.75, name="fits", n_dimensional=True)
+    if plot_centers_guess:
+        viewer.add_points(centers_guess_napari, size=2, face_color="green", opacity=0.5, name="guesses", n_dimensional=True)
 
-if plot_fit_filters:
-    conditions = data["conditions"].transpose()
-    condition_names = data["conditions_names"]
-    colors = ["purple", "blue", "yellow", "orange"] * int(np.ceil(len(conditions) / 4))
-    for c, cn, col in zip(conditions, condition_names, colors):
-        ct = centers_guess[np.logical_not(c)] / dc
-        viewer.add_points(ct, size=2, face_color=col, opacity=0.5, name="not %s" % cn.replace("_", " "), n_dimensional=True)
+    if plot_fit_filters:
+        conditions = data["conditions"].transpose()
+        condition_names = data["conditions_names"]
+        colors = ["purple", "blue", "yellow", "orange"] * int(np.ceil(len(conditions) / 4))
+        for c, cn, col in zip(conditions, condition_names, colors):
+            ct = centers_guess[np.logical_not(c)] / dc
+            viewer.add_points(ct, size=2, face_color=col, opacity=0.5, name="not %s" % cn.replace("_", " "), n_dimensional=True)
