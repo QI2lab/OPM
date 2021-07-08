@@ -5,6 +5,7 @@ import pickle
 import matplotlib.pyplot as plt
 import tifffile
 import localize
+import localize_skewed
 
 
 rounds = list(range(8))
@@ -41,8 +42,8 @@ for round in rounds:
 
             for ind in range(len(fps)):
                 if to_keep[ind]:
-                    figa = localize.plot_roi(fps[ind], rois[ind], imgs, x, y, z,
-                                             init_params=ips[ind],
-                                             figsize=(16, 8), same_color_scale=True, prefix="TL%d_Ch%d_Tile%d_ROI%d_plot" % (round, channel, tile, ind),
-                                             save_dir=data_dir)
+                    figa = localize.plot_gauss_roi(fps[ind], rois[ind], imgs, x, y, z,
+                                                    init_params=ips[ind],
+                                                    figsize=(16, 8), same_color_scale=True, prefix="TL%d_Ch%d_Tile%d_ROI%d_plot" % (round, channel, tile, ind),
+                                                    save_dir=data_dir)
                     plt.close(figa)

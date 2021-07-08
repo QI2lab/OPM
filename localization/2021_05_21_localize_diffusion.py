@@ -6,7 +6,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
-import localize
+import localize_skewed
 import pycromanager
 import sys
 
@@ -146,7 +146,7 @@ for root_dir in root_dirs:
             y_offset = img_start * dstage
 
             # do localization
-            rois, fit_params, init_params, fit_results, imgs_filtered, coords = localize.localize_skewed(
+            rois, fit_params, init_params, fit_results, imgs_filtered, coords = localize_skewed.localize_skewed(
                 imgs, {"dc": dc, "dstep": dstage, "theta": theta}, absolute_threshold, roi_size,
                 filter_sigma_small, filter_sigma_large, min_dists,
                 offsets=(0, y_offset, 0), allowed_polygon=allowed_camera_region, mode="fit")
@@ -154,10 +154,10 @@ for root_dir in root_dirs:
 
 
             # filter results
-            to_keep, conditions, condition_names = localize.filter_localizations(fit_params, init_params, coords,
-                                                                                 sigma_xy, sigma_z, min_dists,
-                                                                                 (sigmas_min, sigmas_max),
-                                                                                 0.5 * absolute_threshold)
+            to_keep, conditions, condition_names = localize_skewed.filter_localizations(fit_params, init_params, coords,
+                                                                                        sigma_xy, sigma_z, min_dists,
+                                                                                        (sigmas_min, sigmas_max),
+                                                                                        0.5 * absolute_threshold)
 
             # ind = 333
             # x, y, z = localize.get_skewed_coords(imgs.shape, dc, dstage, theta)

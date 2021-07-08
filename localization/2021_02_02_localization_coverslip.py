@@ -10,7 +10,7 @@ import pickle
 import joblib
 import pycromanager
 
-import localize
+import localize_skewed
 
 # basic parameters
 plot_extra = False
@@ -102,7 +102,7 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
 
     y_offset = (aa - n_overlap) * dstage
 
-    imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize_skewed(
+    imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize_skewed.localize_skewed(
         imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_roi_size, z_roi_size, 0, 0, min_z_dist,
         min_xy_dist, sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_try, y_offset=y_offset)
 
@@ -115,7 +115,7 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
     # plot localization fit diagnostic on good points
     # picture coordinates in coverslip frame
     # x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
-    x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
+    x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
     y += y_offset
 
     if plot_results:
@@ -123,8 +123,8 @@ for aa in range(50, ds_array.shape[0] - nsingle, nsingle):
         plt.switch_backend("agg")
         print("plotting %d ROI's" % len(fit_params_unique))
         results = joblib.Parallel(n_jobs=-1, verbose=10, timeout=None)(
-            joblib.delayed(localize.plot_skewed_roi)(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
-                                                     figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
+            joblib.delayed(localize_skewed.plot_skewed_roi)(fit_params_unique[ii], rois_unique[ii], imgs_filtered, theta, x, y, z,
+                                                            figsize=figsize, prefix=("%04d" % ii), save_dir=save_dir_sub)
             for ii in range(len(fit_params_unique)))
 
         # for debugging
@@ -144,7 +144,7 @@ centers_fit_sequence_all = np.concatenate(centers_fit_sequence_all, axis=0)
 centers_guess_all = np.concatenate(centers_guess_all, axis=0)
 
 # since left some overlap at the edges, have to again combine results
-centers_unique, unique_inds =localize.combine_nearby_peaks(centers_unique_all, min_xy_dist, min_z_dist, mode="keep-one")
+centers_unique, unique_inds = localize.combine_nearby_peaks(centers_unique_all, min_xy_dist, min_z_dist, mode="keep-one")
 fit_params_unique = fit_params_unique_all[unique_inds]
 rois_unique = rois_unique_all[unique_inds]
 
@@ -167,9 +167,9 @@ with open(fname, "wb") as f:
 imgs_all = np.flip(ds_array.compute(), axis=1)
 nstep, ny, nx = imgs_all.shape
 gn = np.arange(nstep) * dstage
-x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
+x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
 
-xi, yi, zi, imgs_unskew = localize.interp_opm_data(imgs_all, dc, dstage, theta, mode="ortho-interp")
+xi, yi, zi, imgs_unskew = localize_skewed.interp_opm_data(imgs_all, dc, dstage, theta, mode="ortho-interp")
 # xi, yi, zi, imgs_unskew = localize.interp_opm_data(imgs_all, dc, dstage, theta, mode="row-interp")
 dxi = xi[1] - xi[0]
 dyi = yi[1] - yi[0]

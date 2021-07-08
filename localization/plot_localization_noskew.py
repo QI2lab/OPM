@@ -10,6 +10,7 @@ import tifffile
 import napari
 from napari_animation import AnimationWidget
 import matplotlib.pyplot as plt
+import localize_skewed
 import localize
 import image_post_processing as pp
 
@@ -67,7 +68,7 @@ if raw_data_skewed:
         imgs_raw.append(dset.read_image(channel=0, z=ii))
     print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
     imgs_raw = np.flip(np.asarray(imgs_raw), axis=0)
-    xskew, yskew, zskew = localize.get_skewed_coords(imgs_raw.shape, 0.115, 0.4, 30 * np.pi/180)
+    xskew, yskew, zskew = localize_skewed.get_skewed_coords(imgs_raw.shape, 0.115, 0.4, 30 * np.pi / 180)
 
     tstart = time.perf_counter()
     imgs = pp.deskew(imgs_raw, 30., 0.4, 0.115)
@@ -109,11 +110,11 @@ if plot_fits:
     while num_plotted < 20 and ind < len(fps):
         if to_keep[ind] and fps[ind, 6] > 700:
             if raw_data_skewed:
-                figa = localize.plot_skewed_roi(fps[ind], rois[ind], imgs_raw, theta, xskew, yskew, zskew,
-                                                init_params=ips[ind], figsize=(16, 8), same_color_scale=True)
+                figa = localize_skewed.plot_skewed_roi(fps[ind], rois[ind], imgs_raw, theta, xskew, yskew, zskew,
+                                                       init_params=ips[ind], figsize=(16, 8), same_color_scale=True)
             else:
-                fig = localize.plot_roi(fps[ind], rois[ind], imgs_raw, x, y, z, init_params=ips[ind],
-                                        figsize=(16, 8), same_color_scale=True)
+                fig = localize.plot_gauss_roi(fps[ind], rois[ind], imgs_raw, x, y, z, init_params=ips[ind],
+                                               figsize=(16, 8), same_color_scale=True)
             num_plotted += 1
         ind += 1
 

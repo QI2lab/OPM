@@ -9,7 +9,7 @@ import pickle
 import joblib
 import tifffile
 import pycromanager
-import localize
+import localize_skewed
 import load_dataset
 
 tbegin = time.perf_counter()
@@ -126,7 +126,7 @@ for vv in range(nvols):
         y_offset = imgs_inds[0] * dstage
 
         # do localization
-        imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize_skewed(
+        imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize_skewed.localize_skewed(
             imgs, {"dc": dc, "dstep": dstage, "theta": theta}, absolute_threshold, roi_size,
             filter_sigma_small, filter_sigma_large, min_dists, (sigmas_min, sigmas_max),
             offsets=(0, y_offset, 0), allowed_polygon=allowed_camera_region, mode="fit")

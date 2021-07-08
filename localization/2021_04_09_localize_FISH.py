@@ -4,7 +4,9 @@ import datetime
 import time
 import numpy as np
 import pickle
+import localize_skewed
 import localize
+import rois
 import tifffile
 import pygpufit.gpufit as gf
 import napari
@@ -63,7 +65,7 @@ filter_sigma_small = (0.5 * sigma_z, 0.25 * sigma_xy, 0.25 * sigma_xy)
 filter_sigma_large = (5 * sigma_z, 20 * sigma_xy, 20 * sigma_xy)
 # fit roi size
 roi_size = (3 * sigma_z, 8 * sigma_xy, 8 * sigma_xy)
-roi_size_pix = localize.get_roi_size(roi_size, dc, dz)
+roi_size_pix = rois.get_roi_size(roi_size, dc, dz)
 # assume points closer together than this come from a single bead
 min_dists = (3 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
 # exclude points with sigmas outside these ranges
@@ -122,7 +124,7 @@ for vv in range(nvols):
         imgs_filtered = localize.filter_convolve(imgs, ks) - localize.filter_convolve(imgs, kl)
 
         # find candidate peaks
-        footprint = localize.get_footprint(min_dists, dc, dz)
+        footprint = localize.get_max_filter_footprint(min_dists, dc, dz)
         centers_guess_inds = localize.find_peak_candidates(imgs_filtered, footprint, absolute_threshold)
 
         # convert to real coordinates
@@ -141,7 +143,7 @@ for vv in range(nvols):
         centers_temp = centers_guess
 
         print("using parallelization on GPU")
-        imgs_roi = [np.expand_dims(localize.cut_roi(r, imgs).ravel(), axis=0) for r in rois]
+        imgs_roi = [np.expand_dims(rois.cut_roi(r, imgs).ravel(), axis=0) for r in rois]
         # pad to make sure all rois same size
         imgs_roi = [np.pad(ir, ((0, 0), (0, nmax - ir.size)), mode="constant") for ir in imgs_roi]
 
@@ -218,7 +220,7 @@ for vv in range(nvols):
         tstart = time.perf_counter()
         # only keep unique center if close enough
         centers_unique, unique_inds = localize.combine_nearby_peaks(centers_fit[to_keep], min_dists[1], min_dists[0],
-                                                           mode="keep-one")
+                                                                           mode="keep-one")
         fit_params_unique = fit_params[to_keep][unique_inds]
         rois_unique = rois[to_keep][unique_inds]
         tend = time.perf_counter()
@@ -254,7 +256,7 @@ for vv in range(nvols):
     if ichunk > 0:
         # since left some overlap at the edges, have to again combine results
         centers_unique, unique_inds = localize.combine_nearby_peaks(centers_vol, min_dists[1], min_dists[0],
-                                                                    mode="keep-one")
+                                                                           mode="keep-one")
         fit_params_unique = fit_params_vol[unique_inds]
         rois_unique = rois_vol[unique_inds]
     else:

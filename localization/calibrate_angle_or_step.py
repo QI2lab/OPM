@@ -9,8 +9,9 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
-import localize
-import load_dataset
+import localize_skewed
+import fit
+import rois
 import pycromanager
 import data_io
 import scipy
@@ -138,28 +139,28 @@ for vv in range(nvols):
         centers_guess_inds = np.argwhere(np.logical_and(imgs_filtered == img_max_filtered, imgs > absolute_threshold))
 
         roi_shape = (13, 30, 30)
-        rois = np.array([localize.get_centered_roi(c, roi_shape, min_vals=(0, 0, 0), max_vals=imgs.shape) for c in centers_guess_inds])
+        rois = np.array([rois.get_centered_roi(c, roi_shape, min_vals=(0, 0, 0), max_vals=imgs.shape) for c in centers_guess_inds])
 
         plotted_counter = 0
         max_plot = np.inf
         fit_ps = np.zeros((len(rois), 9))
         for ind in range(len(rois)):
             roi = rois[ind]
-            img_roi = localize.cut_roi(roi, imgs)
+            img_roi = rois.cut_roi(roi, imgs)
             current_roi_shape = (roi[1] - roi[0], roi[3] - roi[2], roi[5] - roi[4])
 
-            def fit_fn(p): return localize.gaussian3d_angle(current_roi_shape, dc, p)
-            def jac_fn(p): return localize.gaussian3d_angle_jacobian(current_roi_shape, dc, p)
+            def fit_fn(p): return localize_skewed.gaussian3d_angle(current_roi_shape, dc, p)
+            def jac_fn(p): return localize_skewed.gaussian3d_angle_jacobian(current_roi_shape, dc, p)
 
             # guess params
-            xg, yg, zg = localize.get_skewed_coords(current_roi_shape, dc, dstage, theta)
+            xg, yg, zg = localize_skewed.get_skewed_coords(current_roi_shape, dc, dstage, theta)
             ind_max = np.unravel_index(np.argmax(img_roi), current_roi_shape)
             init_params = [np.nanmax(img_roi), xg[0, 0, ind_max[2]], yg[ind_max[0], ind_max[1], 0], zg[0, ind_max[1], 0], sigma_xy, sigma_z,
                            np.nanmean(img_roi), theta, dstage]
             fixed_params = [False, False, False, False, False, False, False, True, False]
-            results = localize.fit_model(img_roi, fit_fn, init_params, fixed_params=fixed_params, model_jacobian=jac_fn)
+            results = fit.fit_model(img_roi, fit_fn, init_params, fixed_params=fixed_params, model_jacobian=jac_fn)
 
-            xf, yf, zf = localize.get_skewed_coords(current_roi_shape, dc, results["fit_params"][-1], results["fit_params"][-2])
+            xf, yf, zf = localize_skewed.get_skewed_coords(current_roi_shape, dc, results["fit_params"][-1], results["fit_params"][-2])
             cfit = np.array([results["fit_params"][3], results["fit_params"][2], results["fit_params"][1]])
 
             fit_ps[ind] = results["fit_params"]

@@ -1,34 +1,19 @@
 """
 Code for localization in native OPM frame
+
+This file stores tools specific to the OPM skewed geometry. Most localization functions are found in localize.py
 """
 import os
 import numpy as np
-import scipy.optimize
-import scipy.ndimage
-import scipy.signal
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import warnings
 import time
 import joblib
 
-# for filtering on GPU
-try:
-    import cupy as cp
-    import cupyx.scipy.signal # new in v9, compiled github source
-    import cupyx.scipy.ndimage
-    CUPY_AVAILABLE = True
-except ImportError:
-    CUPY_AVAILABLE = False
-
-# for fitting on GPU
-# custom code found in qi2lab branch of gpufit repo
-# this must be compiled from source, and then the python package installed from there
-try:
-    import pygpufit.gpufit as gf
-    GPUFIT_AVAILABLE = True
-except ImportError:
-    GPUFIT_AVAILABLE = False
+import fit_psf
+import rois
+import localize
 
 # geometry functions
 def nearest_pt_line(pt, slope, pt_line):
@@ -229,20 +214,6 @@ def get_trapezoid_ybound(cz, coords):
     return ymax, ymin
 
 
-def get_coords(sizes, dc, dz):
-    """
-    Non-tilted coordinates
-    :param sizes: (sz, sy, sx)
-    :param dc:
-    :param dz:
-    :return:
-    """
-    x = np.expand_dims(np.arange(sizes[2]) * dc, axis=(0, 1))
-    y = np.expand_dims(np.arange(sizes[1]) * dc, axis=(0, 2))
-    z = np.expand_dims(np.arange(sizes[0]) * dz, axis=(1, 2))
-    return x, y, z
-
-
 # deskew
 def interp_opm_data(imgs, dc, ds, theta, mode="ortho-interp"):
     """
@@ -345,191 +316,6 @@ def interp_opm_data(imgs, dc, ds, theta, mode="ortho-interp"):
 
 
 # point spread function model and fitting
-def oversample_pixel(x, y, z, ds, sf=3, euler_angles=(0., 0., 0.)):
-    """
-    Suppose we have a set of pixels centered at points given by x, y, z. Generate sf**2 points in this pixel equally
-    spaced about the center. Allow the pixel to be orientated in an arbitrary direction with respect to the coordinate
-    system. The pixel rotation is described by the Euler angles (psi, theta, phi), where the pixel "body" frame
-    is a square with xy axis orientated along the legs of the square with z-normal to the square
-
-    :param x:
-    :param y:
-    :param z:
-    :param ds: pixel size
-    :param sf: sample factor
-    :param euler_angles: [phi, theta, psi] where phi and theta are the polar angles describing the normal of the pixel,
-    and psi describes the rotation of the pixel about its normal
-    :return:
-
-    """
-
-    # generate new points in pixel, each of which is centered about an equal area of the pixel, so summing them is
-    # giving an approximation of the integral
-    if sf > 1:
-        pts = np.arange(1 / (2*sf), 1 - 1 / (2*sf), 1 / sf) - 0.5
-        xp, yp = np.meshgrid(ds * pts, ds * pts)
-        zp = np.zeros(xp.shape)
-
-        # rotate points to correct position using normal vector
-        # for now we will fix x, but lose generality
-        mat = euler_mat(*euler_angles)
-        result = mat.dot(np.concatenate((xp.ravel()[None, :], yp.ravel()[None, :], zp.ravel()[None, :]), axis=0))
-        xs, ys, zs = result
-
-        # now must add these to each point x, y, z
-        xx_s = x[..., None] + xs[None, ...]
-        yy_s = y[..., None] + ys[None, ...]
-        zz_s = z[..., None] + zs[None, ...]
-    else:
-        xx_s = np.expand_dims(x, axis=-1)
-        yy_s = np.expand_dims(y, axis=-1)
-        zz_s = np.expand_dims(z, axis=-1)
-
-    return xx_s, yy_s, zz_s
-
-def euler_mat(phi, theta, psi):
-    """
-    Define our euler angles connecting the body frame to the space/lab frame by
-
-    r_lab = U_z(phi) * U_y(theta) * U_z(psi) * r_body
-
-    Consider the z-axis in the body frame. This axis is then orientated at [cos(phi)*sin(theta), sin(phi)*sin(theta), cos(theta)]
-    in the space frame. i.e. phi, theta are the usual polar angles. psi represents a rotation of the object about its own axis.
-
-    U_z(phi) = [[cos(phi), -sin(phi), 0], [sin(phi), cos(phi), 0], [0, 0, 1]]
-    U_y(theta) = [[cos(theta), 0, sin(theta)], [0, 1, 0], [-sin(theta), 0, cos(theta)]]
-    """
-    euler_mat = np.array([[np.cos(phi) * np.cos(theta) * np.cos(psi) - np.sin(phi) * np.sin(psi),
-                          -np.cos(phi) * np.cos(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi),
-                           np.cos(phi) * np.sin(theta)],
-                          [np.sin(phi) * np.cos(theta) * np.cos(psi) + np.cos(phi) * np.sin(psi),
-                          -np.sin(phi) * np.cos(theta) * np.sin(psi) + np.cos(phi) * np.cos(psi),
-                           np.sin(phi) * np.sin(theta)],
-                          [-np.sin(theta) * np.cos(psi), np.sin(theta) * np.sin(psi), np.cos(theta)]])
-
-    return euler_mat
-
-
-def euler_mat_inv(phi, theta, psi):
-    """
-    r_body = U_z(-psi) * U_y(-theta) * U_z(-phi) * r_lab
-    """
-
-    inv = euler_mat(-psi, -theta, -phi)
-    return inv
-
-
-def euler_mat_derivatives(phi, theta, psi):
-    dphi = np.array([[-np.sin(phi) * np.cos(theta) * np.cos(psi) - np.cos(phi) * np.sin(psi),
-                       np.sin(phi) * np.cos(theta) * np.sin(psi) - np.cos(phi) * np.cos(psi),
-                      -np.sin(phi) * np.sin(theta)],
-                     [ np.cos(phi) * np.cos(theta) * np.cos(psi) - np.sin(phi) * np.sin(psi),
-                      -np.cos(phi) * np.cos(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi),
-                       np.cos(phi) * np.sin(theta)],
-                     [0, 0, 0]])
-    dtheta = np.array([[-np.cos(phi) * np.sin(theta) * np.cos(psi),
-                         np.cos(phi) * np.sin(theta) * np.sin(psi),
-                         np.cos(phi) * np.cos(theta)],
-                       [-np.sin(phi) * np.sin(theta) * np.cos(psi),
-                         np.sin(phi) * np.sin(theta) * np.sin(psi),
-                         np.sin(phi) * np.cos(theta)],
-                       [-np.cos(theta) * np.cos(psi), np.cos(theta) * np.sin(psi), -np.sin(theta)]])
-    dpsi = np.array([[-np.cos(phi) * np.cos(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi),
-                      -np.cos(phi) * np.cos(theta) * np.cos(psi) + np.sin(phi) * np.sin(psi),
-                      0],
-                     [-np.sin(phi) * np.cos(theta) * np.sin(psi) + np.cos(phi) * np.cos(psi),
-                      -np.sin(phi) * np.cos(theta) * np.cos(psi) - np.cos(phi) * np.sin(psi),
-                      0],
-                     [np.sin(theta) * np.sin(psi), np.sin(theta) * np.cos(psi), 0]])
-
-    return dphi, dtheta, dpsi
-
-
-def euler_mat_inv_derivatives(phi, theta, psi):
-    d1, d2, d3 = euler_mat_derivatives(-psi, -theta, -phi)
-    dphi = -d3
-    dtheta = -d2
-    dpsi = -d1
-
-    return dphi, dtheta, dpsi
-
-def gaussian3d_pixelated_psf(x, y, z, dc, p, sf=3, angles=(0., 0., 0.)):
-    """
-    Gaussian function, accounting for image pixelation in the xy plane. 
-
-    vectorized, i.e. can rely on obeying broadcasting rules for x,y,z
-
-    :param x:
-    :param y:
-    :param z: coordinates of z-planes to evaluate function at
-    :param dc: pixel size
-    :param angle:
-    :param p: [A, cx, cy, cz, sxy, sz, bg]
-    :param sf: factor to oversample pixels. The value of each pixel is determined by averaging sf**2 equally spaced
-    points in the pixel.
-    :return:
-    """
-
-    # oversample points in pixel
-    xx_s, yy_s, zz_s = oversample_pixel(x, y, z, dc, sf=sf, euler_angles=angles)
-
-    # calculate psf at oversampled points
-    psf_s = np.exp(-(xx_s - p[1]) ** 2 / 2 / p[4] ** 2
-                   -(yy_s - p[2]) ** 2 / 2 / p[4] ** 2
-                   -(zz_s - p[3]) ** 2 / 2 / p[5] ** 2)
-
-    # todo: might want to put this in, but complicates jacobian calculation
-    # calculate norm
-    #xn, yn, zn = oversample_pixel(np.array([0]), np.array([0]), np.array([0]), dx, sf=sf, euler_angles=angle)
-    #norm = np.exp(-(xn - p[1]) ** 2 / 2 / p[4] ** 2
-    #             -(yn - p[2]) ** 2 / 2 / p[4] ** 2
-    #             -(zn - p[3]) ** 2 / 2 / p[5] ** 2)
-
-    # normalization is such that the predicted peak value of the PSF ignoring binning would be p[0]
-    psf = p[0] * np.mean(psf_s, axis=-1) + p[-1]
-
-    return psf
-
-
-def gaussian3d_pixelated_psf_jac(x, y, z, dc, p, sf, angles):
-    """
-    Jacobian of gaussian3d_pixelated_psf()
-
-    :param x:
-    :param y:
-    :param z: coordinates of z-planes to evaluate function at
-    :param dc: pixel size
-    :param p: [A, cx, cy, cz, sxy, sz, bg]
-    :param sf: factor to oversample pixels. The value of each pixel is determined by averaging sf**2 equally spaced
-    points in the pixel.
-    :return:
-    """
-
-
-    # oversample points in pixel
-    xx_s, yy_s, zz_s = oversample_pixel(x, y, z, dc, sf=sf, euler_angles=angles)
-
-    psf_s = np.exp(-(xx_s - p[1]) ** 2 / 2 / p[4] ** 2
-                   -(yy_s - p[2]) ** 2 / 2 / p[4] ** 2
-                   -(zz_s - p[3]) ** 2 / 2 / p[5] ** 2)
-
-    # normalization is such that the predicted peak value of the PSF ignoring binning would be p[0]
-    # psf = p[0] * psf_sum + p[-1]
-
-    bcast_shape = (x + y + z).shape
-    # [A, cx, cy, cz, sxy, sz, bg]
-    jac = [np.mean(psf_s, axis=-1),
-           p[0] * np.mean(2 * (xx_s - p[1]) / 2 / p[4]**2 * psf_s, axis=-1),
-           p[0] * np.mean(2 * (yy_s - p[2]) / 2 / p[4]**2 * psf_s, axis=-1),
-           p[0] * np.mean(2 * (zz_s - p[3]) / 2/ p[5]**2 * psf_s, axis=-1),
-           p[0] * np.mean((2 / p[4]**3 * (xx_s - p[1])**2 / 2 +
-                           2 / p[4]**3 * (yy_s - p[2])**2 / 2) * psf_s, axis=-1),
-           p[0] * np.mean(2 / p[5]**3 * (zz_s - p[3])**2 / 2 * psf_s, axis=-1),
-           np.ones(bcast_shape)]
-
-    return jac
-
-
 def gaussian3d_angle(shape, dc, p):
     """
     
@@ -568,126 +354,6 @@ def gaussian3d_angle_jacobian(shape, dc, p):
            ]
 
     return jac
-
-
-def fit_model(img, model_fn, init_params, fixed_params=None, sd=None, bounds=None, model_jacobian=None, **kwargs):
-    """
-    Fit 2D model function with capability of fixing some parameters
-
-    :param np.array img: nd array
-    :param model_fn: function f(p)
-    :param list[float] init_params: p = [p1, p2, ..., pn]
-    :param list[boolean] fixed_params: list of boolean values, same size as init_params. If None, no parameters will be fixed.
-    :param sd: uncertainty in parameters y. e.g. if experimental curves come from averages then should be the standard
-    deviation of the mean. If None, then will use a value of 1 for all points. As long as these values are all the same
-    they will not affect the optimization results, although they will affect chi squared.
-    :param tuple[tuple[float]] bounds: (lbs, ubs). If None, -/+ infinity used for all parameters.
-    :param model_jacobian: Jacobian of the model function as a list, [df/dp[0], df/dp[1], ...]. If None, no jacobian used.
-    :param kwargs: additional key word arguments will be passed through to scipy.optimize.least_squares
-    :return:
-    """
-    to_use = np.logical_not(np.isnan(img))
-
-    # get default fixed parameters
-    if fixed_params is None:
-        fixed_params = [False for _ in init_params]
-
-    if sd is None or np.all(np.isnan(sd)) or np.all(sd == 0):
-        sd = np.ones(img.shape)
-
-    # handle uncertainties that will cause fitting to fail
-    if np.any(sd == 0) or np.any(np.isnan(sd)):
-        sd[sd == 0] = np.nanmean(sd[sd != 0])
-        sd[np.isnan(sd)] = np.nanmean(sd[sd != 0])
-
-    # default bounds
-    if bounds is None:
-        bounds = (tuple([-np.inf] * len(init_params)), tuple([np.inf] * len(init_params)))
-
-    init_params = np.array(init_params, copy=True)
-    # ensure initial parameters within bounds. If within small tolerance, assume supposed to be equal and force
-    for ii in range(len(init_params)):
-        if (init_params[ii] < bounds[0][ii] or init_params[ii] > bounds[1][ii]) and not fixed_params[ii]:
-            if init_params[ii] > bounds[1][ii] and np.round(init_params[ii] - bounds[1][ii], 12) == 0:
-                init_params[ii] = bounds[1][ii]
-            elif (init_params[ii] < bounds[0][ii] and np.round(init_params[ii] - bounds[0][ii], 12) == 0):
-                init_params[ii] = bounds[0][ii]
-            else:
-                raise ValueError(
-                    "Initial parameter at index %d had value %0.5g, which was outside of bounds (%0.5g, %0.5g)" %
-                    (ii, init_params[ii], bounds[0][ii], bounds[1][ii]))
-
-    if np.any(np.isnan(init_params)):
-        raise ValueError("init_params cannot include nans")
-
-    if np.any(np.isnan(bounds)):
-        raise ValueError("bounds cannot include nans")
-
-    def err_fn(p):
-        return np.divide(model_fn(p)[to_use].ravel() - img[to_use].ravel(), sd[to_use].ravel())
-
-    if model_jacobian is not None:
-        def jac_fn(p): return [v[to_use] / sd[to_use] for v in model_jacobian(p)]
-
-    # if some parameters are fixed, we need to hide them from the fit function to produce correct covariance, etc.
-    # awful list comprehension. The idea is this: map the "reduced" (i.e. not fixed) parameters onto the full parameter list.
-    # do this by looking at each parameter. If it is supposed to be "fixed" substitute the initial parameter. If not,
-    # then get the next value from pfree. We find the right index of pfree by summing the number of previously unfixed parameters
-    free_inds = [int(np.sum(np.logical_not(fixed_params[:ii]))) for ii in range(len(fixed_params))]
-
-    def pfree2pfull(pfree):
-        return np.array([pfree[free_inds[ii]] if not fp else init_params[ii] for ii, fp in enumerate(fixed_params)])
-
-    # map full parameters to reduced set
-    def pfull2pfree(pfull):
-        return np.array([p for p, fp in zip(pfull, fixed_params) if not fp])
-
-    # function to minimize the sum of squares of, now as a function of only the free parameters
-    def err_fn_pfree(pfree):
-        return err_fn(pfree2pfull(pfree))
-
-    if model_jacobian is not None:
-        def jac_fn_free(pfree): return pfull2pfree(jac_fn(pfree2pfull(pfree))).transpose()
-    init_params_free = pfull2pfree(init_params)
-    bounds_free = (tuple(pfull2pfree(bounds[0])), tuple(pfull2pfree(bounds[1])))
-
-    # non-linear least squares fit
-    if model_jacobian is None:
-        fit_info = scipy.optimize.least_squares(err_fn_pfree, init_params_free, bounds=bounds_free, **kwargs)
-    else:
-        fit_info = scipy.optimize.least_squares(err_fn_pfree, init_params_free, bounds=bounds_free,
-                                                jac=jac_fn_free, x_scale='jac', **kwargs)
-    pfit = pfree2pfull(fit_info['x'])
-
-    # calculate chi squared
-    nfree_params = np.sum(np.logical_not(fixed_params))
-    red_chi_sq = np.sum(np.square(err_fn(pfit))) / (img[to_use].size - nfree_params)
-
-    # calculate covariances
-    try:
-        jacobian = fit_info['jac']
-        cov_free = red_chi_sq * np.linalg.inv(jacobian.transpose().dot(jacobian))
-    except np.linalg.LinAlgError:
-        cov_free = np.nan * np.zeros((jacobian.shape[1], jacobian.shape[1]))
-
-    cov = np.nan * np.zeros((len(init_params), len(init_params)))
-    ii_free = 0
-    for ii, fpi in enumerate(fixed_params):
-        jj_free = 0
-        for jj, fpj in enumerate(fixed_params):
-            if not fpi and not fpj:
-                cov[ii, jj] = cov_free[ii_free, jj_free]
-                jj_free += 1
-                if jj_free == nfree_params:
-                    ii_free += 1
-
-    result = {'fit_params': pfit, 'chi_squared': red_chi_sq, 'covariance': cov,
-              'init_params': init_params, 'fixed_params': fixed_params, 'bounds': bounds,
-              'cost': fit_info['cost'], 'optimality': fit_info['optimality'],
-              'nfev': fit_info['nfev'], 'njev': fit_info['njev'], 'status': fit_info['status'],
-              'success': fit_info['success'], 'message': fit_info['message']}
-
-    return result
 
 
 # generate synthetic image
@@ -730,7 +396,7 @@ def simulate_img(scan_params, physical_params, ncenters=1, centers=None, sf=3):
     img_gt = np.zeros((x+y+z).shape)
     for c in centers:
         params = [amp, c[2], c[1], c[0], sxy, sz, bg]
-        img_gt += gaussian3d_pixelated_psf(x, y, z, dc, params, sf=sf, angles=np.array([0, theta, 0]))
+        img_gt += fit_psf.gaussian3d_psf(x, y, z, dc, params, sf=sf, angles=np.array([0, theta, 0]))
 
     return img_gt, centers
 
@@ -786,99 +452,6 @@ def simulate_img_noise(ground_truth, max_photons, cam_gains=2, cam_offsets=100, 
 
 
 # ROI tools
-def cut_roi(roi, img):
-    return img[roi[0]:roi[1], roi[2]:roi[3], roi[4]:roi[5]]
-
-
-def get_centered_roi(centers, sizes, min_vals=None, max_vals=None):
-    """
-    Get end points of an roi centered about centers (as close as possible) with length sizes.
-    If the ROI size is odd, the ROI will be perfectly centered. Otherwise, the centering will
-    be approximation
-
-    roi = [start_0, end_0, start_1, end_1, ..., start_n, end_n]
-
-    Slicing an array as A[start_0:end_0, start_1:end_1, ...] gives the desired ROI.
-    Note that following python array indexing convention end_i are NOT contained in the ROI
-
-    :param centers: list of centers [c1, c2, ..., cn]
-    :param sizes: list of sizes [s1, s2, ..., sn]
-    :param min_values: list of minimimum allowed index values for each dimension
-    :param max_values: list of maximum allowed index values for each dimension
-    :return roi: [start_0, end_0, start_1, end_1, ..., start_n, end_n]
-    """
-    roi = []
-    # for c, n in zip(centers, sizes):
-    for ii in range(len(centers)):
-        c = centers[ii]
-        n = sizes[ii]
-
-        # get ROI closest to centered
-        end_test = np.round(c + (n - 1) / 2) + 1
-        end_err = np.mod(end_test, 1)
-        start_test = np.round(c - (n - 1) / 2)
-        start_err = np.mod(start_test, 1)
-
-        if end_err > start_err:
-            start = start_test
-            end = start + n
-        else:
-            end = end_test
-            start = end - n
-
-        if min_vals is not None:
-            if start < min_vals[ii]:
-                start = min_vals[ii]
-
-        if max_vals is not None:
-            if end > max_vals[ii]:
-                end = max_vals[ii]
-
-        roi.append(int(start))
-        roi.append(int(end))
-
-    return roi
-
-
-def get_roi_size(sizes, dc, dz, ensure_odd=True):
-    n0 = int(np.ceil(sizes[0] / dz))
-    n1 = int(np.ceil(sizes[1] / dc))
-    n2 = int(np.ceil(sizes[2] / dc))
-
-    if ensure_odd:
-        n0 += (1 - np.mod(n0, 2))
-        n1 += (1 - np.mod(n1, 2))
-        n2 += (1 - np.mod(n2, 2))
-
-    return [n0, n1, n2]
-
-
-def get_roi(center, img, x, y, z, sizes):
-    """
-
-    :param center: [cz, cy, cx] in same units as x, y, z.
-    :param x:
-    :param y:
-    :param z:
-    :param sizes: [i0, i1, i2] integers
-    :return:
-    """
-    i0 = np.argmin(np.abs(z.ravel() - center[0]))
-    i1 = np.argmin(np.abs(y.ravel() - center[1]))
-    i2 = np.argmin(np.abs(x.ravel() - center[2]))
-
-    roi = np.array(get_centered_roi([i0, i1, i2], sizes, min_vals=[0, 0, 0], max_vals=img.shape))
-
-    z_roi = z[roi[0]:roi[1]]
-    y_roi = y[:, roi[2]:roi[3], :]
-    x_roi = x[:, :, roi[4]:roi[5]]
-    z_roi, y_roi, x_roi = np.broadcast_arrays(z_roi, y_roi, x_roi)
-
-    img_roi = cut_roi(roi, img)
-
-    return roi, img_roi, x_roi, y_roi, z_roi
-
-
 def get_skewed_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     """
     Get ROI size in OPM matrix that includes sufficient xy and z points
@@ -928,9 +501,9 @@ def get_skewed_roi(center, imgs, x, y, z, sizes):
     shape = imgs.shape
     i2 = np.argmin(np.abs(x.ravel() - center[2]))
     i0, i1, _ = np.unravel_index(np.argmin((y - center[1]) ** 2 + (z - center[0]) ** 2), y.shape)
-    roi = np.array(get_centered_roi([i0, i1, i2], sizes, min_vals=[0, 0, 0], max_vals=np.array(shape)))
+    roi = np.array(rois.get_centered_roi([i0, i1, i2], sizes, min_vals=[0, 0, 0], max_vals=np.array(shape)))
 
-    img_roi = cut_roi(roi, imgs)
+    img_roi = rois.cut_roi(roi, imgs)
 
     x_roi = x[:, :, roi[4]:roi[5]]  # only roi on last one because x has only one entry on first two dims
     y_roi = y[roi[0]:roi[1], roi[2]:roi[3], :]
@@ -997,78 +570,6 @@ def get_filter_kernel_skewed(sigmas, dc, theta, dstage, sigma_cutoff=2):
     return kernel
 
 
-def get_filter_kernel(sigmas, dc, dz, sigma_cutoff=2):
-    """
-    Gaussian filter kernel
-    :param sigmas:
-    :param dc:
-    :param dz:
-    :param sigma_cutoff:
-    :return:
-    """
-    # compute kernel size
-    nk_x = 2 * int(np.round(sigmas[2] / dc * sigma_cutoff)) + 1
-    nk_y = 2 * int(np.round(sigmas[1] / dc * sigma_cutoff)) + 1
-    nk_z = 2 * int(np.round(sigmas[0] / dz * sigma_cutoff)) + 1
-
-    # get coordinates to evaluate kernel at
-    xk = np.expand_dims(np.arange(nk_x) * dc, axis=(0, 1))
-    yk = np.expand_dims(np.arange(nk_y) * dc, axis=(0, 2))
-    zk = np.expand_dims(np.arange(nk_z) * dz, axis=(1, 2))
-
-    xk = xk - np.mean(xk)
-    yk = yk - np.mean(yk)
-    zk = zk - np.mean(zk)
-
-    kernel = np.exp(-xk ** 2 / 2 / sigmas[2] ** 2 - yk ** 2 / 2 / sigmas[1] ** 2 - zk ** 2 / 2 / sigmas[0] ** 2)
-    kernel = kernel / np.sum(kernel)
-
-    return kernel
-
-
-def filter_convolve(imgs, kernel, use_gpu=CUPY_AVAILABLE):
-    """
-    Convolution fitler using kernel with GPU support
-
-    # todo: how much memory does convolution require? Much more than I expect...
-
-    :param imgs:
-    :param sigmas: (sigma_z, sigma_y, sigma_x)
-    :param dc:
-    :param theta:
-    :param dstage:
-    :param sigma_cutoff: number of sigmas to cutoff the kernel at # todo: allow different in different directions...
-    :return:
-    """
-
-    # convolve, and deal with edges by normalizing
-    if use_gpu:
-        kernel_cp = cp.asarray(kernel, dtype=cp.float32)
-        imgs_cp = cp.asarray(imgs, dtype=cp.float32)
-        imgs_filtered_cp = cupyx.scipy.signal.fftconvolve(imgs_cp, kernel_cp, mode="same")
-        imgs_filtered = cp.asnumpy(imgs_filtered_cp)
-
-        norm_cp = cupyx.scipy.signal.fftconvolve(cp.ones(imgs.shape), kernel_cp, mode="same")
-        norm = cp.asnumpy(norm_cp)
-
-        imgs_filtered = imgs_filtered / norm
-
-        # todo: unclear if this matters, or if these should be immediately after each variable is consummed
-        del kernel_cp
-        del imgs_cp
-        del norm_cp
-        del imgs_filtered_cp
-    else:
-        imgs_filtered = scipy.signal.fftconvolve(imgs, kernel, mode="same") / \
-                        scipy.signal.fftconvolve(np.ones(imgs.shape), kernel, mode="same")
-
-    # this method too slow for large filter sizes
-    # imgs_filtered = scipy.ndimage.convolve(imgs, kernel, mode="constant", cval=0) / \
-    #                 scipy.ndimage.convolve(np.ones(imgs.shape), kernel, mode="constant", cval=0)
-
-    return imgs_filtered
-
-
 # identify peaks
 def get_skewed_footprint(min_sep_allowed, dc, ds, theta):
     """
@@ -1090,112 +591,6 @@ def get_skewed_footprint(min_sep_allowed, dc, ds, theta):
     footprint_mask = footprint_mask.astype(np.bool)
 
     return footprint_form * footprint_mask
-
-
-def get_footprint(min_sep_allowed, dc, dz):
-    """
-    Get footprint for maximum filter
-    :param min_sep_allowed: (sz, sy, sx)
-    :param dc:
-    :param dz:
-    :return:
-    """
-
-    sz, sy, sx = min_sep_allowed
-
-    nz = int(np.ceil(sz / dz))
-    if np.mod(nz, 2) == 0:
-        nz += 1
-
-    ny = int(np.ceil(sy / dc))
-    if np.mod(ny, 2) == 0:
-        ny += 1
-
-    nx = int(np.ceil(sx / dc))
-    if np.mod(nx, 2) == 0:
-        nx += 1
-
-    footprint = np.ones((nz, ny, nx), dtype=np.bool)
-
-    return footprint
-
-
-def find_peak_candidates(imgs, footprint, threshold, use_gpu_filter=CUPY_AVAILABLE):
-    """
-    Find peak candidates using maximum filter
-
-    :param imgs:
-    :param footprint: footprint to use for maximum filter
-    :param threshold: only pixels with values greater than or equal to the threshold will be considered
-    :param use_gpu_filter:
-    :return centers_guess_inds: np.array([[i0, i1, i2], ...]) array indices of local maxima
-    """
-
-    if use_gpu_filter:
-        img_max_filtered = cp.asnumpy(
-            cupyx.scipy.ndimage.maximum_filter(cp.asarray(imgs, dtype=cp.float32), footprint=cp.asarray(footprint)))
-        # need to compare imgs as float32 because img_max_filtered will be ...
-        is_max = np.logical_and(imgs.astype(np.float32) == img_max_filtered, imgs >= threshold)
-    else:
-        img_max_filtered = scipy.ndimage.maximum_filter(imgs, footprint=footprint)
-        is_max = np.logical_and(imgs == img_max_filtered, imgs >= threshold)
-
-    amps = imgs[is_max]
-    centers_guess_inds = np.argwhere(is_max)
-
-    return centers_guess_inds, amps
-
-
-#
-def combine_nearby_peaks(centers, min_xy_dist, min_z_dist, mode="average", weights=None):
-    """
-    Combine multiple peaks above threshold into reduced set, where assume all peaks separated by no more than
-    min_xy_dist and min_z_dist come from the same feature.
-    :param centers:
-    :param min_xy_dist:
-    :param min_z_dist:
-    :param mode:
-    :param weights:
-    :return:
-    """
-    # todo: looks like this might be easier if use some tools from scipy.spatial, scipy.spatial.cKDTree
-
-    centers_unique = np.array(centers, copy=True)
-    inds = np.arange(len(centers), dtype=np.int)
-
-    if weights is None:
-        weights = np.ones(len(centers_unique))
-
-    counter = 0
-    while 1:
-        # compute distances to all other beads
-        z_dists = np.abs(centers_unique[counter][0] - centers_unique[:, 0])
-        xy_dists = np.sqrt((centers_unique[counter][1] - centers_unique[:, 1]) ** 2 +
-                           (centers_unique[counter][2] - centers_unique[:, 2]) ** 2)
-
-        # beads which are close enough we will combine
-        combine = np.logical_and(z_dists < min_z_dist, xy_dists < min_xy_dist)
-        if mode == "average":
-            denom = np.nansum(np.logical_not(np.isnan(np.sum(centers_unique[combine], axis=1))) * weights[combine])
-            centers_unique[counter] = np.nansum(centers_unique[combine] * weights[combine][:, None], axis=0, dtype=np.float) / denom
-            weights[counter] = denom
-        elif mode == "keep-one":
-            pass
-        else:
-            raise ValueError("mode must be 'average' or 'keep-one', but was '%s'" % mode)
-
-        # remove all points from list except for one representative
-        combine[counter] = False
-
-        inds = inds[np.logical_not(combine)]
-        centers_unique = centers_unique[np.logical_not(combine)]
-        weights = weights[np.logical_not(combine)]
-
-        counter += 1
-        if counter >= len(centers_unique):
-            break
-
-    return centers_unique, inds
 
 
 # localization functions
@@ -1320,154 +715,6 @@ def localize_radial_symm(img, coords, mode="radial-symmetry"):
     return np.array([amp, xc, yc, zc, sigma_xy, sz, np.nan])
 
 
-def fit_roi(img_roi, coords, init_params=None, fixed_params=None, bounds=None, sf=1, dc=None, angles=None):
-    """
-    Fit single ROI
-    TODO: generalize to accept skewed or regular data
-    :param img_roi:
-    :param coords: (z_roi, y_roi, x_roi)
-    :param init_params:
-    :param fixed_params:
-    :param bounds:
-    :return:
-    """
-    z_roi, y_roi, x_roi = coords
-
-    to_use = np.logical_not(np.isnan(img_roi))
-    x_roi_full, y_roi_full, z_roi_full = np.broadcast_arrays(x_roi, y_roi, z_roi)
-
-    if init_params is None:
-        init_params = [None] * 7
-
-    if np.any([ip is None for ip in init_params]):
-        # set initial parameters
-        min_val = np.nanmin(img_roi)
-        img_roi -= min_val  # so will get ok values for moments
-        mx1 = np.nansum(img_roi * x_roi) / np.nansum(img_roi)
-        mx2 = np.nansum(img_roi * x_roi ** 2) / np.nansum(img_roi)
-        my1 = np.nansum(img_roi * y_roi) / np.nansum(img_roi)
-        my2 = np.nansum(img_roi * y_roi ** 2) / np.nansum(img_roi)
-        sxy = np.sqrt(np.sqrt(my2 - my1 ** 2) * np.sqrt(mx2 - mx1 ** 2))
-        mz1 = np.nansum(img_roi * z_roi) / np.nansum(img_roi)
-        mz2 = np.nansum(img_roi * z_roi ** 2) / np.nansum(img_roi)
-        sz = np.sqrt(mz2 - mz1 ** 2)
-        img_roi += min_val  # put back to before
-
-        ip_default = [np.nanmax(img_roi) - np.nanmean(img_roi), mx1, my1, mz1, sxy, sz, np.nanmean(img_roi)]
-
-        # set any parameters that were None to the default values
-        for ii in range(len(init_params)):
-            if init_params[ii] is None:
-                init_params[ii] = ip_default[ii]
-
-    if bounds is None:
-        # set bounds
-        bounds = [[0, x_roi_full[to_use].min(), y_roi_full[to_use].min(), z_roi_full[to_use].min(), 0, 0, -np.inf],
-                  [np.inf, x_roi_full[to_use].max(), y_roi_full[to_use].max(), z_roi_full[to_use].max(), np.inf, np.inf, np.inf]]
-
-    # gaussian fitting localization
-    def model_fn(p):
-        return gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, dc, p, sf=sf, angles=angles)
-
-    def jac_fn(p):
-        return gaussian3d_pixelated_psf_jac(x_roi, y_roi, z_roi, dc, p, sf, angles)
-
-    # do fitting
-    results = fit_model(img_roi, model_fn, init_params, bounds=bounds, fixed_params=fixed_params, model_jacobian=jac_fn)
-
-    return results
-
-
-def fit_rois(img_rois, coords_rois, init_params, max_number_iterations=100,
-             sf=3, dc=None, angles=None, estimator="LSE", use_gpu=GPUFIT_AVAILABLE):
-    """
-    Fit rois. Can use either CPU parallelization with joblib or GPU parallelization using gpufit
-
-    :param img_rois: list of image rois
-    :param coords_rois: ((z0, y0, x0), (z1, y1, x1), ....)
-    :param init_params:
-    :param max_number_iterations:
-    :param int sf: oversampling factor for simulating pixelation
-    :param float dc: pixel size, only used for oversampling
-    :param (float, float, float) angles: euler angles describing pixel orientation. Only used for oversampling.
-    :param estimator: "LSE" or "MLE"
-    :param bool use_gpu:
-    :return:
-    """
-
-    zrois, yrois, xrois = coords_rois
-
-    if not use_gpu:
-        results = joblib.Parallel(n_jobs=-1, verbose=1, timeout=None)(
-                  joblib.delayed(fit_roi)(img_rois[ii], (zrois[ii], yrois[ii], xrois[ii]), init_params=init_params[ii],
-                                          sf=sf, dc=dc, angles=angles)
-                  for ii in range(len(img_rois)))
-
-        fit_params = np.asarray([r["fit_params"] for r in results])
-        chi_sqrs = np.asarray([r["chi_squared"] for r in results])
-        fit_states = np.asarray([r["status"] for r in results])
-        niters = np.asarray([r["nfev"] for r in results])
-        fit_t = np.zeros(niters.shape) # todo: what to set this to?
-        
-    else:
-        # todo: if requires more memory than GPU has, split into chunks
-
-        # ensure arrays row vectors
-        xrois, yrois, zrois, img_rois = zip(*[(xr.ravel()[None, :], yr.ravel()[None, :], zr.ravel()[None, :], ir.ravel()[None, :])
-                                          for xr, yr, zr, ir in zip(xrois, yrois, zrois, img_rois)])
-
-        # setup rois
-        roi_sizes = np.array([ir.size for ir in img_rois])
-        nmax = roi_sizes.max()
-
-        # pad ROI's to make sure all rois same size
-        img_rois = [np.pad(ir, ((0, 0), (0, nmax - ir.size)), mode="constant") for ir in img_rois]
-
-        # build roi data
-        data = np.concatenate(img_rois, axis=0)
-        data = data.astype(np.float32)
-        nfits, n_pts_per_fit = data.shape
-
-        # build user info
-        coords = [np.concatenate(
-            (np.pad(xr.ravel(), (0, nmax - xr.size)),
-             np.pad(yr.ravel(), (0, nmax - yr.size)),
-             np.pad(zr.ravel(), (0, nmax - zr.size))
-            ))
-                  for xr, yr, zr in zip(xrois, yrois, zrois)]
-        coords = np.concatenate(coords)
-
-        user_info = np.concatenate((coords.astype(np.float32), roi_sizes.astype(np.float32)))
-
-        # initial parameters
-        init_params = init_params.astype(np.float32)
-
-        # check arguments
-        if data.ndim != 2:
-            raise ValueError
-        if init_params.ndim != 2 or init_params.shape != (nfits, 7):
-            raise ValueError
-        if user_info.ndim != 1 or user_info.size != (3 * nfits * n_pts_per_fit + nfits):
-            raise ValueError
-
-        if estimator == "MLE":
-            est = gf.EstimatorID.MLE
-        elif estimator == "LSE":
-            est = gf.EstimatorID.LSE
-        else:
-            raise ValueError("'estimator' must be 'MLE' or 'LSE' but was '%s'" % estimator)
-
-        fit_params, fit_states, chi_sqrs, niters, fit_t = gf.fit(data, None, gf.ModelID.GAUSS_3D_ARB, init_params,
-                                                                 max_number_iterations=max_number_iterations,
-                                                                 estimator_id=est,
-                                                                 user_info=user_info)
-
-        # correct sigmas in case negative
-        fit_params[:, 4] = np.abs(fit_params[:, 4])
-        fit_params[:, 5] = np.abs(fit_params[:, 5])
-
-    return fit_params, fit_states, chi_sqrs, niters, fit_t
-
 # plotting functions
 def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, same_color_scale=True, figsize=(16, 8),
                     prefix="", save_dir=None):
@@ -1496,7 +743,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     #normal = np.array([0, -np.sin(theta), np.cos(theta)])
 
     # get ROI and coordinates
-    img_roi = cut_roi(roi, imgs)
+    img_roi = rois.cut_roi(roi, imgs)
     x_roi = x[:, :, roi[4]:roi[5]]  # only roi on last one because x has only one entry on first two dims
     y_roi = y[roi[0]:roi[1], roi[2]:roi[3], :]
     z_roi = z[:, roi[2]:roi[3], :]
@@ -1505,7 +752,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     vmax_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 99.9)
 
     # get fit
-    fit_volume = gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, dc, fit_params, sf=3, angles=np.array([0., theta, 0.]))
+    fit_volume = fit_psf.gaussian3d_psf(x_roi, y_roi, z_roi, dc, fit_params, sf=3, angles=np.array([0., theta, 0.]))
 
     if same_color_scale:
         vmin_fit = vmin_roi
@@ -1524,7 +771,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     dzi_roi = zi_roi[1] - zi_roi[0]
 
     # fit on regular grid
-    fit_roi_unskew = gaussian3d_pixelated_psf(xi_roi[None, None, :], yi_roi[None, :, None], zi_roi[:, None, None]
+    fit_roi_unskew = fit_psf.gaussian3d_psf(xi_roi[None, None, :], yi_roi[None, :, None], zi_roi[:, None, None]
                                               , dc, fit_params, sf=1)
 
     # ################################
@@ -1691,149 +938,10 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     return figh_interp, figh_raw
 
 
-def plot_roi(fit_params, roi, imgs, x, y, z, init_params=None, same_color_scale=True, figsize=(16, 8),
-             prefix="", save_dir=None):
-    """
-    plot results from fit_roi()
-    :param fit_params:
-    :param roi:
-    :param imgs:
-    :param dc:
-    :param theta:
-    :param x:
-    :param y:
-    :param z:
-    :param figsize:
-    :return:
-    """
-    # extract useful coordinate info
-    dc = x[0, 0, 1] - x[0, 0, 0]
-    dz = z[1, 0, 0] - z[0, 0, 0]
-
-    if init_params is not None:
-        center_guess = np.array([init_params[3], init_params[2], init_params[1]])
-
-    center_fit = np.array([fit_params[3], fit_params[2], fit_params[1]])
-
-    # get ROI and coordinates
-    img_roi = cut_roi(roi, imgs)
-    x_roi = x[:, :, roi[4]:roi[5]]
-    y_roi = y[:, roi[2]:roi[3], :]
-    z_roi = z[roi[0]:roi[1], :, :]
-
-    vmin_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 1)
-    vmax_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 99.9)
-
-    # git fit
-    img_fit = gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, dc, fit_params, sf=1)
-
-    # ################################
-    # plot results interpolated on regular grid
-    # ################################
-    figh_interp = plt.figure(figsize=figsize)
-    st_str = "Fit, max projections, interpolated, ROI = [%d, %d, %d, %d, %d, %d]\n" \
-             "         A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
-             (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
-              fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
-    if init_params is not None:
-        st_str += "\nguess A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
-                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5],
-                   init_params[6])
-    plt.suptitle(st_str)
-
-    grid = plt.GridSpec(2, 4)
-
-    ax = plt.subplot(grid[0, 1])
-    extent = [y_roi[0, 0, 0] - 0.5 * dc, y_roi[0, -1, 0] + 0.5 * dc, x_roi[0, 0, 0] - 0.5 * dc, x_roi[0, 0, -1] + 0.5 * dc]
-    plt.imshow(np.nanmax(img_roi, axis=0).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-               extent=extent)
-    plt.plot(center_fit[1], center_fit[2], 'mx')
-    if init_params is not None:
-        plt.plot(center_guess[1], center_guess[2], 'gx')
-    ax.set_ylim(extent[2:4])
-    ax.set_xlim(extent[0:2])
-    plt.xlabel("Y (um)")
-    plt.ylabel("X (um)")
-    plt.title("XY")
-
-    ax = plt.subplot(grid[0, 0])
-    extent = [z_roi[0, 0, 0] - 0.5 * dz, z_roi[-1, 0, 0] + 0.5 * dz, x_roi[0, 0, 0] - 0.5 * dc, x_roi[0, 0, -1] + 0.5 * dc]
-    plt.imshow(np.nanmax(img_roi, axis=1).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-               extent=extent)
-    plt.plot(center_fit[0], center_fit[2], 'mx')
-    if init_params is not None:
-        plt.plot(center_guess[0], center_guess[2], 'gx')
-    ax.set_ylim(extent[2:4])
-    ax.set_xlim(extent[0:2])
-    plt.xlabel("Z (um)")
-    plt.ylabel("X (um)")
-    plt.title("XZ")
-
-    ax = plt.subplot(grid[1, 1])
-    extent = [y_roi[0, 0, 0] - 0.5 * dc, y_roi[0, -1, 0] + 0.5 * dc, z_roi[0, 0, 0] - 0.5 * dz, z_roi[-1, 0, 0] + 0.5 * dz]
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', r'All-NaN (slice|axis) encountered')
-
-        plt.imshow(np.nanmax(img_roi, axis=2), vmin=vmin_roi, vmax=vmax_roi, origin="lower", extent=extent)
-    plt.plot(center_fit[1], center_fit[0], 'mx')
-    if init_params is not None:
-        plt.plot(center_guess[1], center_guess[0], 'gx')
-    ax.set_ylim(extent[2:4])
-    ax.set_xlim(extent[0:2])
-    plt.xlabel("Y (um)")
-    plt.ylabel("Z (um)")
-    plt.title("YZ")
-
-    if same_color_scale:
-        vmin_fit = vmin_roi
-        vmax_fit = vmax_roi
-    else:
-        vmin_fit = np.percentile(img_fit, 1)
-        vmax_fit = np.percentile(img_fit, 99.9)
-
-    ax = plt.subplot(grid[0, 3])
-    extent = [y_roi[0, 0, 0] - 0.5 * dc, y_roi[0, -1, 0] + 0.5 * dc, x_roi[0, 0, 0] - 0.5 * dc, x_roi[0, 0, -1] + 0.5 * dc]
-    plt.imshow(np.nanmax(img_fit, axis=0).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower", extent=extent)
-    plt.plot(center_fit[1], center_fit[2], 'mx')
-    if init_params is not None:
-        plt.plot(center_guess[1], center_guess[2], 'gx')
-    ax.set_ylim(extent[2:4])
-    ax.set_xlim(extent[0:2])
-    plt.xlabel("Y (um)")
-    plt.ylabel("X (um)")
-
-    ax = plt.subplot(grid[0, 2])
-    extent = [z_roi[0, 0, 0] - 0.5 * dz, z_roi[-1, 0, 0] + 0.5 * dz, x_roi[0, 0, 0] - 0.5 * dc, x_roi[0, 0, -1] + 0.5 * dc]
-    plt.imshow(np.nanmax(img_fit, axis=1).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower", extent=extent)
-    plt.plot(center_fit[0], center_fit[2], 'mx')
-    if init_params is not None:
-        plt.plot(center_guess[0], center_guess[2], 'gx')
-    ax.set_ylim(extent[2:4])
-    ax.set_xlim(extent[0:2])
-    plt.xlabel("Z (um)")
-    plt.ylabel("X (um)")
-
-    ax = plt.subplot(grid[1, 3])
-    extent = [y_roi[0, 0, 0] - 0.5 * dc, y_roi[0, -1, 0] + 0.5 * dc, z_roi[0, 0, 0] - 0.5 * dz, z_roi[-1, 0, 0] + 0.5 * dz]
-    plt.imshow(np.nanmax(img_fit, axis=2), vmin=vmin_fit, vmax=vmax_fit, origin="lower", extent=extent)
-    plt.plot(center_fit[1], center_fit[0], 'mx')
-    if init_params is not None:
-        plt.plot(center_guess[1], center_guess[0], 'gx')
-    ax.set_ylim(extent[2:4])
-    ax.set_xlim(extent[0:2])
-    plt.xlabel("Y (um)")
-    plt.ylabel("Z (um)")
-
-    if save_dir is not None:
-        figh_interp.savefig(os.path.join(save_dir, "%s.png" % prefix))
-        plt.close(figh_interp)
-
-    return figh_interp
-
 # orchestration functions
 def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, filter_sigma_large,
                     min_spot_sep, offsets=(0, 0, 0), allowed_polygon=None, sf=3,
-                    mode="fit", use_gpu_fit=GPUFIT_AVAILABLE, use_gpu_filter=CUPY_AVAILABLE):
+                    mode="fit", use_gpu_fit=True, use_gpu_filter=True):
     """
     :param imgs: raw OPM data
     :param params: {"dc", "dstage", "theta"}
@@ -1868,8 +976,8 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
 
     ks = get_filter_kernel_skewed(filter_sigma_small, dc, theta, stage_step, sigma_cutoff=2)
     kl = get_filter_kernel_skewed(filter_sigma_large, dc, theta, stage_step, sigma_cutoff=2)
-    imgs_hp = filter_convolve(imgs, ks, use_gpu=use_gpu_filter)
-    imgs_lp = filter_convolve(imgs, kl, use_gpu=use_gpu_filter)
+    imgs_hp = localize.filter_convolve(imgs, ks, use_gpu=use_gpu_filter)
+    imgs_lp = localize.filter_convolve(imgs, kl, use_gpu=use_gpu_filter)
     imgs_filtered = imgs_hp - imgs_lp
 
     print("Filtered images in %0.2fs" % (time.perf_counter() - tstart))
@@ -1895,7 +1003,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
     tstart = time.perf_counter()
 
     footprint = get_skewed_footprint((dz_min, dxy_min, dxy_min), dc, stage_step, theta)
-    centers_guess_inds, amps = find_peak_candidates(imgs_filtered * mask, footprint, abs_threshold, use_gpu_filter=use_gpu_filter)
+    centers_guess_inds, amps = localize.find_peak_candidates(imgs_filtered * mask, footprint, abs_threshold, use_gpu_filter=use_gpu_filter)
 
     # convert to xyz coordinates
     xc = x[0, 0, centers_guess_inds[:, 2]]
@@ -1913,7 +1021,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
 
     inds = np.ravel_multi_index(centers_guess_inds.transpose(), imgs_filtered.shape)
     weights = imgs_filtered.ravel()[inds]
-    centers_guess, inds_comb = combine_nearby_peaks(centers_guess, dxy_min, dz_min, weights=weights, mode="average")
+    centers_guess, inds_comb = localize.combine_nearby_peaks(centers_guess, dxy_min, dz_min, weights=weights, mode="average")
 
     amps = amps[inds_comb]
     print("Found %d points separated by dxy > %0.5g and dz > %0.5g in %0.1fs" %
@@ -1962,7 +1070,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
         print("starting fitting for %d rois" % centers_guess.shape[0])
         tstart = time.perf_counter()
 
-        fit_params, fit_states, chi_sqrs, niters, fit_t = fit_rois(img_rois, (zrois, yrois, xrois),
+        fit_params, fit_states, chi_sqrs, niters, fit_t = localize.fit_gauss_rois(img_rois, (zrois, yrois, xrois),
                                                                    init_params, estimator="LSE",
                                                                    sf=sf, dc=dc, angles=(0., theta, 0.),
                                                                    use_gpu=use_gpu_fit)
@@ -1970,7 +1078,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
     elif mode == "radial-symmetry":
         print("starting radial-symmetry localization for %d rois" % len(centers_guess))
 
-        img_roi_masked = [cut_roi(rois[ii], imgs_filtered) * roi_masks[ii] for ii in range(len(centers_guess))]
+        img_roi_masked = [rois.cut_roi(rois[ii], imgs_filtered) * roi_masks[ii] for ii in range(len(centers_guess))]
         for ii in range(len(img_roi_masked)):
             img_roi_masked[ii][img_roi_masked[ii] < 0] = 0
 
@@ -2072,7 +1180,7 @@ def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_
     if np.sum(to_keep_temp) > 0:
 
         # only keep unique center if close enough
-        _, unique_inds = combine_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
+        _, unique_inds = localize.combine_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
 
         # unique mask for those in to_keep_temp
         is_unique = np.zeros(np.sum(to_keep_temp), dtype=np.bool)

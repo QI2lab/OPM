@@ -9,7 +9,7 @@ import pickle
 import joblib
 import tifffile
 import pycromanager
-import localize
+import localize_skewed
 
 # basic parameters
 plot_extra = False
@@ -109,7 +109,7 @@ for vv in range(nvols):
         y_offset = img_start * dstage
 
         # do localization
-        imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize.localize_skewed(
+        imgs_filtered, centers_unique, fit_params_unique, rois_unique, centers_guess = localize_skewed.localize_skewed(
             imgs, {"dc": dc, "dstep": dstage, "theta": theta}, thresh, xy_roi_size, z_roi_size, 0, 0, min_z_dist,
             min_xy_dist, sigma_xy_max, sigma_xy_min, sigma_z_max, sigma_z_min, nmax_try=nmax_fit_tries,
             offsets=(0, y_offset, 0))
@@ -122,11 +122,11 @@ for vv in range(nvols):
 
         # plot localization fit diagnostic on good points
         # picture coordinates in coverslip frame
-        x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
+        x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
         y += y_offset
 
         # max projections
-        xi, yi, zi, imgs_unskew = localize.interp_opm_data(imgs, dc, dstage, theta, mode="ortho-interp")
+        xi, yi, zi, imgs_unskew = localize_skewed.interp_opm_data(imgs, dc, dstage, theta, mode="ortho-interp")
         tifffile.imsave(os.path.join(save_dir, "max_proj_xy_vol=%d_chunk=%d.tiff" % (vv, aa)), np.nanmax(imgs_unskew, axis=0))
         tifffile.imsave(os.path.join(save_dir, "max_proj_xz_vol=%d_chunk=%d.tiff" % (vv, aa)), np.nanmax(imgs_unskew, axis=1))
         tifffile.imsave(os.path.join(save_dir, "max_proj_yz_vol=%d_chunk=%d.tiff" % (vv, aa)), np.nanmax(imgs_unskew, axis=2))

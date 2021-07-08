@@ -3,7 +3,7 @@ test different scan interp methods
 """
 import time
 import numpy as np
-import localize
+import localize_skewed
 from image_post_processing import deskew
 import matplotlib.pyplot as plt
 
@@ -27,19 +27,19 @@ sz = np.sqrt(6) / np.pi * ni * emission_wavelength / na ** 2
 
 # coordinates
 # x, y, z = localize.get_lab_coords(nx, ny, dc, theta, stage_pos)
-x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
+x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
 
 # simulated image
 center = np.expand_dims(np.array([z.mean(), y.mean(), x.mean()]), axis=0)
-gt, c_gt = localize.simulate_img({"dc": dc, "dstep": dstep, "theta": theta, "shape": (npos, ny, nx)},
-                           {"na": na, "ni": ni, "peak_photons": 1000, "background": 0.1, "emission_wavelength": emission_wavelength},
-                           centers=center)
+gt, c_gt = localize_skewed.simulate_img({"dc": dc, "dstep": dstep, "theta": theta, "shape": (npos, ny, nx)},
+                                        {"na": na, "ni": ni, "peak_photons": 1000, "background": 0.1, "emission_wavelength": emission_wavelength},
+                                        centers=center)
 c_gt = c_gt[0]
 # camera and photon shot noise
-img, _, _ = localize.simulate_img_noise(gt, 1, cam_gains=2, cam_offsets=100, cam_readout_noise_sds=5)
+img, _, _ = localize_skewed.simulate_img_noise(gt, 1, cam_gains=2, cam_offsets=100, cam_readout_noise_sds=5)
 
 tstart = time.perf_counter()
-x1, y1, z1, deskew1 = localize.interp_opm_data(img, dc, dstep, theta, mode="ortho-interp")
+x1, y1, z1, deskew1 = localize_skewed.interp_opm_data(img, dc, dstep, theta, mode="ortho-interp")
 dx1 = x1[1] - x1[0]
 dy1 = y1[1] - y1[0]
 dz1 = z1[1] - z1[0]

@@ -1,5 +1,5 @@
 import pygpufit.gpufit as gf
-import localize
+import localize_skewed
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -22,15 +22,15 @@ sxy = 0.22 * emission_wavelength / na
 sz = np.sqrt(6) / np.pi * ni * emission_wavelength / na ** 2
 
 # coordinates
-x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
+x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
 x, y, z = np.broadcast_arrays(x, y, z)
 
 # simulated image
-gt, c_gt = localize.simulate_img({"dc": dc, "dstep": dstep, "theta": theta, "shape": (npos, ny, nx)},
-                           {"na": na, "ni": ni, "peak_photons": 1000, "background": 0.1, "emission_wavelength": emission_wavelength},
-                           ncenters=1)
+gt, c_gt = localize_skewed.simulate_img({"dc": dc, "dstep": dstep, "theta": theta, "shape": (npos, ny, nx)},
+                                        {"na": na, "ni": ni, "peak_photons": 1000, "background": 0.1, "emission_wavelength": emission_wavelength},
+                                        ncenters=1)
 # camera and photon shot noise
-img, _, _ = localize.simulate_img_noise(gt, 1, cam_gains=2, cam_offsets=100, cam_readout_noise_sds=5)
+img, _, _ = localize_skewed.simulate_img_noise(gt, 1, cam_gains=2, cam_offsets=100, cam_readout_noise_sds=5)
 
 data = np.expand_dims(img.ravel(), axis=0)
 data = np.concatenate((data, data), axis=0)

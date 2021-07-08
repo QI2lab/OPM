@@ -6,7 +6,10 @@ import skimage.feature
 import skimage.filters
 import matplotlib.pyplot as plt
 import warnings
-import localize
+
+import fit_psf
+import localize_skewed
+import fit
 
 # ###############################
 # setup parametesr
@@ -33,7 +36,7 @@ npos = len(gn)
 # ###############################
 # picture coordinates in coverslip frame
 # x, y, z = localize.get_lab_coords(nx, ny, dc, theta, gn)
-x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dy, theta)
+x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dy, theta)
 
 # picture coordinates
 xp = dc * np.arange(nx)
@@ -55,21 +58,21 @@ sigma_z = np.sqrt(6) / np.pi * ni * wavelength / na ** 2
 imgs_opm = np.zeros((npos, ny, nx))
 for kk in range(nc):
     params = [1, centers[kk, 2], centers[kk, 1], centers[kk, 0], sigma_xy, sigma_z, 0]
-    imgs_opm += localize.gaussian3d_pixelated_psf(x, y, z, dc, params, sf=3, angles=np.array([0., theta, 0.]))
+    imgs_opm += fit_psf.gaussian3d_psf(x, y, z, dc, params, sf=3, angles=np.array([0., theta, 0.]))
 
 # add shot-noise and gaussian readout noise
 nphotons = 100
 bg = 100
 gain = 2
 noise = 5
-imgs_opm, _, _ = localize.simulate_img_noise(imgs_opm, nphotons, gain, bg, noise)
+imgs_opm, _, _ = localize_skewed.simulate_img_noise(imgs_opm, nphotons, gain, bg, noise)
 vmin = bg - 2
 vmax = np.percentile(imgs_opm, 99.999)
 
 # ###############################
 # identify candidate points in opm data
 # ###############################
-centers_guess_inds = localize.find_candidate_beads(imgs_opm, filter_xy_pix=1, filter_z_pix=0.5, max_thresh=150, mode="threshold")
+centers_guess_inds = localize_skewed.find_candidate_beads(imgs_opm, filter_xy_pix=1, filter_z_pix=0.5, max_thresh=150, mode="threshold")
 xc = x[0, 0, centers_guess_inds[:, 2]]
 yc = y[centers_guess_inds[:, 0], centers_guess_inds[:, 1], 0]
 zc = z[0, centers_guess_inds[:, 1], 0] # z-position is determined by the y'-index in OPM image
@@ -106,7 +109,7 @@ nxp = int(np.ceil(xy_size / dc))
 nyp = int(np.ceil(z_size / dc / np.cos(theta)))
 nzp = int(np.ceil(xy_size / dc / np.sin(theta)))
 # get rois
-rois = np.array([localize.get_centered_roi(c, [nzp, nyp, nxp]) for c in centers_guess_inds])
+rois = np.array([rois.get_centered_roi(c, [nzp, nyp, nxp]) for c in centers_guess_inds])
 # ensure rois stay within bounds
 for ll in range(3):
     rois[:, 2*ll][rois[:, 2*ll] < 0] = 0
@@ -132,11 +135,11 @@ for ii, roi in enumerate(rois):
     z_roi = z[:, roi[2]:roi[3]:, ]
 
     # gaussian fitting localization
-    def model_fn(p): return localize.gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, [dc, dc], normal, p, sf=3)
+    def model_fn(p): return localize_skewed.gaussian3d_pixelated_psf(x_roi, y_roi, z_roi, [dc, dc], normal, p, sf=3)
     init_params = [np.max(img_roi), centers_guess[ii, 2], centers_guess[ii, 1], centers_guess[ii, 0], 0.2, 1, np.mean(img_roi)]
     bounds = [[0, x_roi.min(), y_roi.min(), z_roi.min(), 0, 0, 0],
               [np.inf, x_roi.max(), y_roi.max(), z_roi.max(), np.inf, np.inf, np.inf]]
-    results = localize.fit_model(img_roi, model_fn, init_params, bounds=bounds)
+    results = fit.fit_model(img_roi, model_fn, init_params, bounds=bounds)
 
     # store results
     fit_results.append(results)
@@ -162,8 +165,8 @@ for ii, roi in enumerate(rois):
 # ###############################
 # interpolate images so are on grids in coverslip coordinate system
 # ###############################
-xi, yi, zi, imgs_unskew = localize.interp_opm_data(imgs_opm, dc, dy, theta, mode="row-interp")
-_, _, _, imgs_unskew2 = localize.interp_opm_data(imgs_opm, dc, dy, theta, mode="ortho-interp")
+xi, yi, zi, imgs_unskew = localize_skewed.interp_opm_data(imgs_opm, dc, dy, theta, mode="row-interp")
+_, _, _, imgs_unskew2 = localize_skewed.interp_opm_data(imgs_opm, dc, dy, theta, mode="ortho-interp")
 dxi = xi[1] - xi[0]
 dyi = yi[1] - yi[0]
 dzi = zi[1] - zi[0]
@@ -174,9 +177,9 @@ dzi = zi[1] - zi[0]
 imgs_square = np.zeros((len(zi), len(yi), len(xi)))
 for kk in range(nc):
     params = [1, centers[kk, 2], centers[kk, 1], centers[kk, 0], sigma_xy, sigma_z, 0]
-    imgs_square += localize.gaussian3d_pixelated_psf(xi[None, None, :], yi[None, :, None], zi[:, None, None], [dxi, dyi], np.array([0, 0, 1]), params, sf=3)
+    imgs_square += fit_psf.gaussian3d_psf(xi[None, None, :], yi[None, :, None], zi[:, None, None], [dxi, dyi], np.array([0, 0, 1]), params, sf=3)
 # add noise
-imgs_square, _, _ = localize.simulate_img_noise(imgs_square, nphotons, gain, bg, noise)
+imgs_square, _, _ = localize_skewed.simulate_img_noise(imgs_square, nphotons, gain, bg, noise)
 # nan-mask region outside what we get from the OPM
 imgs_square[np.isnan(imgs_unskew)] = np.nan
 

@@ -6,7 +6,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
-import localize
+import localize_skewed
 import pycromanager
 import sys
 
@@ -167,7 +167,7 @@ for ii, root_dir in enumerate(root_dirs):
             y_offset = img_start * dstage
 
             # do localization
-            rois, fit_params, init_params, fit_results, imgs_filtered, coords = localize.localize_skewed(
+            rois, fit_params, init_params, fit_results, imgs_filtered, coords = localize_skewed.localize_skewed(
                 imgs, {"dc": dc, "dstep": dstage, "theta": theta}, absolute_threshold, roi_size,
                 filter_sigma_small, filter_sigma_large, min_spot_sep,
                 offsets=(0, y_offset, 0), allowed_polygon=allowed_camera_region, mode="fit")
@@ -175,11 +175,11 @@ for ii, root_dir in enumerate(root_dirs):
 
 
             # filter results
-            to_keep, conditions, condition_names, filter_settings = localize.filter_localizations(fit_params, init_params, coords,
-                                                                                 (sigma_z, sigma_xy), min_spot_sep,
-                                                                                 (sigmas_min, sigmas_max),
-                                                                                 0.5 * absolute_threshold,
-                                                                                 dist_boundary_min=(0.5*sigma_z, sigma_xy))
+            to_keep, conditions, condition_names, filter_settings = localize_skewed.filter_localizations(fit_params, init_params, coords,
+                                                                                                         (sigma_z, sigma_xy), min_spot_sep,
+                                                                                                         (sigmas_min, sigmas_max),
+                                                                                                         0.5 * absolute_threshold,
+                                                                                                         dist_boundary_min=(0.5*sigma_z, sigma_xy))
 
             # ind = 333
             # x, y, z = localize.get_skewed_coords(imgs.shape, dc, dstage, theta)

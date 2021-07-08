@@ -18,6 +18,7 @@ import napari
 from napari_animation import AnimationWidget
 import matplotlib.pyplot as plt
 # custom library
+import localize_skewed
 import localize
 
 plot_centers = True
@@ -52,7 +53,7 @@ dz = z[1, 0, 0] - z[0, 0, 0]
 
 # filter image
 tstart = time.perf_counter()
-kernel = localize.get_filter_kernel((10*dz, 20*dc, 20*dc), dc, dz)
+kernel = localize.get_filter_kernel((10 * dz, 20 * dc, 20 * dc), dc, dz)
 imgs_filtered = localize.filter_convolve(imgs, kernel, use_gpu=False)
 tend = time.perf_counter()
 print("filtering image took %0.2fs" % (tend - tstart))

@@ -4,9 +4,11 @@ import datetime
 import time
 import numpy as np
 import pickle
+import localize_skewed
 import localize
 import tifffile
 import napari
+import rois
 
 debug = False
 # paths to image files
@@ -79,7 +81,7 @@ for root_dir in root_dirs:
         # fit roi size
         # roi_size = (3 * sigma_z, 8 * sigma_xy, 8 * sigma_xy)
         roi_size = (5 * sigma_z, 8 * sigma_xy, 8 * sigma_xy)
-        roi_size_pix = localize.get_roi_size(roi_size, dc, dz)
+        roi_size_pix = rois.get_roi_size(roi_size, dc, dz)
         # assume points closer together than this come from a single bead
         min_dists = (3 * sigma_z, 2 * sigma_xy, 2 * sigma_xy)
         # exclude points with sigmas outside these ranges
@@ -136,7 +138,7 @@ for root_dir in root_dirs:
                 imgs_filtered = localize.filter_convolve(imgs_chunk, ks) - localize.filter_convolve(imgs_chunk, kl)
 
                 # find candidate peaks
-                footprint = localize.get_footprint(min_dists, dc, dz)
+                footprint = localize.get_max_filter_footprint(min_dists, dc, dz)
                 centers_guess_inds, amps = localize.find_peak_candidates(imgs_filtered, footprint, thresholds[jj])
 
                 # convert to distance coordinates
@@ -191,18 +193,18 @@ for root_dir in root_dirs:
 
                     print("Fitting %d rois on GPU" % (len(rois)))
                     # use MLE if background subtracted images
-                    fit_params, fit_states, chi_sqrs, niters, fit_t = localize.fit_rois(img_rois, (zrois, yrois, xrois), init_params,
-                                                                                        estimator="LSE", sf=1, dc=dc, angles=(0, 0, 0))
+                    fit_params, fit_states, chi_sqrs, niters, fit_t = localize.fit_gauss_rois(img_rois, (zrois, yrois, xrois), init_params,
+                                                                                               estimator="LSE", sf=1, dc=dc, angles=(0, 0, 0))
 
                     # ###############################
                     # filter some peaks
                     # ###############################
                     tstart = time.perf_counter()
 
-                    to_keep, conditions, condition_names = localize.filter_localizations(fit_params, init_params,
-                                                                                         (z, y, x), sigma_xy, sigma_z,
-                                                                                         min_dists, (sigmas_min, sigmas_max),
-                                                                                         0.5 * thresholds[jj], mode="straight")
+                    to_keep, conditions, condition_names = localize_skewed.filter_localizations(fit_params, init_params,
+                                                                                                (z, y, x), sigma_xy, sigma_z,
+                                                                                                min_dists, (sigmas_min, sigmas_max),
+                                                                                                0.5 * thresholds[jj], mode="straight")
 
                     tend = time.perf_counter()
                     print("identified %d/%d localizations in %0.3f" % (np.sum(to_keep), to_keep.size,  time.perf_counter() - tstart))

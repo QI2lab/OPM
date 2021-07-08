@@ -18,6 +18,7 @@ sys.path.append(fdir)
 
 import image_post_processing as pp
 import data_io
+import localize_skewed
 import localize
 
 debug = True
@@ -69,7 +70,7 @@ if not os.path.exists(save_dir):
 # do localizations
 # ###############################
 tstart_all = time.perf_counter()
-for round in list(range(8)):
+for round in list(range(1, 8)):
     for ch in range(3):
         if not channel_to_use[ch]:
             continue
@@ -164,7 +165,7 @@ for round in list(range(8)):
                         y_offset = ip_start * dstage
                         x_offset = ix_start * dc
 
-                        x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
+                        x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dstage, theta)
                         x += x_offset
                         y += y_offset
 
@@ -174,8 +175,8 @@ for round in list(range(8)):
                         # ###################################################
                         tstart = time.perf_counter()
 
-                        ks = localize.get_filter_kernel_skewed(filter_sigma_small, dc, theta, dstage, sigma_cutoff=2)
-                        kl = localize.get_filter_kernel_skewed(filter_sigma_large, dc, theta, dstage, sigma_cutoff=2)
+                        ks = localize_skewed.get_filter_kernel_skewed(filter_sigma_small, dc, theta, dstage, sigma_cutoff=2)
+                        kl = localize_skewed.get_filter_kernel_skewed(filter_sigma_large, dc, theta, dstage, sigma_cutoff=2)
                         imgs_hp = localize.filter_convolve(imgs_chunk, ks)
                         imgs_lp = localize.filter_convolve(imgs_chunk, kl, use_gpu=True)
                         imgs_filtered = imgs_hp - imgs_lp
@@ -189,7 +190,7 @@ for round in list(range(8)):
 
                         dz_min, dxy_min = min_spot_sep
 
-                        footprint = localize.get_skewed_footprint((dz_min, dxy_min, dxy_min), dc, dstage, theta)
+                        footprint = localize_skewed.get_skewed_footprint((dz_min, dxy_min, dxy_min), dc, dstage, theta)
                         centers_guess_inds, amps = localize.find_peak_candidates(imgs_filtered, footprint, thresholds[ch])
 
                         # convert to xyz coordinates
@@ -211,7 +212,7 @@ for round in list(range(8)):
                             inds = np.ravel_multi_index(centers_guess_inds.transpose(), imgs_filtered.shape)
                             weights = imgs_filtered.ravel()[inds]
                             centers_guess, inds_comb = localize.combine_nearby_peaks(centers_guess, dxy_min, dz_min, weights=weights,
-                                                                            mode="average")
+                                                                                            mode="average")
 
                             amps = amps[inds_comb]
                             print("Found %d points separated by dxy > %0.5g and dz > %0.5g in %0.1fs" %
@@ -223,12 +224,12 @@ for round in list(range(8)):
                             tstart = time.perf_counter()
 
                             # cut rois out
-                            roi_size_skew = localize.get_skewed_roi_size(roi_size, theta, dc, dstage, ensure_odd=True)
-                            rois, img_rois, xrois, yrois, zrois = zip(*[localize.get_skewed_roi(c, imgs_chunk, x, y, z, roi_size_skew) for c in centers_guess])
+                            roi_size_skew = localize_skewed.get_skewed_roi_size(roi_size, theta, dc, dstage, ensure_odd=True)
+                            rois, img_rois, xrois, yrois, zrois = zip(*[localize_skewed.get_skewed_roi(c, imgs_chunk, x, y, z, roi_size_skew) for c in centers_guess])
                             rois = np.asarray(rois)
 
                             # exclude some regions of roi
-                            roi_masks = [localize.get_roi_mask(c, (np.inf, 0.5 * roi_size[1]), (zrois[ii], yrois[ii], xrois[ii])) for
+                            roi_masks = [localize_skewed.get_roi_mask(c, (np.inf, 0.5 * roi_size[1]), (zrois[ii], yrois[ii], xrois[ii])) for
                                          ii, c in enumerate(centers_guess)]
 
                             # mask regions
@@ -264,9 +265,10 @@ for round in list(range(8)):
                             print("starting fitting for %d rois" % centers_guess.shape[0])
                             tstart = time.perf_counter()
 
-                            fit_params, fit_states, chi_sqrs, niters, fit_t = localize.fit_rois(img_rois, (zrois, yrois, xrois),
-                                                                                       init_params, estimator="LSE",
-                                                                                       sf=1, dc=dc, angles=(0., theta, 0.))
+                            fit_params, fit_states, chi_sqrs, niters, fit_t = localize.fit_gauss_rois(img_rois, (zrois, yrois, xrois),
+                                                                                                      init_params, estimator="LSE",
+                                                                                                      model="gaussian",
+                                                                                                      sf=1, dc=dc, angles=(0., theta, 0.))
 
                             tend = time.perf_counter()
                             print("Localization took %0.2fs" % (tend - tstart))
@@ -282,7 +284,7 @@ for round in list(range(8)):
                             # ###################################################
                             tstart = time.perf_counter()
 
-                            to_keep, conditions, condition_names, filter_settings = localize.filter_localizations(
+                            to_keep, conditions, condition_names, filter_settings = localize_skewed.filter_localizations(
                                 fit_params, init_params, (z, y, x),
                                 (sigma_z, 3*sigma_xy), min_spot_sep,
                                 (sigmas_min, sigmas_max),
@@ -326,7 +328,7 @@ for round in list(range(8)):
                             plot_any = False
                             while plotted < to_plot:
                                 if to_keep[ind] or plot_any:
-                                    localize.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
+                                    localize_skewed.plot_skewed_roi(fit_params[ind], rois[ind], imgs, theta, x, y, z, init_params[ind])
 
                                     plotted += 1
                                 ind += 1

@@ -4,6 +4,7 @@ Test localization methods on a single synthetic ROI
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import localize_skewed
 import localize
 
 # set scan parameters
@@ -25,34 +26,34 @@ sxy = 0.22 * emission_wavelength / na
 sz = np.sqrt(6) / np.pi * ni * emission_wavelength / na ** 2
 
 # coordinates
-x, y, z = localize.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
+x, y, z = localize_skewed.get_skewed_coords((npos, ny, nx), dc, dstep, theta)
 
 # simulated image
-gt, c_gt = localize.simulate_img({"dc": dc, "dstep": dstep, "theta": theta, "shape": (npos, ny, nx)},
-                           {"na": na, "ni": ni, "peak_photons": 1000, "background": 0.1, "emission_wavelength": emission_wavelength},
-                           ncenters=1)
+gt, c_gt = localize_skewed.simulate_img({"dc": dc, "dstep": dstep, "theta": theta, "shape": (npos, ny, nx)},
+                                        {"na": na, "ni": ni, "peak_photons": 1000, "background": 0.1, "emission_wavelength": emission_wavelength},
+                                        ncenters=1)
 # camera and photon shot noise
-img, _, _ = localize.simulate_img_noise(gt, 1, cam_gains=2, cam_offsets=100, cam_readout_noise_sds=5)
+img, _, _ = localize_skewed.simulate_img_noise(gt, 1, cam_gains=2, cam_offsets=100, cam_readout_noise_sds=5)
 
 # localize using gauss nonlinear fit
 tstart = time.process_time()
 
-results = localize.fit_roi(img, (z, y, x), dc=dc, angles=np.array([0, theta, 0]))
+results = localize.fit_gauss_roi(img, (z, y, x), dc=dc, angles=np.array([0, theta, 0]))
 c_nl = np.array([results["fit_params"][3], results["fit_params"][2], results["fit_params"][1]])
 
 tend = time.process_time()
 print("Fit took %0.3gs" % (tend - tstart))
 
 # localize with radial symmetry method
-rad_params = localize.localize_radial_symm(img, (z, y, x), mode="radial-symmetry")
+rad_params = localize_skewed.localize_radial_symm(img, (z, y, x), mode="radial-symmetry")
 c_rad = np.array([rad_params[3], rad_params[2], rad_params[1]])
 
 # localize with centroid
-cent_params = localize.localize_radial_symm(img, (z, y, x), mode="centroid")
+cent_params = localize_skewed.localize_radial_symm(img, (z, y, x), mode="centroid")
 c_cent = np.array([cent_params[3], cent_params[2], cent_params[1]])
 
 # deskew image
-xi, yi, zi, img_unskew = localize.interp_opm_data(img, dc, dstep, theta, mode="ortho-interp")
+xi, yi, zi, img_unskew = localize_skewed.interp_opm_data(img, dc, dstep, theta, mode="ortho-interp")
 dxi = xi[1] - xi[0]
 dyi = yi[1] - yi[0]
 dzi = zi[1] - zi[0]
