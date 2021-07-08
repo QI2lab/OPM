@@ -1544,7 +1544,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     ax = plt.subplot(grid[0, 0])
     plt.imshow(np.nanmax(img_roi_unskew, axis=0).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
                extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi])
+                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi],
+               cmap="bone")
     plt.plot(center_fit[1], center_fit[2], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[2], 'gx')
@@ -1555,7 +1556,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     ax = plt.subplot(grid[0, 1])
     plt.imshow(np.nanmax(img_roi_unskew, axis=1), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
                extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
+                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
+               cmap="bone")
     plt.plot(center_fit[2], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[2], center_guess[0], 'gx')
@@ -1568,7 +1570,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
         warnings.filterwarnings('ignore', r'All-NaN (slice|axis) encountered')
         plt.imshow(np.nanmax(img_roi_unskew, axis=2), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
                    extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
+                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
+                   cmap="bone")
     plt.plot(center_fit[1], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[0], 'gx')
@@ -1579,7 +1582,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     ax = plt.subplot(grid[1, 0])
     plt.imshow(np.nanmax(fit_roi_unskew, axis=0).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
                extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi])
+                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi],
+               cmap="bone")
     plt.plot(center_fit[1], center_fit[2], 'mx')
     if init_params is not None:
         plt.plot(center_guess[ 1], center_guess[2], 'gx')
@@ -1589,7 +1593,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     ax = plt.subplot(grid[1, 1])
     plt.imshow(np.nanmax(fit_roi_unskew, axis=1), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
                extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
+                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
+               cmap="bone")
     plt.plot(center_fit[2], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[2], center_guess[0], 'gx')
@@ -1599,7 +1604,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     ax = plt.subplot(grid[1, 2])
     plt.imshow(np.nanmax(fit_roi_unskew, axis=2), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
                extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi])
+                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
+               cmap="bone")
     plt.plot(center_fit[1], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[0], 'gx')
@@ -1641,7 +1647,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
         xp, yp = xy_lab2cam(fit_params[1], fit_params[2], stage_pos_roi[jj], theta)
 
         ax = plt.subplot(grid[0, jj])
-        plt.imshow(img_roi[jj], vmin=vmin_roi, vmax=vmax_roi, extent=extent_roi, origin="lower")
+        plt.imshow(img_roi[jj], vmin=vmin_roi, vmax=vmax_roi, extent=extent_roi, origin="lower", cmap="bone")
         if jj != jj_min:
             plt.plot(xp, yp, 'mx')
         else:
@@ -1655,7 +1661,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
             ax.axes.yaxis.set_ticks([])
 
         ax = plt.subplot(grid[1, jj])
-        plt.imshow(fit_volume[jj], vmin=vmin_fit, vmax=vmax_fit, extent=extent_roi, origin="lower")
+        plt.imshow(fit_volume[jj], vmin=vmin_fit, vmax=vmax_fit, extent=extent_roi, origin="lower", cmap="bone")
         if jj != jj_min:
             plt.plot(xp, yp, 'mx')
         else:
@@ -1667,7 +1673,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
             ax.axes.yaxis.set_ticks([])
 
         ax = plt.subplot(grid[2, jj])
-        plt.imshow(img_roi[jj] - fit_volume[jj], extent=extent_roi, origin="lower")
+        plt.imshow(img_roi[jj] - fit_volume[jj], extent=extent_roi, origin="lower", cmap="bone")
         if jj != jj_min:
             plt.plot(xp, yp, 'mx')
         else:

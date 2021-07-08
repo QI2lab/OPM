@@ -49,25 +49,40 @@ figsize = (16, 8)
 # img_fname = r"\\10.206.26.21\opm2\20210628\bDNA_stiff_gel_human_lung_r0000_y0007_z0001_ch0003_1"
 # data_fname = r"\\10.206.26.21\opm2\20210628\new area\2021_07_01_17;27;16_localization\localization_round=1_ch=2_tile=14_z=0_t=0.pkl"
 # img_fname = r"\\10.206.26.21\opm2\20210628\new area\bDNA_stiff_gel_human_lung_r0001_y0014_z0000_ch0002_1"
+raw_data_skewed = True
 
-data_fname = r"\\10.206.26.21\opm2\20210628\new area\2021_07_01_17;27;16_localization\localization_round=1_ch=3_tile=14_z=0_t=0.pkl"
+data_fname = r"\\10.206.26.21\opm2\20210628\new area\2021_07_07_15;09;59_localization\localization_round=1_ch=3_tile=14_z=0_t=0.pkl"
 img_fname = r"\\10.206.26.21\opm2\20210628\new area\bDNA_stiff_gel_human_lung_r0001_y0014_z0000_ch0003_1"
+
 dset = pycromanager.Dataset(img_fname)
+dstep = 0.4
+theta = 30 * np.pi/180
 dc = 0.115
 dz = 0.115
 
-tstart = time.perf_counter()
-imgs_raw = []
-for ii in range(len(dset.axes["z"])):
-    imgs_raw.append(dset.read_image(channel=0, z=ii))
-print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
-imgs_raw = np.flip(np.asarray(imgs_raw), axis=0)
-xskew, yskew, zskew = localize.get_skewed_coords(imgs_raw.shape, 0.115, 0.4, 30 * np.pi/180)
+if raw_data_skewed:
+    tstart = time.perf_counter()
+    imgs_raw = []
+    for ii in range(len(dset.axes["z"])):
+        imgs_raw.append(dset.read_image(channel=0, z=ii))
+    print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
+    imgs_raw = np.flip(np.asarray(imgs_raw), axis=0)
+    xskew, yskew, zskew = localize.get_skewed_coords(imgs_raw.shape, 0.115, 0.4, 30 * np.pi/180)
 
-tstart = time.perf_counter()
-imgs = pp.deskew(imgs_raw, 30., 0.4, 0.115)
-print("deskewed in %0.2fs" % (time.perf_counter() - tstart))
+    tstart = time.perf_counter()
+    imgs = pp.deskew(imgs_raw, 30., 0.4, 0.115)
+    print("deskewed in %0.2fs" % (time.perf_counter() - tstart))
+else:
+    tstart = time.perf_counter()
+    imgs_raw = []
+    for ii in range(len(dset.axes["z"])):
+        imgs_raw.append(dset.read_image(channel=0, z=ii))
+    imgs_raw = np.asarray(imgs_raw)
+    print("loaded images in %0.2fs" % (time.perf_counter() - tstart))
 
+    imgs = imgs_raw
+
+# global coordinates
 x, y, z = localize.get_coords(imgs.shape, dc, dz)
 
 # load localization data
@@ -87,27 +102,18 @@ centers_guess = np.stack((ips[:, 3], ips[:, 2], ips[:, 1]), axis=1)
 centers_guess_napari = centers_guess / dc
 
 # plot some fits
-if False:
-    num_plotted = 0
-    ind = 0
-    while num_plotted < 20:
-        if to_keep[ind]:
-            # figa = localize.plot_skewed_roi(fps[ind], rois[ind], imgs_raw, 30 * np.pi/180, xskew, yskew, zskew,
-            #                                 init_params=ips[ind], figsize=(16, 8), same_color_scale=True)
-            figa = localize.plot_roi(fps[ind], rois[ind], imgs, x, y, z,
-                                                  init_params=ips[ind],
-                                                  figsize=(16, 8), same_color_scale=False)
-            num_plotted += 1
-        ind += 1
-
-# plot fits with large amps
-if False:
+plot_fits = False
+if plot_fits:
     num_plotted = 0
     ind = 0
     while num_plotted < 20 and ind < len(fps):
-        if to_keep[ind] and fps[ind, 6] > 1000:
-            figa = localize.plot_skewed_roi(fps[ind], rois[ind], imgs_raw, 30 * np.pi / 180, xskew, yskew, zskew,
-                                            init_params=ips[ind], figsize=(16, 8), same_color_scale=True)
+        if to_keep[ind] and fps[ind, 6] > 700:
+            if raw_data_skewed:
+                figa = localize.plot_skewed_roi(fps[ind], rois[ind], imgs_raw, theta, xskew, yskew, zskew,
+                                                init_params=ips[ind], figsize=(16, 8), same_color_scale=True)
+            else:
+                fig = localize.plot_roi(fps[ind], rois[ind], imgs_raw, x, y, z, init_params=ips[ind],
+                                        figsize=(16, 8), same_color_scale=True)
             num_plotted += 1
         ind += 1
 
