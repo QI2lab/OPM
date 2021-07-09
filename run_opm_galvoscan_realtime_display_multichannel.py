@@ -20,7 +20,6 @@ import ctypes as ct
 import napari
 from magicgui import magicgui
 from image_post_processing import deskew
-from skimage.measure import block_reduce
 from napari.qt.threading import thread_worker
 import warnings
 import gc
@@ -32,12 +31,13 @@ def img_process_fn(image, metadata):
     global z_counter
     global images_to_grab
     global scan_finished
+    global n_active_channels
     
     image_stack[ch_counter,z_counter,:,:]=image
     
     ch_counter = ch_counter + 1
     
-    if ch_counter == 3:
+    if ch_counter == n_active_channels:
         z_counter = z_counter + 1
         ch_counter = 0
 
@@ -54,6 +54,7 @@ def acquire_data():
         global image_stack
         global images_to_grab
         global scan_finished
+        global n_active_channels
 
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -61,8 +62,8 @@ def acquire_data():
 
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
-        channel_states = [False, True, True, True, False] # true -> active, false -> inactive
-        channel_powers = [0, 5, 5, 15, 0] # (0 -> 100%)
+        channel_states = [True, True, True, True, False] # true -> active, false -> inactive
+        channel_powers = [5, 20, 20, 20, 0] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -75,10 +76,10 @@ def acquire_data():
         print("")
 
         # exposure time
-        exposure_ms = 20.0 #unit: ms
+        exposure_ms = 10.0 #unit: ms
 
         # scan axis range
-        scan_axis_range_um = 150.0 # unit: microns
+        scan_axis_range_um = 100.0 # unit: microns
         
         # galvo voltage at neutral
         galvo_neutral_volt = 0 # unit: volts
@@ -275,7 +276,30 @@ def acquire_data():
 
         ch_counter = 0
         z_counter = 0
-        image_stack = np.empty([3,scan_steps,y_pixels,x_pixels]).astype(np.uint16)
+        image_stack = np.empty([n_active_channels,scan_steps,y_pixels,x_pixels]).astype(np.uint16)
+
+        deskew_parameters = np.empty([3])
+        deskew_parameters[0] = 30         # (degrees)
+        deskew_parameters[1] = 400        # (nm)
+        deskew_parameters[2] = 115        # (nm)
+
+        # calculate size of one volume
+        # change step size from physical space (nm) to camera space (pixels)
+        pixel_step = deskew_parameters[1]/deskew_parameters[2]    # (pixels)
+
+        # calculate the number of pixels scanned during stage scan 
+        scan_end = image_stack.shape[1] * pixel_step  # (pixels)
+        y_pixels = image_stack.shape[2]
+        x_pixels = image_stack.shape[3]
+
+        # calculate properties for final image
+        ny = np.int64(np.ceil(scan_end+y_pixels*np.cos(deskew_parameters[0]*np.pi/180))) # (pixels)
+        nz = np.int64(np.ceil(y_pixels*np.sin(deskew_parameters[0]*np.pi/180)))          # (pixels)
+        nx = np.int64(x_pixels)     
+
+        deskewed_image = np.empty([n_active_channels,nz,ny,nx]).astype(np.uint16)
+        yield deskewed_image.astype(np.uint16)
+
         images_to_grab = scan_steps
         scan_finished = False
 
@@ -312,29 +336,9 @@ def acquire_data():
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)
 
-        deskew_parameters = np.empty([3])
-        deskew_parameters[0] = 30         # (degrees)
-        deskew_parameters[1] = 400        # (nm)
-        deskew_parameters[2] = 115        # (nm)
-
-        # calculate size of one volume
-        # change step size from physical space (nm) to camera space (pixels)
-        pixel_step = deskew_parameters[1]/deskew_parameters[2]    # (pixels)
-
-        # calculate the number of pixels scanned during stage scan 
-        scan_end = image_stack.shape[1] * pixel_step  # (pixels)
-        y_pixels = image_stack.shape[2]
-        x_pixels = image_stack.shape[3]
-
-        # calculate properties for final image
-        ny = np.int64(np.ceil(scan_end+y_pixels*np.cos(deskew_parameters[0]*np.pi/180))) # (pixels)
-        nz = np.int64(np.ceil(y_pixels*np.sin(deskew_parameters[0]*np.pi/180)))          # (pixels)
-        nx = np.int64(x_pixels)      
-
-        deskewed_image = np.empty([3,nz,ny,nx]).astype(np.uint16)
-        deskewed_image[0,:]= deskew(np.flipud(image_stack[0,:]),*deskew_parameters)
-        deskewed_image[1,:]= deskew(np.flipud(image_stack[1,:]),*deskew_parameters)
-        deskewed_image[2,:]= deskew(np.flipud(image_stack[2,:]),*deskew_parameters)
+        for i in range(n_active_channels):
+            deskewed_image[i,:]= deskew(np.flipud(image_stack[i,:]),*deskew_parameters)
+            yield deskewed_image.astype(np.uint16)
 
         yield deskewed_image.astype(np.uint16)
 
@@ -345,8 +349,8 @@ def main():
     global images_to_grab
     global scan_finished
     global acq_running
+    global n_active_channels
 
-    first_iteration = True
     acq_running = False
 
     # first, set the galvo to the initial point if it is not already
@@ -357,19 +361,19 @@ def main():
     taskAO_last.StopTask()
     taskAO_last.ClearTask()
 
-
-    viewer = napari.Viewer(ndisplay=2)
+    viewer = napari.Viewer(ndisplay=3)
 
     def update_layer(new_image):
-        try:
-            viewer.layers['ch1'].data = new_image[0,:]
-            viewer.layers['ch2'].data = new_image[1,:]
-            viewer.layers['ch3'].data = new_image[2,:]
-        except KeyError:
-            viewer.add_image(new_image[0,:], name='ch1', colormap='bop blue', contrast_limits=[200,7000], scale=[2,1,1])
-            viewer.add_image(new_image[1,:], name='ch2', colormap='bop orange', contrast_limits=[200,2000], scale=[2,1,1], blending='additive')
-            viewer.add_image(new_image[2,:], name='ch3', colormap='red', contrast_limits=[200,2000], scale=[2,1,1], blending='additive')
-
+        lookup_tables = ['bop purple','bop blue','bop orange','gray']
+        channel_names = ['ch0','ch1','ch2','ch3']
+        for i in range(n_active_channels):
+            try:
+                viewer.layers[channel_names[i]].data = new_image[i,:]
+            except KeyError:
+                viewer.add_image(new_image[i,:], name=channel_names[i], 
+                                colormap=lookup_tables[i], 
+                                contrast_limits=[100,7000], 
+                                scale=[1,1,1])
     worker = acquire_data()
     worker.yielded.connect(update_layer)
 
@@ -433,5 +437,4 @@ def main():
 
 # run
 if __name__ == "__main__":
-    warnings.filterwarnings("ignore")
     main()

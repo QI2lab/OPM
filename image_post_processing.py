@@ -2,9 +2,7 @@
 import sys
 import numpy as np
 from numba import njit, prange
-from scyjava import jimport
-import itertools
-from flat_field import calc_flatfield
+#from flat_field import calc_flatfield
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
