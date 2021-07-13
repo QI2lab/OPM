@@ -1021,7 +1021,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
 
     inds = np.ravel_multi_index(centers_guess_inds.transpose(), imgs_filtered.shape)
     weights = imgs_filtered.ravel()[inds]
-    centers_guess, inds_comb = localize.combine_nearby_peaks(centers_guess, dxy_min, dz_min, weights=weights, mode="average")
+    centers_guess, inds_comb = localize.filter_nearby_peaks(centers_guess, dxy_min, dz_min, weights=weights, mode="average")
 
     amps = amps[inds_comb]
     print("Found %d points separated by dxy > %0.5g and dz > %0.5g in %0.1fs" %
@@ -1180,7 +1180,7 @@ def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_
     if np.sum(to_keep_temp) > 0:
 
         # only keep unique center if close enough
-        _, unique_inds = localize.combine_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
+        _, unique_inds = localize.filter_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
 
         # unique mask for those in to_keep_temp
         is_unique = np.zeros(np.sum(to_keep_temp), dtype=np.bool)
