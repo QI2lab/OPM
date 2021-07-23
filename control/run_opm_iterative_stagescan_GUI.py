@@ -12,7 +12,8 @@ Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading t
 
 # imports
 from pycromanager import Bridge, Acquisition
-from hardware import APump, HamiltonMVP
+from hardware.APump import APump
+from hardware.HamiltonMVP import HamiltonMVP
 from fluidics.FluidicsControl import run_fluidic_program
 from pathlib import Path
 import numpy as np
@@ -54,47 +55,59 @@ def main():
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
 
-    # load fluidics program
-    fluidics_path = easygui.fileopenbox('Load fluidics program')
-    program_name = Path(fluidics_path)
+    run_fluidics = False
+    flush_system = False
 
     # check if user wants to flush system?
-    run_type = easygui.choicebox('Type of run?', 'Iterative multiplexing setup', ['Flush fluidics (no imaging)', 'Iterative imaging'])
+    run_type = easygui.choicebox('Type of run?', 'Iterative multiplexing setup', ['Flush fluidics (no imaging)', 'Iterative imaging', 'Single round (test)'])
     if run_type == str('Flush fluidics (no imaging)'):
         flush_system = True
-    else:
+        run_fluidics = True
+        # load fluidics program
+        fluidics_path = easygui.fileopenbox('Load fluidics program')
+        program_name = Path(fluidics_path)
+    elif run_type == str('Iterative imaging'):
         flush_system = False
+        run_fluidics = True
+        # load fluidics program
+        fluidics_path = easygui.fileopenbox('Load fluidics program')
+        program_name = Path(fluidics_path)
+    elif run_type == str('Single round (test)'):
+        flush_system = False
+        run_fluidics = False
+        iterative_rounds = 1
 
     # TO DO: Create instrument 'setup' file that contains COM ports, digital pin setup, etc...
 
-    # define ports for pumps and valves
-    pump_COM_port = 'COM5'
-    valve_COM_port = 'COM6'
+    if run_fluidics:
+        # define ports for pumps and valves
+        pump_COM_port = 'COM5'
+        valve_COM_port = 'COM6'
 
-    # setup pump parameters
-    pump_parameters = {'pump_com_port': pump_COM_port,
-                    'pump_ID': 30,
-                    'verbose': True,
-                    'simulate_pump': False,
-                    'serial_verbose': False,
-                    'flip_flow_direction': False}
+        # setup pump parameters
+        pump_parameters = {'pump_com_port': pump_COM_port,
+                        'pump_ID': 30,
+                        'verbose': True,
+                        'simulate_pump': False,
+                        'serial_verbose': False,
+                        'flip_flow_direction': False}
 
-    # connect to pump
-    pump_controller = APump(pump_parameters)
+        # connect to pump
+        pump_controller = APump(pump_parameters)
 
-    # set pump to remote control
-    pump_controller.enableRemoteControl(True)
+        # set pump to remote control
+        pump_controller.enableRemoteControl(True)
 
-    # connect to valves
-    valve_controller = HamiltonMVP(com_port=valve_COM_port)
+        # connect to valves
+        valve_controller = HamiltonMVP(com_port=valve_COM_port)
 
-    # initialize valves
-    valve_controller.autoAddress()
+        # initialize valves
+        valve_controller.autoAddress()
 
-    # load user defined program from hard disk
-    df_program = data_io.read_fluidics_program(program_name)
-    iterative_rounds = df_program['round'].max()
-    print('Number of iterative rounds: '+str(iterative_rounds))
+        # load user defined program from hard disk
+        df_program = data_io.read_fluidics_program(program_name)
+        iterative_rounds = df_program['round'].max()
+        print('Number of iterative rounds: '+str(iterative_rounds))
 
     if flush_system:
         # run fluidics program for this round
@@ -185,19 +198,20 @@ def main():
 
     # iterate over user defined program
     # TO DO: find way to allow for restart based on metadata already saved to disk
-    for r_idx in range(0,iterative_rounds):
+    for r_idx in range(8,iterative_rounds):
 
         # set motors to on to actively maintain position during fluidics run
         # TO DO: figure out how to make this work
         #core.set_property('XYStage:XY:31','MaintainState-MA',2)
         #core.set_property('ZStage:M:37','MaintainState-MA',2)
 
-        # run fluidics program for this round
-        success_fluidics = False
-        success_fluidics = run_fluidic_program(r_idx, df_program, valve_controller, pump_controller)
-        if not(success_fluidics):
-            print('Error in fluidics! Stopping scan.')
-            sys.exit()
+        if run_fluidics:
+            # run fluidics program for this round
+            success_fluidics = False
+            success_fluidics = run_fluidic_program(r_idx, df_program, valve_controller, pump_controller)
+            if not(success_fluidics):
+                print('Error in fluidics! Stopping scan.')
+                sys.exit()
 
         # set motors to standard drift correction setting
         # TO DO: figure out how to make this work
@@ -205,7 +219,7 @@ def main():
         #core.set_property('ZStage:M:37','MaintainState-MA',0)
 
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
-        if r_idx == 0:
+        if r_idx == 8:
             
             # setup imaging parameters using MM GUI
             run_imaging = False
@@ -314,6 +328,8 @@ def main():
                 actual_exposure_s = actual_readout_ms / 1000. #unit: s
                 scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s / n_active_channels,5) #unit: mm/s
                 scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
+                if not(run_fluidics):
+                    print('Scan speed ='+str(scan_axis_speed))
 
                 # tile axis setup
                 tile_axis_overlap=0.2 #unit: percentage
@@ -368,25 +384,46 @@ def main():
                     config_changed = True
 
         # if last round, switch to DAPI + alexa488 readout instead
-        if r_idx == (iterative_rounds - 1):
+        if (r_idx == (iterative_rounds - 1)) and (run_fluidics):
+
+            setup_done = False
+            while not(setup_done):
+                setup_done = easygui.ynbox('Finished setting up MM?', 'Title', ('Yes', 'No'))
+
+            # pull current MDA window settings
+            acq_manager = studio.acquisitions()
+            acq_settings = acq_manager.get_acquisition_settings()
 
             # grab settings from MM
-            # set up lasers and exposure times
-            channel_states = [True,True,False,False,False]
+            # grab and setup save directory and filename
+            save_directory=Path(acq_settings.root())
+            save_name=Path(acq_settings.prefix())
+
+            # pull active lasers from MDA window
+            channel_labels = ['405', '488', '561', '637', '730']
+            channel_states = [False,False,False,False,False] #define array to keep active channels
+            channels = acq_settings.channels() # get active channels in MDA window
+            for idx in range(channels.size()):
+                channel = channels.get(idx) # pull channel information
+                if channel.config() == channel_labels[0]: 
+                    channel_states[0]=True
+                if channel.config() == channel_labels[1]: 
+                    channel_states[1]=True
+                elif channel.config() == channel_labels[2]: 
+                    channel_states[2]=True
+                elif channel.config() == channel_labels[3]: 
+                    channel_states[3]=True
+                elif channel.config() == channel_labels[4]: 
+                    channel_states[4]=True
             do_ch_pins = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
-
-            # parse which channels are active
-            active_channel_indices = [ind for ind, st in zip(do_ch_pins, channel_states) if st]
-            n_active_channels = len(active_channel_indices)
-
-            channel_powers[0] = 3
-            channel_powers[1] = 10
-            channel_powers[2] = 0
-            channel_powers[3] = 0
-            channel_powers[4] = 0
-
-            exposure_ms = 50
-            core.set_exposure(exposure_ms)
+            
+            # pull laser powers from main window
+            channel_powers = [0.,0.,0.,0.,0.]
+            channel_powers[0] = core.get_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)')
+            channel_powers[1] = core.get_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)')
+            channel_powers[2] = core.get_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)')
+            channel_powers[3] = core.get_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)')
+            channel_powers[4] = core.get_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)')
 
              # set flag to change configuration
             config_changed = True
@@ -502,7 +539,7 @@ def main():
             core.wait_for_config('Laser','AllOn')
 
             # create events to execute scan
-            excess_scan_positions = 10
+            excess_scan_positions = 2
             events = []
             for x in range(scan_axis_positions+excess_scan_positions):
                 for c in active_channel_indices:
@@ -518,6 +555,16 @@ def main():
             dataDO = np.zeros((samples_per_ch, num_DI_channels), dtype=np.uint8)
             for ii, ind in enumerate(active_channel_indices):
                 dataDO[2*ii::2*n_active_channels, ind] = 1
+
+
+        # set camera to internal control
+        core.set_config('Camera-TriggerSource','INTERNAL')
+        core.wait_for_config('Camera-TriggerSource','INTERNAL')   
+        
+        # prompt user to confirm alignment using dichroic diode after fluidics round
+        alignment_confirmed = False
+        while not(alignment_confirmed):
+            alignment_confirmed = easygui.ynbox('Confirmed alignment?', 'Title', ('Yes', 'No'))
 
         for y_idx in range(tile_axis_positions):
             # calculate tile axis position

@@ -96,9 +96,9 @@ def main(argv):
     if not (num_ch == n_active_channels):
         print('Channel setup error. Check metatdata file and directory names.')
         sys.exit()
-    num_ch = 1
-    n_active_channels = 1
-    channels_in_data = [1]
+    num_ch = 2
+    n_active_channels = 2
+    channels_in_data = [0,1]
 
     # check if user provided output path
     if (output_dir_string==''):
@@ -151,7 +151,8 @@ def main(argv):
         from image_post_processing import mv_decon
 
     # initialize tile counter
-    rounds_in_data = list(range(num_r))
+    #rounds_in_data = list(range(num_r))
+    rounds_in_data = [8]
     y_in_data = list(range(num_y))
     z_in_data = list(range(num_z))
     ch_in_BDV = list(range(n_active_channels))
@@ -224,7 +225,7 @@ def main(argv):
                 # save tile in BDV H5 with actual stage positions
                 print('Write into BDV H5.')
                 bdv_writer.append_view(deskewed_downsample_decon,
-                                        time=r_idx, 
+                                        time=0, 
                                         channel=ch_BDV_idx, 
                                         tile=tile_idx,
                                         voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel), 
