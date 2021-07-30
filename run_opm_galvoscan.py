@@ -30,8 +30,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 10, 100, 40, 100] # (0 -> 100%)
+    channel_states = [False, True, False, False, False] # true -> active, false -> inactive
+    channel_powers = [0, 5, 100, 10, 100] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -44,7 +44,7 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 1.5 #unit: ms
+    exposure_ms = 2.0 #unit: ms
 
     # scan axis range
     scan_axis_range_um = 10.0 # unit: microns
@@ -53,11 +53,11 @@ def main():
     galvo_neutral_volt = 0 # unit: volts
 
     # timepoints
-    timepoints = 3000
+    timepoints = 100
 
     # setup file name
-    save_directory=Path('D:/20210624l/')
-    save_name = 'glycerol50'
+    save_directory=Path('D:/20210729/10x_dilution_0.1ml_per_sec')
+    save_name = 'PIV'
 
     # automatically transfer files to NAS at end of dataset
     transfer_files = False
@@ -226,14 +226,14 @@ def main():
 
         # first, set the galvo to the initial point if it is not already
         taskAO_first = daq.Task()
-        taskAO_first.CreateAOVoltageChan("/Dev1/ao0", "", -4.0, 4.0, daq.DAQmx_Val_Volts, None)
+        taskAO_first.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
         taskAO_first.WriteAnalogScalarF64(True, -1, waveform[0], None)
         taskAO_first.StopTask()
         taskAO_first.ClearTask()
 
         # now set up the task to ramp the galvo
         taskAO = daq.Task()
-        taskAO.CreateAOVoltageChan("/Dev1/ao0", "", -4.0, 4.0, daq.DAQmx_Val_Volts, None)
+        taskAO.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
 
         ## Configure timing (from DI task)
         taskAO.CfgSampClkTiming("/Dev1/PFI2", DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, samples_per_ch)
@@ -321,7 +321,7 @@ def main():
     # put the galvo back to neutral
     # first, set the galvo to the initial point if it is not already
     taskAO_last = daq.Task()
-    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
     taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
     taskAO_last.StopTask()
     taskAO_last.ClearTask()
