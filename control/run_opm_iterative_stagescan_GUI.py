@@ -48,6 +48,9 @@ def camera_hook_fn(event,bridge,event_queue):
     command='1SCAN'
     core.set_property('TigerCommHub','SerialCommand',command)
 
+    del core
+    gc.collect()
+
     return event
     
 def main():
@@ -144,7 +147,7 @@ def main():
     core.set_config('Modulation-730','CW (constant power)')
     core.wait_for_config('Modulation-730','CW (constant power)')
 
-    # set camera to fast readout mode
+    # set camera to fastest readout mode that exposure time supports for ROI
     core.set_config('Camera-Setup','ScanMode3')
     core.wait_for_config('Camera-Setup','ScanMode3')
 
@@ -196,9 +199,22 @@ def main():
     except daq.DAQError as err:
         print("DAQmx Error %s"%err)
 
+    del core, studio
+    bridge.close()
+    gc.collect()
+
     # iterate over user defined program
     # TO DO: find way to allow for restart based on metadata already saved to disk
     for r_idx in range(8,iterative_rounds):
+
+        bridge = Bridge()
+        core = bridge.get_core()
+        studio = bridge.get_studio()
+        
+        # get handle to xy and z stages
+        xy_stage = core.get_xy_stage_device()
+        z_stage = core.get_focus_device()
+
 
         # set motors to on to actively maintain position during fluidics run
         # TO DO: figure out how to make this work
@@ -304,13 +320,38 @@ def main():
                 # get exposure time from main window
                 exposure_ms = core.get_exposure()
 
-                # enforce exposure time
-                core.set_exposure(exposure_ms)
-
                 # determine image size
                 core.snap_image()
                 y_pixels = core.get_image_height()
                 x_pixels = core.get_image_width()
+
+                # set readout mode based on ROI and readout time
+                # exposure times pulled from FusionBT documentation and tested using oscilliscope
+                Vn = y_pixels
+                H_ultra_quiet = 80.0 # us
+                H_standard = 18.64706 # us
+                H_fast = 4.867647 # us
+
+                min_exp_time_ultra_quiet_ms = 1 / ((Vn+1)*H_ultra_quiet) / 1000 # ms
+                min_exp_time_standard_ms = 1 / ((Vn+1)*H_standard) / 1000 # ms
+                min_exp_time_fast_ms = 1 / ((Vn+1)*H_fast) / 1000 # ms
+
+                if exposure_ms > min_exp_time_ultra_quiet_ms:
+                    core.set_config('Camera-Setup','ScanMode1')
+                    core.wait_for_config('Camera-Setup','ScanMode1')
+                elif exposure_ms <= min_exp_time_ultra_quiet_ms and exposure_ms > min_exp_time_standard_ms:
+                    core.set_config('Camera-Setup','ScanMode2')
+                    core.wait_for_config('Camera-Setup','ScanMode2')
+                elif exposure_ms <= min_exp_time_standard_ms and exposure_ms > min_exp_time_fast_ms:
+                    core.set_config('Camera-Setup','ScanMode3')
+                    core.wait_for_config('Camera-Setup','ScanMode3')
+                else:
+                    exposure_ms = min_exp_time_fast_ms
+                    core.set_config('Camera-Setup','ScanMode3')
+                    core.wait_for_config('Camera-Setup','ScanMode3')
+                
+                # enforce exposure time
+                core.set_exposure(exposure_ms)
 
                 # grab exposure
                 true_exposure = core.get_exposure()
@@ -539,7 +580,7 @@ def main():
             core.wait_for_config('Laser','AllOn')
 
             # create events to execute scan
-            excess_scan_positions = 2
+            excess_scan_positions = 20
             events = []
             for x in range(scan_axis_positions+excess_scan_positions):
                 for c in active_channel_indices:
@@ -800,6 +841,13 @@ def main():
                 # run O3 focus optimizer
                 pass
 
+        del core, studio
+        bridge.close()
+        gc.collect()
+
+    bridge = Bridge()
+    core = bridge.get_core()
+
     # set lasers to zero power
     channel_powers = [0.,0.,0.,0.,0.]
     core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
@@ -833,7 +881,9 @@ def main():
     core.set_property('ZStage:M:37','JoystickInput','22 - right wheel')
 
     # delete bridge object
+    del core
     bridge.close()
+    gc.collect()
 
 #-----------------------------------------------------------------------------
 if __name__ == "__main__":
