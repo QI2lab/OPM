@@ -5,30 +5,30 @@ import numpy as np
 def read_metadata(fname):
     """
     Read data from csv file consisting of one line giving titles, and the other giving values. Return as dictionary
-    
-    :param fname: Path
-        location of metadata CSV file
+
+    :param fname:
     :return metadata:
-        dictionary containing metadata
     """
+
     scan_data_raw_lines = []
 
     with open(fname, "r") as f:
         for line in f:
             scan_data_raw_lines.append(line.replace("\n", ""))
-
+        
     titles = scan_data_raw_lines[0].split(",")
 
     # convert values to appropriate datatypes
     vals = scan_data_raw_lines[1].split(",")
+    
     for ii in range(len(vals)):
         if re.fullmatch("\d+", vals[ii]):
             vals[ii] = int(vals[ii])
         elif re.fullmatch("\d*.\d+", vals[ii]):
             vals[ii] = float(vals[ii])
-        elif vals[ii] == "False":
+        elif vals[ii].lower() == "False".lower():
             vals[ii] = False
-        elif vals[ii] == "True":
+        elif vals[ii].lower() == "True".lower():
             vals[ii] = True
         else:
             # otherwise, leave as string
@@ -40,6 +40,12 @@ def read_metadata(fname):
         metadata[t] = v
 
     return metadata
+
+def read_config_file(config_path):
+
+    dict_from_csv = pd.read_csv(config_path, header=None, index_col=0, squeeze=True).to_dict()
+
+    return dict_from_csv
 
 def write_metadata(data_dict, save_path):
     """

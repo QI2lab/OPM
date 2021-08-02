@@ -10,6 +10,7 @@
 # ----------------------------------------------------------------------------------------
 # Import
 # ----------------------------------------------------------------------------------------
+from warnings import resetwarnings
 import serial
 import time
 
@@ -25,36 +26,31 @@ class ArduinoShutter():
         self.verbose = parameters.get('verbose',False)   
         
         # Create serial port
-        self.serial = serial.Serial(port = self.com_port, 
-                                    baudrate = 115200, 
-                                    parity= serial.PARITY_EVEN, 
-                                    bytesize=serial.EIGHTBITS, 
-                                    stopbits=serial.STOPBITS_TWO, 
-                                    timeout=0.1)
-
-        # Define initial shutter status
-        self.shutter_state = 'Closed'
-        self.closeShutter()
-    
+        self.serial = serial.Serial(port=self.com_port, baudrate=115200, timeout=.1)
+        time.sleep(2)
+  
     def openShutter(self):
-        if self.getShutterState=='Closed':
-            self.shutters_state == 'Open'
-        
-        if self.verbose: 
-            print("Shutter opened")
+        response = self.writeSerialPort('o')
+        if self.verbose: print(response)    
+        if self.verbose: print("Shutter opened")
+        time.sleep(0.5)
     
     def closeShutter(self):
-        if self.getShutterState=='Open':
-            self.shutter_state == 'Closed'
-
+        response = self.writeSerialPort('c')
+        if self.verbose: print(response)
         if self.verbose: print("Shutter closed")
+        time.sleep(0.5)
 
-    def getShutterState(self):
-        if self.verbose: 
-            print(self.shutter_state)
-        return self.shutter_state
+    def writeSerialPort(self,command):
+        self.serial.flushInput
+        self.serial.flushOutput
+        self.serial.write((command+'\n').encode())
+        time.sleep(0.02)
+        data = self.serial.readline().decode('ascii').strip('\r\n')
+        return data
 
     def close(self):
+        self.closeShutter()
         self.serial.close()
         if self.verbose: 
             print("Closed Arduino shutter controller")

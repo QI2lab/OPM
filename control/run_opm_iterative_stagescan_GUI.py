@@ -11,6 +11,7 @@ Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading t
 '''
 
 # imports
+from hardware.ArduinoShutter import ArduinoShutter
 from pycromanager import Bridge, Acquisition
 from hardware.APump import APump
 from hardware.HamiltonMVP import HamiltonMVP
@@ -58,6 +59,7 @@ def main():
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
 
+    debug = True
     run_fluidics = False
     flush_system = False
 
@@ -80,12 +82,14 @@ def main():
         run_fluidics = False
         iterative_rounds = 1
 
-    # TO DO: Create instrument 'setup' file that contains COM ports, digital pin setup, etc...
+    file_directory = Path(__file__).resolve().parent
+    config_file = file_directory / Path('opm_config.csv')
+    df_config = data_io.read_config_file(config_file)
 
     if run_fluidics:
         # define ports for pumps and valves
-        pump_COM_port = 'COM5'
-        valve_COM_port = 'COM6'
+        pump_COM_port = str(df_config['pump_com_port'])
+        valve_COM_port = str(df_config['valve_com_port'])
 
         # setup pump parameters
         pump_parameters = {'pump_com_port': pump_COM_port,
@@ -121,6 +125,15 @@ def main():
             sys.exit()
         print('Flushed fluidic system.')
         sys.exit()
+
+
+    # connect to alignment laser shutter
+    shutter_com_port = df_config['shutter_com_port']
+    shutter_parameters = {'arduino_com_port': shutter_com_port,
+                         'verbose': True}
+    shutter_controller = ArduinoShutter(shutter_parameters)
+    shutter_controller.closeShutter()
+    sys.exit()
 
     # connect to Micromanager instance
     bridge = Bridge()
@@ -189,10 +202,13 @@ def main():
     # galvo voltage at neutral
     galvo_neutral_volt = 0.0 # unit: volts
 
+    # pull galvo line from config file
+    galvo_ao_line = str(df_config['galvo_ao_pin'])
+
     # set the galvo to the neutral position if it is not already
     try: 
         taskAO_first = daq.Task()
-        taskAO_first.CreateAOVoltageChan("/Dev1/ao0","",-4.0,4.0,daq.DAQmx_Val_Volts,None)
+        taskAO_first.CreateAOVoltageChan(galvo_ao_line,"",-4.0,4.0,daq.DAQmx_Val_Volts,None)
         taskAO_first.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
         taskAO_first.StopTask()
         taskAO_first.ClearTask()
@@ -205,7 +221,7 @@ def main():
 
     # iterate over user defined program
     # TO DO: find way to allow for restart based on metadata already saved to disk
-    for r_idx in range(8,iterative_rounds):
+    for r_idx in range(0,iterative_rounds):
 
         bridge = Bridge()
         core = bridge.get_core()
@@ -235,7 +251,7 @@ def main():
         #core.set_property('ZStage:M:37','MaintainState-MA',0)
 
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
-        if r_idx == 8:
+        if r_idx == 0:
             
             # setup imaging parameters using MM GUI
             run_imaging = False
@@ -270,7 +286,7 @@ def main():
                         channel_states[3]=True
                     elif channel.config() == channel_labels[4]: 
                         channel_states[4]=True
-                do_ch_pins = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
+                do_ch_pins = [df_config['laser0_do_pin'], df_config['laser1_do_pin'], df_config['laser2_do_pin'], df_config['laser3_do_pin'], df_config['laser4_do_pin']] # digital output line corresponding to each channel
                 
                 # pull laser powers from main window
                 channel_powers = [0.,0.,0.,0.,0.]
@@ -327,6 +343,7 @@ def main():
 
                 # set readout mode based on ROI and readout time
                 # exposure times pulled from FusionBT documentation and tested using oscilliscope
+                # TO DO: move into config file
                 Vn = y_pixels
                 H_ultra_quiet = 80.0 # us
                 H_standard = 18.64706 # us
@@ -349,6 +366,8 @@ def main():
                     exposure_ms = min_exp_time_fast_ms
                     core.set_config('Camera-Setup','ScanMode3')
                     core.wait_for_config('Camera-Setup','ScanMode3')
+
+                if debug: print(exposure_ms)
                 
                 # enforce exposure time
                 core.set_exposure(exposure_ms)
@@ -883,6 +902,12 @@ def main():
     # delete bridge object
     del core
     bridge.close()
+    gc.collect()
+
+    # shut down python initialized hardware
+    shutter_controller.close()
+    valve_controller.close()
+    pump_controller.close()
     gc.collect()
 
 #-----------------------------------------------------------------------------
