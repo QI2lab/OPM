@@ -2,3 +2,4 @@
 *.json
 control/.ipynb_checkpoints/define_fluidics_program-checkpoint.ipynb
 control/define_fluidics_program.ipynb
+*.csv
