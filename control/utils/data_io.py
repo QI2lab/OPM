@@ -42,6 +42,14 @@ def read_metadata(fname):
     return metadata
 
 def read_config_file(config_path):
+    """
+    Read data from csv file consisting of one line giving titles, and the other giving values. Return as dictionary
+
+    :param config_path: Path
+        Location of configuration file
+    :return dict_from_csv: dict
+        instrument configuration metadata
+    """
 
     dict_from_csv = pd.read_csv(config_path, header=None, index_col=0, squeeze=True).to_dict()
 
