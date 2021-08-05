@@ -59,8 +59,8 @@ def acquire_data():
 
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
-        channel_states = [False, True, False, False, False] # true -> active, false -> inactive
-        channel_powers = [10, 50, 30, 20, 100] # (0 -> 100%)
+        channel_states = [False, False, False, True, False] # true -> active, false -> inactive
+        channel_powers = [0, 0, 0, 20, 0] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -73,10 +73,10 @@ def acquire_data():
         print("")
 
         # exposure time
-        exposure_ms = 2.0 #unit: ms
+        exposure_ms = 100.0 #unit: ms
 
         # scan axis range
-        scan_axis_range_um = 10.0 # unit: microns
+        scan_axis_range_um = 100.0 # unit: microns
         
         # galvo voltage at neutral
         galvo_neutral_volt = 0 # unit: volts
@@ -95,8 +95,8 @@ def acquire_data():
         core = bridge.get_core()
 
         # give camera time to change modes if necessary
-        core.set_config('Camera-Setup','ScanMode3')
-        core.wait_for_config('Camera-Setup','ScanMode3')
+        core.set_config('Camera-Setup','ScanMode1')
+        core.wait_for_config('Camera-Setup','ScanMode1')
 
         # set camera to internal trigger
         core.set_config('Camera-TriggerSource','INTERNAL')

@@ -40,8 +40,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [True, True, True, True, False] # true -> active, false -> inactive
-    channel_powers = [2, 10, 10, 20, 95] # (0 -> 100%)
+    channel_states = [True, False, False, True, False] # true -> active, false -> inactive
+    channel_powers = [50, 10, 10, 40, 95] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -54,25 +54,25 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 10.0
+    exposure_ms = 75.0
 
     # excess scan positions
-    excess_scan_positions = 10
+    excess_scan_positions = 55
 
     # galvo voltage at neutral
     galvo_neutral_volt = 0.0 # unit: volts
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 8700. #unit: um
-    scan_axis_end_um = 14500. #unit: um
+    scan_axis_start_um = 12000. #unit: um
+    scan_axis_end_um = 13000. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -6600 #unit: um
-    tile_axis_end_um = 1200. #unit: um
+    tile_axis_start_um = -2000 #unit: um
+    tile_axis_end_um = -2500. #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 14555. #unit: um
-    height_axis_end_um = 14565 #unit:  um
+    height_axis_start_um = 16204. #unit: um
+    height_axis_end_um = 16205 #unit:  um
 
     # number of timepoints to execute
     # TO DO: add in control for rate of experiment
@@ -83,8 +83,8 @@ def main():
     # ROI = [0, 1152, 2304, 512] #unit: pixels
 
     # setup file name
-    save_directory=Path('E:/20210514b/')
-    save_name = 'etx_rat_lung'
+    save_directory=Path('c:/data/20210804')
+    save_name = 'control_unamplified'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -99,8 +99,8 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set camera to fast readout mode
-    core.set_config('Camera-Setup','ScanMode3')
-    core.wait_for_config('Camera-Setup','ScanMode3')
+    core.set_config('Camera-Setup','ScanMode1')
+    core.wait_for_config('Camera-Setup','ScanMode1')
 
     # set camera to START mode upon input trigger
     core.set_config('Camera-TriggerType','START')
@@ -115,12 +115,12 @@ def main():
     core.wait_for_config('Camera-TriggerSource','INTERNAL')
 
     # set camera to output positive triggers on all lines for exposure
-    core.set_property('Camera','OUTPUT TRIGGER KIND[0]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[1]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER KIND[2]','EXPOSURE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-    core.set_property('Camera','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[0]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[1]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[2]','EXPOSURE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
     # change core timeout for long stage moves
     core.set_property('Core','TimeoutMs',100000)
@@ -138,7 +138,7 @@ def main():
     true_exposure = core.get_exposure()
 
     # get actual framerate from micromanager properties
-    actual_readout_ms = true_exposure+float(core.get_property('Camera','ReadoutTime')) #unit: ms
+    actual_readout_ms = true_exposure+float(core.get_property('OrcaFusionBT','ReadoutTime')) #unit: ms
 
     # camera pixel size
     pixel_size_um = .115 # unit: um
@@ -288,16 +288,16 @@ def main():
     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
     # set all laser to external triggering
-    core.set_config('Trigger-405','External-Digital')
-    core.wait_for_config('Trigger-405','External-Digital')
-    core.set_config('Trigger-488','External-Digital')
-    core.wait_for_config('Trigger-488','External-Digital')
-    core.set_config('Trigger-561','External-Digital')
-    core.wait_for_config('Trigger-561','External-Digital')
-    core.set_config('Trigger-637','External-Digital')
-    core.wait_for_config('Trigger-637','External-Digital')
-    core.set_config('Trigger-730','External-Digital')
-    core.wait_for_config('Trigger-730','External-Digital')
+    core.set_config('Modulation-405','External-Digital')
+    core.wait_for_config('Modulation-405','External-Digital')
+    core.set_config('Modulation-488','External-Digital')
+    core.wait_for_config('Modulation-488','External-Digital')
+    core.set_config('Modulation-561','External-Digital')
+    core.wait_for_config('Modulation-561','External-Digital')
+    core.set_config('Modulation-637','External-Digital')
+    core.wait_for_config('Modulation-637','External-Digital')
+    core.set_config('Modulation-730','External-Digital')
+    core.wait_for_config('Modulation-730','External-Digital')
 
     # turn all lasers on
     core.set_config('Laser','AllOn')
@@ -429,16 +429,15 @@ def main():
                     core.wait_for_config('Camera-TriggerSource','EXTERNAL')
 
                     # verify that camera actually switched back to external trigger mode
-                    trigger_state = core.get_property('Camera','TRIGGER SOURCE')
+                    trigger_state = core.get_property('OrcaFusionBT','TRIGGER SOURCE')
 
                     # if not in external control, keep trying until camera changes settings
                     while not(trigger_state =='EXTERNAL'):
                         time.sleep(2.0)
                         core.set_config('Camera-TriggerSource','EXTERNAL')
                         core.wait_for_config('Camera-TriggerSource','EXTERNAL')
-                        trigger_state = core.get_property('Camera','TRIGGER SOURCE')
+                        trigger_state = core.get_property('OrcaFusionBT','TRIGGER SOURCE')
 
-                    
                     print('T: '+str(t_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx)+' C: '+str(ch_idx))
                     # run acquisition for this tyzc combination
                     with Acquisition(directory=save_directory, name=save_name_tyzc,
@@ -522,7 +521,7 @@ def main():
                     # turn off 'transmit repeated commands' for Tiger
                     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
                     
-                    
+                    '''
                     # if first tile, make parent directory on NAS and start reconstruction script on the server
                     if setup_processing:
                         # make home directory on NAS
@@ -551,7 +550,7 @@ def main():
                     src= Path(save_directory) / Path(save_name_tyzc+ '_1') 
                     dst= Path(remote_directory) / Path(save_name_tyzc+ '_1') 
                     Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
-                    
+                    '''
                     
     # set lasers to zero power
     channel_powers = [0.,0.,0.,0.,0.]
@@ -566,16 +565,16 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set all lasers back to software control
-    core.set_config('Trigger-405','CW (constant power)')
-    core.wait_for_config('Trigger-405','CW (constant power)')
-    core.set_config('Trigger-488','CW (constant power)')
-    core.wait_for_config('Trigger-488','CW (constant power)')
-    core.set_config('Trigger-561','CW (constant power)')
-    core.wait_for_config('Trigger-561','CW (constant power)')
-    core.set_config('Trigger-637','CW (constant power)')
-    core.wait_for_config('Trigger-637','CW (constant power)')
-    core.set_config('Trigger-730','CW (constant power)')
-    core.wait_for_config('Trigger-730','CW (constant power)')
+    core.set_config('Modulation-405','CW (constant power)')
+    core.wait_for_config('Modulation-405','CW (constant power)')
+    core.set_config('Modulation-488','CW (constant power)')
+    core.wait_for_config('Modulation-488','CW (constant power)')
+    core.set_config('Modulation-561','CW (constant power)')
+    core.wait_for_config('Modulation-561','CW (constant power)')
+    core.set_config('Modulation-637','CW (constant power)')
+    core.wait_for_config('Modulation-637','CW (constant power)')
+    core.set_config('Modulation-730','CW (constant power)')
+    core.wait_for_config('Modulation-730','CW (constant power)')
 
     # set camera to internal control
     core.set_config('Camera-TriggerSource','INTERNAL')
