@@ -54,14 +54,18 @@ def main():
     """"
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
-
-    debug_flag = True
+    # flags for metadata, processing, drift correction, and O2-O3 autofocusing
+    setup_metadata=True
+    copy_data = False
+    setup_processing=False
+    debug_flag = False
     maintain_03_focus = True
     correct_stage_drift = False
-    run_fluidics = False
-    flush_system = False
+
 
     # check if user wants to flush system?
+    run_fluidics = False
+    flush_system = False
     run_type = easygui.choicebox('Type of run?', 'Iterative multiplexing setup', ['Flush fluidics (no imaging)', 'Iterative imaging', 'Single round (test)'])
     if run_type == str('Flush fluidics (no imaging)'):
         flush_system = True
@@ -128,7 +132,7 @@ def main():
     # connect to alignment laser shutter
     shutter_com_port = df_config['shutter_com_port']
     shutter_parameters = {'arduino_com_port': shutter_com_port,
-                         'verbose': True}
+                         'verbose': False}
     shutter_controller = ArduinoShutter(shutter_parameters)
     shutter_controller.closeShutter()
 
@@ -155,7 +159,7 @@ def main():
     while not(y_pixels==2304) or not(x_pixels==2304):
         roi_reset = False
         while not(roi_reset):
-            setup_done = easygui.ynbox('Removed camera ROI?', 'Title', ('Yes', 'No'))
+            roi_reset = easygui.ynbox('Removed camera ROI?', 'Title', ('Yes', 'No'))
         core.snap_image()
         y_pixels = core.get_image_height()
         x_pixels = core.get_image_width()
@@ -163,26 +167,27 @@ def main():
     # set ROI
     roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x1800', '512x1800', '1024x1800'])
     if roi_selection == str('256x1800'):
-        roi_imaging = [252,1024,1800,256]
+        roi_imaging = [160,1024,1950,256]
+        roi_alignment = [876,85,64,64]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('512x1800'):
-        roi_imaging = [252,896,1800,512]
+        roi_imaging = [160,896,1950,512]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('1024x1800'):
-        roi_imaging = [252,640,1800,1024]
+        roi_imaging = [160,640,1950,1024]
         core.set_roi(*roi_imaging)
 
     # check if user wants to capture alignment image
     run_alignment = easygui.choicebox('Align O2-O3 coupling.', 'Mode', ['Capture new alignment', 'Load reference alignment'])
     if run_alignment == str('Capture new alignment'):
-        reference_image, found_focus_position = manage_O3_focus(core,df_config['roi_alignment'],shutter_controller,piezo_channel,initialize=True,reference_image=None)
+        reference_image, found_focus_position = manage_O3_focus(core,roi_alignment,shutter_controller,piezo_channel,initialize=True,reference_image=None)
     elif run_alignment == str('Load reference alignment'):
         print('Not implemented yet. Please capture new reference image.')
         run_alignment = str('Capture new alignment')
 
     # set lasers to zero power and software control
-    channel_powers = [0.,0.,0.,0.,0.]
-    setup_obis_laser_boxx(core,channel_powers,state='software')
+    #channel_powers = [0.,0.,0.,0.,0.]
+    #setup_obis_laser_boxx(core,channel_powers,state='software')
 
     # set camera to fast readout mode
     core.set_config('Camera-Setup','ScanMode3')
@@ -216,11 +221,7 @@ def main():
     core.set_property('Core','TimeoutMs',500000)
     time.sleep(1)
 
-    # flags for metadata, processing, drift correction, and O2-O3 autofocusing
-    setup_metadata=True
-    copy_data = False
-    setup_processing=False
-    
+   
     # galvo voltage at neutral
     galvo_neutral_volt = 0.0 # unit: volts
 
@@ -284,17 +285,17 @@ def main():
 
                 df_MM_setup, active_channel_indices = retrieve_setup_from_MM(core,studio,df_config,debug=debug_flag)
 
-                channel_states = [df_MM_setup['405_active'],
-                                  df_MM_setup['488_active'],
-                                  df_MM_setup['561_active'],
-                                  df_MM_setup['635_active'],
-                                  df_MM_setup['730_active']]
+                channel_states = [bool(df_MM_setup['405_active']),
+                                  bool(df_MM_setup['488_active']),
+                                  bool(df_MM_setup['561_active']),
+                                  bool(df_MM_setup['635_active']),
+                                  bool(df_MM_setup['730_active'])]
 
-                channel_powers = [df_MM_setup['405_power'],
-                                  df_MM_setup['488_power'],
-                                  df_MM_setup['561_power'],
-                                  df_MM_setup['635_power'],
-                                  df_MM_setup['730_power']]
+                channel_powers = [float(df_MM_setup['405_power']),
+                                  float(df_MM_setup['488_power']),
+                                  float(df_MM_setup['561_power']),
+                                  float(df_MM_setup['635_power']),
+                                  float(df_MM_setup['730_power'])]
 
                 # construct and display imaging summary to user
                 scan_settings = (f"Number of labeling rounds: {str(iterative_rounds)} \n\n"
@@ -336,18 +337,19 @@ def main():
                 setup_done = easygui.ynbox('Finished setting up MM?', 'Title', ('Yes', 'No'))
 
             df_MM_setup, active_channel_indices = retrieve_setup_from_MM(core,studio,df_config,debug=debug_flag)
+            active_channel_indices = int(active_channel_indices)
 
-            channel_states = [df_MM_setup['405_active'],
-                                  df_MM_setup['488_active'],
-                                  df_MM_setup['561_active'],
-                                  df_MM_setup['635_active'],
-                                  df_MM_setup['730_active']]
+            channel_states = [bool(df_MM_setup['405_active']),
+                                  bool(df_MM_setup['488_active']),
+                                  bool(df_MM_setup['561_active']),
+                                  bool(df_MM_setup['635_active']),
+                                  bool(df_MM_setup['730_active'])]
 
-            channel_powers = [df_MM_setup['405_power'],
-                                df_MM_setup['488_power'],
-                                df_MM_setup['561_power'],
-                                df_MM_setup['635_power'],
-                                df_MM_setup['730_power']]
+            channel_powers = [float(df_MM_setup['405_power']),
+                                float(df_MM_setup['488_power']),
+                                float(df_MM_setup['561_power']),
+                                float(df_MM_setup['635_power']),
+                                float(df_MM_setup['730_power'])]
 
             # construct and display imaging summary to user
             scan_settings = (f"Number of labeling rounds: {str(iterative_rounds)} \n\n"
@@ -380,51 +382,45 @@ def main():
         if config_changed:
 
             # setup constant speed stage scanning on ASI Tiger controller
-            setup_asi_tiger(core,df_MM_setup['scan_axis_speed'],df_MM_setup['scan_axis_start_mm'],df_MM_setup['scan_axis_end_mm'])
+            setup_asi_tiger(core,float(df_MM_setup['scan_axis_speed']),float(df_MM_setup['scan_axis_start_mm']),float(df_MM_setup['scan_axis_end_mm']))
             setup_obis_laser_boxx(core,channel_powers,state='digital')
             
             # create events to execute scan
-            excess_scan_positions = 20 # TO DO: find a way to calibrate this based on scan speed
             events = []
-            for x in range(df_MM_setup['scan_axis_positions']+excess_scan_positions):
+            for x in range(int(df_MM_setup['scan_axis_positions'])+int(df_config['excess_scan_positions'])):
                 for c in active_channel_indices:
                     evt = { 'axes': {'z': x,'c': c}}
                     events.append(evt)
 
             # setup digital trigger buffer on DAQ
-            samples_per_ch = 2 * df_MM_setup['n_active_channels']
+            n_active_channels = int(df_MM_setup['n_active_channels'])
+            samples_per_ch = 2 * n_active_channels
             DAQ_sample_rate_Hz = 10000
             num_DI_channels = 8
 
             # create DAQ pattern for laser strobing controlled via rolling shutter
             dataDO = np.zeros((samples_per_ch, num_DI_channels), dtype=np.uint8)
             for ii, ind in enumerate(active_channel_indices):
-                dataDO[2*ii::2*df_MM_setup['n_active_channels'], ind] = 1
-
+                dataDO[2*ii::2*n_active_channels, int(ind)] = 1
 
         # set camera to internal control
         core.set_config('Camera-TriggerSource','INTERNAL')
         core.wait_for_config('Camera-TriggerSource','INTERNAL')   
         
-        # prompt user to confirm alignment using dichroic diode after fluidics round
-        alignment_confirmed = False
-        while not(alignment_confirmed):
-            alignment_confirmed = easygui.ynbox('Confirmed alignment?', 'Title', ('Yes', 'No'))
-
-        for y_idx in range(df_MM_setup['tile_axis_positions']):
+        for y_idx in range(int(df_MM_setup['tile_axis_positions'])):
             # calculate tile axis position
-            tile_position_um = df_MM_setup['tile_axis_start_um']+(df_MM_setup['tile_axis_step_um']*y_idx)
+            tile_position_um = float(df_MM_setup['tile_axis_start_um'])+(float(df_MM_setup['tile_axis_step_um'])*y_idx)
             
             # move XY stage to new tile axis position
-            core.set_xy_position(df_MM_setup['scan_axis_start_um'],tile_position_um)
+            core.set_xy_position(float(df_MM_setup['scan_axis_start_um']),tile_position_um)
             core.wait_for_device(xy_stage)
                 
-            for z_idx in range(df_MM_setup['height_axis_positions']):
+            for z_idx in range(int(df_MM_setup['height_axis_positions'])):
                 if df_MM_setup['height_strategy'] == 'tile':
                     # calculate height axis position
-                    height_position_um = df_MM_setup['height_axis_start_um']+(df_MM_setup['height_axis_step_um']*z_idx)
+                    height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*z_idx)
                 elif df_MM_setup['height_strategy'] == 'track':
-                    height_position_um = df_MM_setup['height_axis_start_um']+(df_MM_setup['height_axis_step_um']*y_idx)
+                    height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*y_idx)
 
                 # move Z stage to new height axis position
                 core.set_position(height_position_um)
@@ -569,15 +565,15 @@ def main():
                                         'height_axis_end': float(df_MM_setup['height_axis_end_um']),
                                         'height_axis_step': float(df_MM_setup['height_axis_step_um']),
                                         'theta': float(30.0), 
-                                        'scan_step': float(df_MM_setup['scan_axis_step_um']*1000.), 
-                                        'pixel_size': float(df_config['pixel_size']*1000.),
+                                        'scan_step': float(float(df_config['scan_axis_step_um'])*1000.), 
+                                        'pixel_size': float(float(df_config['pixel_size'])*1000.),
                                         'num_t': int(1),
                                         'num_r': int(iterative_rounds),
                                         'num_y': int(df_MM_setup['tile_axis_positions']),
                                         'num_z': int(df_MM_setup['height_axis_positions']),
                                         'num_ch': int(df_MM_setup['n_active_channels']),
                                         'scan_axis_positions': int(df_MM_setup['scan_axis_positions']),
-                                        'excess_scan_positions': int(excess_scan_positions),
+                                        'excess_scan_positions': int(df_config['excess_scan_positions']),
                                         'y_pixels': int(df_MM_setup['y_pixels']),
                                         'x_pixels': int(df_MM_setup['x_pixels']),
                                         '405_active': bool(channel_states[0]),
@@ -619,7 +615,7 @@ def main():
                     # if first tile, make parent directory on NAS and start reconstruction script on the server
                     if setup_processing:
                         # make home directory on NAS
-                        save_directory_path = Path(df_MM_setup['save_directory'])
+                        save_directory_path = Path(str(df_MM_setup['save_directory']))
                         remote_directory = Path('y:/') / Path(save_directory_path.parts[1])
                         cmd='mkdir ' + str(remote_directory)
                         status_mkdir = subprocess.run(cmd, shell=True)
@@ -645,9 +641,9 @@ def main():
                     dst= Path(remote_directory) / Path(save_name_ryz+ '_1') 
                     Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
 
-            if (maintain_03_focus == True):
-                # run O3 focus optimizer
-                reference_image, found_focus_position = manage_O3_focus(core,df_config['roi_alignment'],shutter_controller,piezo_channel,initialize=False,reference_image=reference_image)
+                if (maintain_03_focus == True):
+                    # run O3 focus optimizer
+                    reference_image, found_focus_position = manage_O3_focus(core,roi_alignment,shutter_controller,piezo_channel,initialize=False,reference_image=reference_image)
 
         del core, studio
         bridge.close()

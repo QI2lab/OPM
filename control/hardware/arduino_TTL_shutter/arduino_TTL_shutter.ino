@@ -1,7 +1,7 @@
 /* Use Arduino to activate shutter
  */
 
-int pin_TTL_out1 = 12;
+int pin_TTL_out1 = 32;
 char COM_in;
 char state;
 

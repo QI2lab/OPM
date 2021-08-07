@@ -255,7 +255,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     height_axis_end_um = np.round(z_positions.max(),0)
 
     # set pixel size
-    pixel_size_um = df_config['pixel_size'] # unit: um 
+    pixel_size_um = float(df_config['pixel_size']) # unit: um 
 
     # get exposure time from main window
     exposure_ms = core.get_exposure()
@@ -273,9 +273,9 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     H_standard = 18.64706 # us
     H_fast = 4.867647 # us
 
-    min_exp_time_ultra_quiet_ms = 1 / ((Vn+1)*H_ultra_quiet) / 1000 # ms
-    min_exp_time_standard_ms = 1 / ((Vn+1)*H_standard) / 1000 # ms
-    min_exp_time_fast_ms = 1 / ((Vn+1)*H_fast) / 1000 # ms
+    min_exp_time_ultra_quiet_ms = ((Vn+1)*H_ultra_quiet) / 1000 # ms
+    min_exp_time_standard_ms = ((Vn+1)*H_standard) / 1000 # ms
+    min_exp_time_fast_ms = ((Vn+1)*H_fast) / 1000 # ms
 
     if exposure_ms > min_exp_time_ultra_quiet_ms:
         core.set_config('Camera-Setup','ScanMode1')
@@ -304,7 +304,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     if debug: print('Full readout time = ' + str(actual_readout_ms))
 
     # scan axis setup
-    scan_axis_step_um = df_config['scan_axis_step_um']  # unit: um 
+    scan_axis_step_um = float(df_config['scan_axis_step_um'])  # unit: um 
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -354,7 +354,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
         height_axis_positions=1
 
     # generate dictionary to return with scan parameters
-    df_MM_setup = [{'tile_axis_positions': int(tile_axis_positions),
+    df_MM_setup = {'tile_axis_positions': int(tile_axis_positions),
                     'tile_axis_start_um': float(tile_axis_start_um),
                     'tile_axis_end_um': float(tile_axis_end_um),
                     'tile_axis_step_um': float(tile_axis_step_um),
@@ -384,6 +384,6 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
                     '561_power': float(channel_powers[2]),
                     '635_power': float(channel_powers[3]),
                     '730_power': float(channel_powers[4]),
-                    'active_channel_indices': active_channel_indices}]
+                    'active_channel_indices': active_channel_indices}
 
-    return df_MM_setup
+    return df_MM_setup, active_channel_indices

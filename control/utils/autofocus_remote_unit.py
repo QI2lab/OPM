@@ -26,7 +26,10 @@ def calculate_focus_metric(image,reference_image):
 
     # calculate focus metric
     #focus_metric = nrmse(reference_image, image)
-    shift, focus_metric, diffphase = phase_cross_correlation(reference_image, image,upsample_factor=1000)
+    _, phase_err, _ = phase_cross_correlation(reference_image, image,upsample_factor=1000)
+    nrmse_err = nrmse(reference_image,image)
+
+    focus_metric = phase_err + nrmse_err
 
     # return focus metric
     return focus_metric
@@ -51,7 +54,7 @@ def find_best_O3_focus_metric(core,roi_alignment,reference_image,shutter_control
     current_piezo_position = piezo_channel.position_count
 
     # generate arrays
-    n_piezo_steps=20.
+    n_piezo_steps=10.
     piezo_step_size = 5. #arb. step size on piezo controller
     piezo_positions = np.round(np.arange(current_piezo_position-(piezo_step_size*np.round(n_piezo_steps/2,0)),current_piezo_position+(piezo_step_size*np.round(n_piezo_steps/2,0)),piezo_step_size),0).astype(np.int16)
     focus_metrics = np.zeros(int(n_piezo_steps))
@@ -63,7 +66,7 @@ def find_best_O3_focus_metric(core,roi_alignment,reference_image,shutter_control
     for piezo_position in piezo_positions:
 
         piezo_channel.move_abs(piezo_position)
-        time.sleep(0.2)
+        time.sleep(0.5)
         while not(piezo_channel.position_count==piezo_position):
             time.sleep(0.5)
         core.snap_image()
@@ -81,7 +84,7 @@ def find_best_O3_focus_metric(core,roi_alignment,reference_image,shutter_control
 
     print('Rough alignment: '+str(rough_best_piezo_position)+'vs actual alignment:'+str(current_piezo_position))
 
-    if np.abs(rough_best_piezo_position-current_piezo_position)/current_piezo_position < 0.3:
+    if np.abs(rough_best_piezo_position-(current_piezo_position+1e-16))/(current_piezo_position+1e-16) < 0.5:
         piezo_channel.move_abs(rough_best_piezo_position)
     else:
         piezo_channel.move_abs(current_piezo_position)
@@ -91,8 +94,8 @@ def find_best_O3_focus_metric(core,roi_alignment,reference_image,shutter_control
 
     # generate arrays
     del n_piezo_steps, piezo_step_size, piezo_positions, focus_metrics
-    n_piezo_steps=20.
-    piezo_step_size = 1. #arb. step size on piezo controller
+    n_piezo_steps=10.
+    piezo_step_size = 2. #arb. step size on piezo controller
     piezo_positions = np.round(np.arange(rough_best_piezo_position-(piezo_step_size*np.round(n_piezo_steps/2,0)),rough_best_piezo_position+(piezo_step_size*np.round(n_piezo_steps/2,0)),piezo_step_size),0).astype(np.int16)
     focus_metrics = np.zeros(int(n_piezo_steps))
 
@@ -103,7 +106,7 @@ def find_best_O3_focus_metric(core,roi_alignment,reference_image,shutter_control
     for piezo_position in piezo_positions:
 
         piezo_channel.move_abs(piezo_position)
-        time.sleep(0.2)
+        time.sleep(0.5)
         while not(piezo_channel.position_count==piezo_position):
             time.sleep(0.5)
         core.snap_image()
@@ -121,7 +124,7 @@ def find_best_O3_focus_metric(core,roi_alignment,reference_image,shutter_control
     
     print('Fine alignment: '+str(best_piezo_position)+'vs actual alignment:'+str(current_piezo_position))
     
-    if np.abs(best_piezo_position-current_piezo_position)/current_piezo_position < 0.3:
+    if np.abs(best_piezo_position-(current_piezo_position+1e-16))/(current_piezo_position+1e-16) < 0.5:
         piezo_channel.move_abs(best_piezo_position)
     else:
         piezo_channel.move_abs(current_piezo_position)

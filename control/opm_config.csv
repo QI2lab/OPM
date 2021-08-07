@@ -1,6 +1,6 @@
 pump_com_port,COM5
 valve_com_port,COM6
-shutter_com_port,COM7
+shutter_com_port,COM9
 piezo_com_port,COM8
 galvo_ao_pin,/Dev1/ao0
 laser0_do_pin,0
@@ -8,9 +8,6 @@ laser1_do_pin,1
 laser2_do_pin,2
 laser3_do_pin,3
 laser4_do_pin,4
-roi_256_1800,"252,1024,1800,256"
-roi_512_1800,"252,896,1800,512"
-roi_alignment,"948,1047,128,128"
 pixel_size,0.115
 scan_axis_step_um,0.400
-excess_scan_positions,55
+excess_scan_positions,10

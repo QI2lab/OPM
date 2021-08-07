@@ -7,11 +7,12 @@ from pycromanager import Bridge
 from utils.autofocus_remote_unit import manage_O3_focus
 import gc
 import easygui
+import sys
 
 # test autofocus control
 
 # connect to alignment laser shutter
-shutter_com_port = 'COM7'
+shutter_com_port = 'COM9'
 shutter_parameters = {'arduino_com_port': shutter_com_port,
                         'verbose': False}
 shutter_controller = ArduinoShutter(shutter_parameters)
@@ -32,9 +33,10 @@ setup_done = False
 while not(setup_done):
     setup_done = easygui.ynbox('Done aligning?', 'Title', ('Yes', 'No'))
 shutter_controller.closeShutter()
+sys.exit()
 
-roi_alignment = [1130,1130,32,32]
-roi_experiment = [252,896,1800,512]
+roi_alignment = [889,95,36,36]
+
 
 bridge = Bridge()
 core = bridge.get_core()
