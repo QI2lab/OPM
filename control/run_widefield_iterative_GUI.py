@@ -3,8 +3,8 @@
 '''
 Widefield bypass mode of ASU OPM with fluidics.
 
-Shepherd 05/21 - modify for hardware triggering during multichannel Z stack, software autofocus at each XY position, and having user setup scan through MM GUI
-Shepherd 05/21 - modify for full automation
+Shepherd 08/21 - implement software autofocus
+Shepherd 05/21 - modify for full automation and setup through GUI
 Shepherd 05/21 - modify acquisition control for widefield mode. Move fluidics helper function to own file.
 Shepherd 05/21 - add in fluidics control. Will refactor once it works into separate files.
 Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading to server for simultaneous reconstruction
@@ -14,16 +14,14 @@ Shepherd 04/21 - large-scale changes for new metadata and on-the-fly uploading t
 from pycromanager import Bridge, Acquisition
 from hardware.APump import APump
 from hardware.HamiltonMVP import HamiltonMVP
-from fluidics.FluidicsControl import lookup_valve, run_fluidic_program
+from utils.fluidics_control import run_fluidic_program
 from pathlib import Path
 import numpy as np
 import time
 import sys
 import pandas as pd
-import data_io
+import utils.data_io as data_io
 import easygui
-import PyDAQmx as daq
-import ctypes as ct
 import gc
 
 def main():
@@ -99,34 +97,8 @@ def main():
     core.set_property('Core','TimeoutMs',100000)
     time.sleep(1)
 
-    # setup Photometrics BSI Express camera
-    # set fan to HIGH
-    #core.set_property('BSIExpress','FanSpeedSetpoint','High')
-
-    # set temperature to -20
-    #core.set_property('BSIExpress','CCDTemperatureSetPoint',-20)
-
-    # set readout mode to 11-bit "sensitive" 
-    #core.set_property('BSIExpress','ReadoutRate','200MHz 11bit')
-    #core.set_property('BSIExpress','Gain','3-Sensitivity')
-
-    # turn off all onboard pixel corrections
-    #core.set_property('BSIExpress','PP 1 ENABLED','No')
-    #core.set_property('BSIExpress','PP 2 ENABLED','No')
-    #core.set_property('BSIExpress','PP 3 ENABLED','No')
-    #core.set_property('BSIExpress','PP 4 ENABLED','No')
-    #core.set_property('BSIExpress','PP 4 ENABLED','No')
-    #core.set_property('BSIExpress','PP 5 ENABLED','No')
-
-    # set output trigger to be HIGH when all rows are active ("Rolling Shutter")
-    #core.set_property('BSIExpress','ExposeOutMode','Rolling Shutter')
-
     # iterate over user defined program
-    for r_idx in range(iterative_rounds):
-
-        # set motors to on to actively maintain position during fluidics run
-        #core.set_property('XYStage:XY:31','MaintainState-MA','2 - Motors on indefinitely')
-        #core.set_property('ZStage:M:37','MaintainState-MA','2 - Motors on indefinitely')
+    for r_idx in range(2,iterative_rounds):
 
         # run fluidics program for this round
         success_fluidics = False
@@ -135,12 +107,8 @@ def main():
             print('Error in fluidics! Stopping scan.')
             sys.exit()
 
-        # set motors to standard drift correction setting
-        #core.set_property('XYStage:XY:31','MaintainState-MA','0 - Motors off but correct drift for 0.5 sec')
-        #core.set_property('ZStage:M:37','MaintainState-MA','0 - Motors off but correct drift for 0.5 sec')
-
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
-        if r_idx == 0:
+        if r_idx == 2:
             
             # setup imaging parameters using MM GUI
             run_imaging = False
@@ -219,7 +187,6 @@ def main():
                 xyz_positions[:,0]= x_positions
                 xyz_positions[:,1]= y_positions
                 xyz_positions[:,2]= z_positions
-                print(xyz_positions)
                 
                 # grab autofocus information
                 autofocus_manager = studio.get_autofocus_manager()
@@ -238,8 +205,8 @@ def main():
 
                 # determine image size
                 #core.snap_image()
-                y_pixels = 1462
-                x_pixels = 1462
+                y_pixels = 2048
+                x_pixels = 2048
 
                 # construct imaging summary for user
                 scan_settings = (f"Number of labeling rounds: {str(iterative_rounds)} \n"
@@ -272,88 +239,15 @@ def main():
             # set up lasers and exposure times
             channel_states = [True,True,False,False,False]
             channel_powers[0] = 2
-            channel_powers[1] = 50
+            channel_powers[1] = channel_powers[1]
             channel_powers[2] = 0
             channel_powers[3] = 0
             channel_powers[4] = 0
-
-            exposure_ms = 10
-            core.set_exposure(exposure_ms)
 
              # set flag to change DAQ settings
             config_changed = True
 
         if config_changed:
-
-            '''
-            # setup DAQ triggering
-            # channels then stage trigger. Stage trigger goes high on last falling edge
-            # setup DAQ
-             samples_per_ch = 2*(n_active_channels+1)
-             DAQ_sample_rate_Hz = 10000
-             num_DI_channels = 8
-             do_stage_pin = 5
-
-            # create array for triggering
-            dataDO = np.zeros((samples_per_ch,num_DI_channels),dtype=np.uint8)
-            counter = 0
-            for ch_idx in range(len(channel_states)):
-                if channel_states[ch_idx]:
-                    dataDO[counter,do_ch_pins[ch_idx]]=1
-                    dataDO[counter+1,do_ch_pins[ch_idx]]=0
-                    counter = counter+2
-            dataDO[counter,do_stage_pin]=0
-            dataDO[counter+1,do_stage_pin]=1
-
-            # setup DAQ for laser strobing
-            try:    
-                # ----- DIGITAL input -------
-                taskDI = daq.Task()
-                taskDI.CreateDIChan("/Dev1/PFI0","",daq.DAQmx_Val_ChanForAllLines)
-                
-                # Configure change detection timing (from wave generator)
-                taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
-                taskDI.CfgChangeDetectionTiming("/Dev1/PFI0","/Dev1/PFI0",daq.DAQmx_Val_ContSamps,0)
-
-                # Set where the starting trigger 
-                taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0",daq.DAQmx_Val_Rising)
-                
-                # Export DI signal to unused PFI pins, for clock and start
-                taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
-                taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger,"/Dev1/PFI1")
-                
-                # ----- DIGITAL output ------   
-                taskDO = daq.Task()
-                taskDO.CreateDOChan("/Dev1/port0/line0:7","",daq.DAQmx_Val_ChanForAllLines)
-
-                ## Configure timing (from DI task) 
-                taskDO.CfgSampClkTiming("/Dev1/PFI2",DAQ_sample_rate_Hz,daq.DAQmx_Val_Rising,daq.DAQmx_Val_ContSamps,samples_per_ch)
-                
-                ## Write the output waveform
-                samples_per_ch_ct_digital = ct.c_int32()
-                taskDO.WriteDigitalLines(samples_per_ch,False,10.0,daq.DAQmx_Val_GroupByChannel,dataDO,ct.byref(samples_per_ch_ct_digital),None)
-
-            except daq.DAQError as err:
-                print("DAQmx Error %s"%err)
-                
-            # setup lasers
-            # set all laser to external triggering
-            core.set_config('Modulation-405','External-Digital')
-            core.wait_for_config('Modulation-405','External-Digital')
-            core.set_config('Modulation-488','External-Digital')
-            core.wait_for_config('Modulation-488','External-Digital')
-            core.set_config('Modulation-561','External-Digital')
-            core.wait_for_config('Modulation-561','External-Digital')
-            core.set_config('Modulation-637','External-Digital')
-            core.wait_for_config('Modulation-637','External-Digital')
-            core.set_config('Modulation-730','External-Digital')
-            core.wait_for_config('Modulation-730','External-Digital')
-            
-
-            # turn all lasers on
-            core.set_config('Laser','AllOn')
-            core.wait_for_config('Laser','AllOn')
-            '''
 
             # turn all lasers on
             core.set_config('Laser','Off')
@@ -408,54 +302,7 @@ def main():
                                             'config': channel_labels[c]}}
                         events.append(evt)
 
-            '''
-            # set FTP stage for triggered moves using repeated moves instead of ring buffer
-            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
-
-            relative_move_asi = np.round(z_relative_step*10,1) # 1/10 micron
-            command = 'MOVEREL Z='+str(-1*relative_move_asi)
-            core.set_property('TigerCommHub','SerialCommand',command)
-
-            # check to make sure Tiger is not busy
-            ready='B'
-            while(ready!='N'):
-                command = 'STATUS'
-                core.set_property('TigerCommHub','SerialCommand',command)
-                ready = core.get_property('TigerCommHub','SerialResponse')
-                time.sleep(.500)
-
-            command = 'MOVEREL Z='+str(relative_move_asi)
-            core.set_property('TigerCommHub','SerialCommand',command)
-
-            # check to make sure Tiger is not busy
-            ready='B'
-            while(ready!='N'):
-                command = 'STATUS'
-                core.set_property('TigerCommHub','SerialCommand',command)
-                ready = core.get_property('TigerCommHub','SerialResponse')
-                time.sleep(.500)
-
-            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
-
-            normal_backlash_z = 10
-            triggered_backlash_z = 0
-
-            # turn off backlash compensation for FTP controller 
-            core.set_property('ZStage:M:37','Backlash-B(um)',triggered_backlash_z)
-
-            # turn on "repeat relative move" for TTL IN on FTP controller
-            core.set_property('ZStage:M:37','TTLInputMode','2 - repeat relative move')
-            
-            # start DAQ running
-            try:    
-                taskDO.StartTask()    
-                taskDI.StartTask()
-            except daq.DAQError as err:
-                print("DAQmx Error %s"%err)
-
-            '''
-
-            # run hardware triggered stack for this XY position
+            # run stack for this XY position
             save_name_round_xyz = str(save_name)+'_r'+str(r_idx).zfill(4)+'_xyz'+str(xyz_idx).zfill(4)
             with Acquisition(directory=str(save_directory), name=save_name_round_xyz, show_display=False, max_multi_res_index=0,saving_queue_size=5000) as acq:
                 acq.acquire(events)
@@ -478,31 +325,11 @@ def main():
                     acq_deleted = True
                     gc.collect()
 
-            '''
-            # turn off "repeat last relative move with TTL" for FTP controller
-            core.set_property('ZStage:M:37','TTLInputMode','0 - not done')
-
-            # stop DAQ running
-            try:
-                ## Stop and clear both tasks
-                taskDI.StopTask()
-                taskDO.StopTask()
-                taskDI.ClearTask()
-                taskDO.ClearTask()
-            except daq.DAQError as err:
-                print("DAQmx Error %s"%err)
-            '''
 
             # save stage scan positions after each tile
             save_name_stage_positions = Path('r'+str(r_idx).zfill(4)+'_xyz'+str(xyz_idx).zfill(4)+'_stage_positions.csv')
             save_name_stage_positions = save_directory / save_name_stage_positions
             data_io.write_metadata(current_stage_data[0], save_name_stage_positions)
-
-
-            '''
-            # Turn on backlash compensation for FTP controller
-            core.set_property('ZStage:M:37','Backlash-B(um)',normal_backlash_z)
-            '''
 
         # save metadata for this round
         scan_param_data = [{'root_name': str(save_name),
@@ -569,6 +396,9 @@ def main():
     # enable joystick
     core.set_property('XYStage:XY:31','JoystickEnabled','Yes')
     core.set_property('ZStage:M:37','JoystickInput','22 - right wheel')
+
+    # close bridge
+    bridge.close()
 
 #-----------------------------------------------------------------------------
 
