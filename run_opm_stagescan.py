@@ -40,8 +40,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [True, False, False, True, False] # true -> active, false -> inactive
-    channel_powers = [50, 10, 10, 40, 95] # (0 -> 100%)
+    channel_states = [True, True, False, True, False] # true -> active, false -> inactive
+    channel_powers = [50, 10, 10, 100, 95] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -54,13 +54,13 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 75.0
+    exposure_ms = 50.0
 
     # excess scan positions
     excess_scan_positions = 55
 
     # galvo voltage at neutral
-    galvo_neutral_volt = 0.0 # unit: volts
+    galvo_neutral_volt = -0.15 # unit: volts
 
     # scan axis limits. Use stage positions reported by MM
     scan_axis_start_um = 12000. #unit: um

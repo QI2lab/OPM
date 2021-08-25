@@ -60,7 +60,7 @@ def acquire_data():
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
         channel_states = [False, False, False, True, False] # true -> active, false -> inactive
-        channel_powers = [0, 0, 0, 20, 0] # (0 -> 100%)
+        channel_powers = [0, 0, 0, 80, 0] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -73,13 +73,13 @@ def acquire_data():
         print("")
 
         # exposure time
-        exposure_ms = 100.0 #unit: ms
+        exposure_ms = 50.0 #unit: ms
 
         # scan axis range
         scan_axis_range_um = 100.0 # unit: microns
         
         # galvo voltage at neutral
-        galvo_neutral_volt = 0 # unit: volts
+        galvo_neutral_volt = -.150 # unit: volts
 
         # timepoints
         timepoints = 1
@@ -151,7 +151,7 @@ def acquire_data():
         # galvo scan setup
         scan_axis_step_um = 0.4  # unit: um
         #scan_axis_calibration = 0.039 # unit: V / um
-        scan_axis_calibration = 0.0453 # unit: V / um
+        scan_axis_calibration = 0.043 # unit: V / um
 
         min_volt = -(scan_axis_range_um * scan_axis_calibration / 2.) + galvo_neutral_volt # unit: volts
         scan_axis_step_volts = scan_axis_step_um * scan_axis_calibration # unit: V
@@ -401,7 +401,6 @@ def main():
 
     # put the galvo back to neutral
     # first, set the galvo to the initial point if it is not already
-    galvo_neutral_volt = 0 # unit: volts
     taskAO_last = daq.Task()
     taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
     taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
