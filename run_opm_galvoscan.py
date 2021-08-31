@@ -30,8 +30,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [False, True, False, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 5, 100, 10, 100] # (0 -> 100%)
+    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
+    channel_powers = [0, 5, 90, 10, 100] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -44,20 +44,21 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 2.0 #unit: ms
+    exposure_ms = 50.0 #unit: ms
 
     # scan axis range
-    scan_axis_range_um = 10.0 # unit: microns
+    scan_axis_range_um = 100.0 # unit: microns
     
     # galvo voltage at neutral
-    galvo_neutral_volt = 0 # unit: volts
+    #galvo_neutral_volt = 0 # unit: volts
+    galvo_neutral_volt = -.150
 
     # timepoints
-    timepoints = 100
+    timepoints = 1
 
     # setup file name
-    save_directory=Path('D:/20210729/10x_dilution_0.1ml_per_sec')
-    save_name = 'PIV'
+    save_directory=Path('D:/20210831/galvo_scan')
+    save_name = 'view3'
 
     # automatically transfer files to NAS at end of dataset
     transfer_files = False
@@ -129,7 +130,8 @@ def main():
     # galvo scan setup
     scan_axis_step_um = 0.4  # unit: um
     #scan_axis_calibration = 0.039 # unit: V / um
-    scan_axis_calibration = 0.0453 # unit: V / um
+    #scan_axis_calibration = 0.0453 # unit: V / um
+    scan_axis_calibration = 0.043 # unit: V / um
 
     min_volt = -(scan_axis_range_um * scan_axis_calibration / 2.) + galvo_neutral_volt # unit: volts
     scan_axis_step_volts = scan_axis_step_um * scan_axis_calibration # unit: V

@@ -40,8 +40,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [True, True, False, True, False] # true -> active, false -> inactive
-    channel_powers = [50, 10, 10, 100, 95] # (0 -> 100%)
+    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
+    channel_powers = [50, 10, 90, 100, 95] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -57,22 +57,22 @@ def main():
     exposure_ms = 50.0
 
     # excess scan positions
-    excess_scan_positions = 55
+    excess_scan_positions = 10
 
     # galvo voltage at neutral
     galvo_neutral_volt = -0.15 # unit: volts
 
     # scan axis limits. Use stage positions reported by MM
-    scan_axis_start_um = 12000. #unit: um
-    scan_axis_end_um = 13000. #unit: um
+    scan_axis_start_um = 8680. #unit: um
+    scan_axis_end_um = 8800. #unit: um
 
     # tile axis limits. Use stage positions reported by MM
-    tile_axis_start_um = -2000 #unit: um
-    tile_axis_end_um = -2500. #unit: um
+    tile_axis_start_um = -3841.28 #unit: um
+    tile_axis_end_um = -3841.28 #unit: um
 
     # height axis limits. Use stage positions reported by MM
-    height_axis_start_um = 16204. #unit: um
-    height_axis_end_um = 16205 #unit:  um
+    height_axis_start_um = 13128.63 #unit: um
+    height_axis_end_um = 13128.63 #unit:  um
 
     # number of timepoints to execute
     # TO DO: add in control for rate of experiment
@@ -83,8 +83,8 @@ def main():
     # ROI = [0, 1152, 2304, 512] #unit: pixels
 
     # setup file name
-    save_directory=Path('c:/data/20210804')
-    save_name = 'control_unamplified'
+    save_directory=Path('D:/20210831')
+    save_name = 'stage_scan'
 
     #------------------------------------------------------------------------------------------------------------------------------------
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -99,8 +99,8 @@ def main():
     core.wait_for_config('Laser','Off')
 
     # set camera to fast readout mode
-    core.set_config('Camera-Setup','ScanMode1')
-    core.wait_for_config('Camera-Setup','ScanMode1')
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
     # set camera to START mode upon input trigger
     core.set_config('Camera-TriggerType','START')
@@ -183,7 +183,7 @@ def main():
     z_stage = core.get_focus_device()
 
     # galvo voltage at neutral
-    galvo_neutral_volt = 0.0 # unit: volts
+    galvo_neutral_volt = -.15 # unit: volts
 
     # set the galvo to the neutral position if it is not already
     try: 
@@ -579,6 +579,8 @@ def main():
     # set camera to internal control
     core.set_config('Camera-TriggerSource','INTERNAL')
     core.wait_for_config('Camera-TriggerSource','INTERNAL')
+
+    bridge.close()
 
 #-----------------------------------------------------------------------------
 
