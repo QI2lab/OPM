@@ -59,9 +59,8 @@ def main():
     copy_data = False
     setup_processing=False
     debug_flag = False
-    maintain_03_focus = True
+    maintain_03_focus = False
     correct_stage_drift = False
-
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -128,7 +127,7 @@ def main():
         print('Flushed fluidic system.')
         sys.exit()
 
-
+    '''
     # connect to alignment laser shutter
     shutter_com_port = df_config['shutter_com_port']
     shutter_parameters = {'arduino_com_port': shutter_com_port,
@@ -146,12 +145,14 @@ def main():
     step_rate = u.Quantity(100, 1/u.s)
     acceleration = u.Quantity(1000, 1/u.s**2)
     piezo_channel.drive_op_parameters = [max_volts, step_rate, acceleration]
+    '''
 
     # connect to Micromanager instance
     bridge = Bridge()
     core = bridge.get_core()
     studio = bridge.get_studio()
 
+    '''
     # make sure camera does not have an ROI set
     core.snap_image()
     y_pixels = core.get_image_height()
@@ -163,7 +164,9 @@ def main():
         core.snap_image()
         y_pixels = core.get_image_height()
         x_pixels = core.get_image_width()
+    '''
 
+    '''
     # set ROI
     roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x1800', '512x1800', '1024x1800'])
     if roi_selection == str('256x1800'):
@@ -176,7 +179,9 @@ def main():
     elif roi_selection == str('1024x1800'):
         roi_imaging = [160,640,1950,1024]
         core.set_roi(*roi_imaging)
+    '''
 
+    '''
     # check if user wants to capture alignment image
     run_alignment = easygui.choicebox('Align O2-O3 coupling.', 'Mode', ['Capture new alignment', 'Load reference alignment'])
     if run_alignment == str('Capture new alignment'):
@@ -184,6 +189,7 @@ def main():
     elif run_alignment == str('Load reference alignment'):
         print('Not implemented yet. Please capture new reference image.')
         run_alignment = str('Capture new alignment')
+    '''
 
     # set lasers to zero power and software control
     #channel_powers = [0.,0.,0.,0.,0.]
@@ -221,9 +227,8 @@ def main():
     core.set_property('Core','TimeoutMs',500000)
     time.sleep(1)
 
-   
     # galvo voltage at neutral
-    galvo_neutral_volt = 0.0 # unit: volts
+    galvo_neutral_volt = -0.15 # unit: volts
 
     # pull galvo line from config file
     galvo_ao_line = str(df_config['galvo_ao_pin'])
@@ -641,9 +646,11 @@ def main():
                     dst= Path(remote_directory) / Path(save_name_ryz+ '_1') 
                     Thread(target=shutil.copytree, args=[str(src), str(dst)]).start()
 
+                '''
                 if (maintain_03_focus == True):
                     # run O3 focus optimizer
                     reference_image, found_focus_position = manage_O3_focus(core,roi_alignment,shutter_controller,piezo_channel,initialize=False,reference_image=reference_image)
+                '''
 
         del core, studio
         bridge.close()
@@ -669,11 +676,13 @@ def main():
     bridge.close()
     gc.collect()
 
+    '''
     # shut down python initialized hardware
     shutter_controller.close()
     valve_controller.close()
     pump_controller.close()
     gc.collect()
+    '''
 
 #-----------------------------------------------------------------------------
 if __name__ == "__main__":
