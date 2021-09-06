@@ -9,5 +9,5 @@ laser2_do_pin,2
 laser3_do_pin,3
 laser4_do_pin,4
 pixel_size,0.115
-scan_axis_step_um,0.400
-excess_scan_positions,10
+scan_axis_step_um,0.4
+excess_scan_positions,55

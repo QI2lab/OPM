@@ -3,6 +3,7 @@ import gc
 from pathlib import Path
 import numpy as np
 import easygui
+from pycromanager import Bridge
 
 def setup_asi_tiger(core,scan_axis_speed,scan_axis_start_mm,scan_axis_end_mm):
 
@@ -153,16 +154,14 @@ def camera_hook_fn(event,bridge,event_queue):
     :return None:
     """
 
-    core = bridge.get_core()
+    with Bridge() as bridge:
+        core = bridge.get_core()
+        command='1SCAN'
+        core.set_property('TigerCommHub','SerialCommand',command)
 
-    command='1SCAN'
-    core.set_property('TigerCommHub','SerialCommand',command)
-
-    del core
     gc.collect()
 
     return event
-
 
 def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     """
@@ -268,6 +267,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     # set readout mode based on ROI and readout time
     # exposure times pulled from FusionBT documentation and tested using oscilliscope
     # TO DO: move into config file
+    '''
     Vn = y_pixels
     H_ultra_quiet = 80.0 # us
     H_standard = 18.64706 # us
@@ -290,6 +290,10 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
         exposure_ms = min_exp_time_fast_ms
         core.set_config('Camera-Setup','ScanMode3')
         core.wait_for_config('Camera-Setup','ScanMode3')
+    '''
+
+    core.set_config('Camera-Setup','ScanMode3')
+    core.wait_for_config('Camera-Setup','ScanMode3')
 
     if debug: print('Exposure time = ' + str(exposure_ms))
     
@@ -361,7 +365,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
                     'height_axis_positions': int(height_axis_positions),
                     'height_axis_start_um': float(height_axis_start_um),
                     'height_axis_end_um': float(height_axis_end_um),
-                    'height_axis_step_um': float(tile_axis_step_um),
+                    'height_axis_step_um': float(height_axis_step_um),
                     'height_strategy': str(height_strategy),
                     'n_active_channels': int(n_active_channels),
                     'scan_axis_positions': int(scan_axis_positions),
