@@ -63,9 +63,9 @@ def main():
     #maintain_03_focus = False
     correct_stage_drift = False
 
-    resume_r_idx = 0
-    resume_y_tile_idx = 3
-    resume_z_tile_idx = 1
+    resume_r_idx = 8
+    resume_y_tile_idx = 0
+    resume_z_tile_idx = 0
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -351,7 +351,6 @@ def main():
                     setup_done = easygui.ynbox('Finished setting up MM?', 'Title', ('Yes', 'No'))
 
                 df_MM_setup, active_channel_indices = retrieve_setup_from_MM(core,studio,df_config,debug=debug_flag)
-                active_channel_indices = int(active_channel_indices)
 
                 channel_states = [bool(df_MM_setup['405_active']),
                                     bool(df_MM_setup['488_active']),
