@@ -2,7 +2,7 @@
 import sys
 import numpy as np
 from numba import njit, prange
-#from flat_field import calc_flatfield
+from flat_field import calc_flatfield
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
@@ -114,8 +114,8 @@ def manage_flat_field_py(stack):
     """
 
     print('Calculating flat-field correction using python BaSiC adaption.')
-    if stack.shape[0] > 100:
-        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 100, replace=False)]
+    if stack.shape[0] > 1000:
+        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 1000, replace=False)]
     else:
         stack_for_flat_field = stack
 
@@ -125,117 +125,6 @@ def manage_flat_field_py(stack):
     corrected_stack = perform_flat_field(flat_field,dark_field,stack)
 
     return corrected_stack
-
-def manage_flat_field(stack,ij):
-    """
-    Manage performing flat and dark-field using BaSiC algorithm via pyimagej. 
-    The use of pyimagej can likely be improved, but this works for now.
-    https://doi.org/10.1038/ncomms14836
-
-    Returns flat- and darkfield corrected image
-    
-    :param stack: ndarray
-        matrix of OPM planes
-    :param ij: imagej
-        imagej object
-
-    :return corrected_stack: ndarray of deskewed OPM planes on uniform grid
-    """
-
-    print('Calculating flat-field correction using ImageJ and BaSiC plugin.')
-    flat_field, dark_field = calculate_flat_field(stack,ij)
-
-    print('Performing flat-field correction.')
-    corrected_stack = perform_flat_field(flat_field,dark_field,stack)
-
-    return corrected_stack
-
-def calculate_flat_field(stack,ij):
-    """
-    Calculate flat- and darkfield using BaSiC algorithm via pyimagej. Returns flat- and darkfield images.
-    
-    :param stack: ndarray
-        matrix of OPM planes
-    :param ij: imagej
-        imagej object
-
-    :return flat_field: ndarray
-        retrospective flat field 
-    :return dark_field: ndarray
-        retrospective dark field 
-    """
-
-    # convert dataset from numpy -> java
-    if stack.shape[0] >= 200:
-        stack_for_flat_field = stack[np.random.choice(stack.shape[0], 50, replace=False)]
-    else:
-        stack_for_flat_field = stack
-    stack_iterable = ij.op().transform().flatIterableView(ij.py.to_java(stack_for_flat_field))
-
-    # show image in imagej since BaSiC plugin cannot be run headless
-    ij.ui().show(stack_iterable)
-    WindowManager = jimport('ij.WindowManager')
-    current_image = WindowManager.getCurrentImage()
-
-    # convert virtual stack to real stack and reorder for BaSiC
-    macro = """
-    rename("active")
-    run("Duplicate...", "duplicate")
-    selectWindow("active")
-    run("Close")
-    selectWindow("active-1")
-    run("Re-order Hyperstack ...", "channels=[Slices (z)] slices=[Channels (c)] frames=[Frames (t)]")
-    """
-    ij.py.run_macro(macro)
-
-    # run BaSiC plugin
-    plugin = 'BaSiC '
-    args = {
-        'processing_stack': 'active-1',
-        'flat-field': 'None',
-        'dark-field': 'None',
-        'shading_estimation': '[Estimate shading profiles]',
-        'shading_model': '[Estimate both flat-field and dark-field]',
-        'setting_regularisationparametes': 'Automatic',
-        'temporal_drift': '[Ignore]',
-        'correction_options': '[Compute shading only]',
-        'lambda_flat': 0.5,
-        'lambda_dark': 0.5
-    }
-    ij.py.run_plugin(plugin, args)
-
-    # grab flat-field image, convert from java->numpy
-    macro2 = """
-    selectWindow("active-1")
-    run("Close")
-    selectWindow("Flat-field:active-1")
-    """
-    ij.py.run_macro(macro2)
-    current_image = WindowManager.getCurrentImage()
-    flat_field_ij = ij.py.from_java(current_image)
-    flat_field = flat_field_ij.data
-
-    # close flat-field, grab dark-field image, convert from java->numpy
-    macro3 = """
-    selectWindow("Flat-field:active-1")
-    run("Close")
-    selectWindow("Dark-field:active-1")
-    """
-    ij.py.run_macro(macro3)
-
-    current_image = WindowManager.getCurrentImage()
-    dark_field_ij = ij.py.from_java(current_image)
-    dark_field = dark_field_ij.data
-
-    # close dark-field image
-    macro4 = """
-    selectWindow("Dark-field:active-1")
-    run("Close")
-    run("Collect Garbage")
-    """
-    ij.py.run_macro(macro4)
-
-    return flat_field, dark_field
 
 def perform_flat_field(flat_field,dark_field,stack):
     """
@@ -252,7 +141,8 @@ def perform_flat_field(flat_field,dark_field,stack):
         corrected OPM image planes 
     """
 
-    corrected_stack = stack.astype(np.float32) - dark_field
+    #corrected_stack = stack.astype(np.float32) - dark_field
+    corrected_stack = stack.astype(np.float32)
     corrected_stack[corrected_stack<0] = 0 
     corrected_stack = corrected_stack/flat_field
 
