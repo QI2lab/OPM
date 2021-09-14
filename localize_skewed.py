@@ -525,7 +525,7 @@ def get_roi_mask(center, max_seps, coords):
     """
     z_roi, y_roi, x_roi = coords
     x_roi_full, y_roi_full, z_roi_full = np.broadcast_arrays(x_roi, y_roi, z_roi)
-    mask = np.ones(x_roi_full.shape, dtype=np.bool)
+    mask = np.ones(x_roi_full.shape, dtype=bool)
 
     # roi is parallelogram, so still want to cut out points which are too far from center
     too_far_xy = np.sqrt((x_roi - center[2]) ** 2 + (y_roi - center[1]) ** 2) > max_seps[1]
@@ -581,7 +581,7 @@ def get_skewed_footprint(min_sep_allowed, dc, ds, theta):
     :return:
     """
     footprint_roi_size = get_skewed_roi_size(min_sep_allowed, theta, dc, ds, ensure_odd=True)
-    footprint_form = np.ones(footprint_roi_size, dtype=np.bool)
+    footprint_form = np.ones(footprint_roi_size, dtype=bool)
     xf, yf, zf = get_skewed_coords(footprint_form.shape, dc, ds, theta)
     xf = xf - xf.mean()
     yf = yf - yf.mean()
@@ -988,7 +988,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
     tstart = time.perf_counter()
 
     if allowed_polygon is None:
-        mask = np.expand_dims(np.ones(imgs_filtered[0].shape, dtype=np.bool), axis=0)
+        mask = np.expand_dims(np.ones(imgs_filtered[0].shape, dtype=bool), axis=0)
     else:
         p = Path(allowed_polygon)
         xx, yy = np.meshgrid(range(imgs.shape[2]), range(imgs.shape[1]))
@@ -1183,17 +1183,17 @@ def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_
         _, unique_inds = localize.filter_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
 
         # unique mask for those in to_keep_temp
-        is_unique = np.zeros(np.sum(to_keep_temp), dtype=np.bool)
+        is_unique = np.zeros(np.sum(to_keep_temp), dtype=bool)
         is_unique[unique_inds] = True
 
         # get indices of non-unique points among all points
-        not_unique_inds_full = np.arange(len(to_keep_temp), dtype=np.int)[to_keep_temp][np.logical_not(is_unique)]
+        not_unique_inds_full = np.arange(len(to_keep_temp), dtype=int)[to_keep_temp][np.logical_not(is_unique)]
 
         # get mask in full space
-        unique = np.ones(len(fit_params), dtype=np.bool)
+        unique = np.ones(len(fit_params), dtype=bool)
         unique[not_unique_inds_full] = False
     else:
-        unique = np.ones(len(fit_params), dtype=np.bool)
+        unique = np.ones(len(fit_params), dtype=bool)
 
     conditions = np.concatenate((conditions, np.expand_dims(unique, axis=1)), axis=1)
     condition_names += ["unique"]
