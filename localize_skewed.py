@@ -769,8 +769,9 @@ def localize_radial_symm(img, coords, mode="radial-symmetry"):
 
 
 # plotting functions
-def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, same_color_scale=True, figsize=(16, 8),
-                    prefix="", save_dir=None):
+def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, same_color_scale=True,
+                    fit_fn=fit_psf.gaussian3d_psf,
+                    figsize=(16, 8), prefix="", save_dir=None):
     """
     plot results from fit_roi()
 
@@ -790,11 +791,9 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     dc = x[0, 0, 1] - x[0, 0, 0]
     stage_pos = y[:, 0]
 
+    center_fit = np.array([fit_params[3], fit_params[2], fit_params[1]])
     if init_params is not None:
         center_guess = np.array([init_params[3], init_params[2], init_params[1]])
-
-    center_fit = np.array([fit_params[3], fit_params[2], fit_params[1]])
-    #normal = np.array([0, -np.sin(theta), np.cos(theta)])
 
     # get ROI and coordinates
     img_roi = rois.cut_roi(roi, imgs)
@@ -806,7 +805,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     vmax_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 99.9)
 
     # get fit
-    fit_volume = fit_psf.gaussian3d_psf(x_roi, y_roi, z_roi, dc, fit_params, sf=3, angles=np.array([0., theta, 0.]))
+    fit_volume = fit_fn(x_roi, y_roi, z_roi, dc, fit_params, sf=3, angles=np.array([0., theta, 0.]))
 
     if same_color_scale:
         vmin_fit = vmin_roi
@@ -825,91 +824,132 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     dzi_roi = zi_roi[1] - zi_roi[0]
 
     # fit on regular grid
-    fit_roi_unskew = fit_psf.gaussian3d_psf(xi_roi[None, None, :], yi_roi[None, :, None], zi_roi[:, None, None]
-                                              , dc, fit_params, sf=1)
+    fit_roi_unskew = fit_fn(xi_roi[None, None, :], yi_roi[None, :, None], zi_roi[:, None, None], dc, fit_params, sf=1)
 
     # ################################
     # plot results interpolated on regular grid
     # ################################
     figh_interp = plt.figure(figsize=figsize)
-    st_str = "Fit, max projections, interpolated, ROI = [%d, %d, %d, %d, %d, %d]\n" \
-             "      A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
-             (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
-              fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
+
+    st_str = "fn = %s, " % fit_fn.__name__ + "ROI = [%d, %d, %d, %d, %d, %d]\n" % tuple(roi) + \
+             ("params = (" + "%3.5f, " * (len(fit_params) - 1) + "%3.5f)") % tuple(fit_params)
     if init_params is not None:
-        st_str += "\nguess A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
-                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5], init_params[6])
-    plt.suptitle(st_str)
+        st_str += ("\nguess  = (" + "%3.5f, " * (len(fit_params) - 1) + "%3.5f)") % tuple(init_params)
+
+    plt.suptitle("Fit, max projections, interpolated, " +st_str)
     grid = plt.GridSpec(2, 3)
 
+    # ################################
+    # XY, data
+    # ################################
     ax = plt.subplot(grid[0, 0])
+    extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+              xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi]
     plt.imshow(np.nanmax(img_roi_unskew, axis=0).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-               extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[2], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[2], 'gx')
-    plt.xlabel("Y (um)")
-    plt.ylabel("X (um)")
-    plt.title("XY")
 
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
+    ax.set_xlabel("Y (um)")
+    ax.set_ylabel("X (um)")
+    ax.set_title("XY")
+
+    # ################################
+    # XZ, data
+    # ################################
     ax = plt.subplot(grid[0, 1])
+    extent = [xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
+              zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
     plt.imshow(np.nanmax(img_roi_unskew, axis=1), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-               extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[2], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[2], center_guess[0], 'gx')
-    plt.xlabel("X (um)")
-    plt.ylabel("Z (um)")
-    plt.title("XZ")
 
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
+    ax.set_xlabel("X (um)")
+    ax.set_ylabel("Z (um)")
+    ax.set_title("XZ")
+
+    # ################################
+    # YZ, data
+    # ################################
     ax = plt.subplot(grid[0, 2])
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', r'All-NaN (slice|axis) encountered')
+        extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+                  zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
+
         plt.imshow(np.nanmax(img_roi_unskew, axis=2), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-                   extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-                   cmap="bone")
+                   extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[0], 'gx')
-    plt.xlabel("Y (um)")
-    plt.ylabel("Z (um)")
-    plt.title("YZ")
 
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
+    ax.set_xlabel("Y (um)")
+    ax.set_ylabel("Z (um)")
+    ax.set_title("YZ")
+
+    # ################################
+    # XY, fit
+    # ################################
     ax = plt.subplot(grid[1, 0])
+    extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+              xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi]
     plt.imshow(np.nanmax(fit_roi_unskew, axis=0).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
-               extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[2], 'mx')
     if init_params is not None:
         plt.plot(center_guess[ 1], center_guess[2], 'gx')
+
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
     plt.xlabel("Y (um)")
     plt.ylabel("X (um)")
 
+    # ################################
+    # XZ, fit
+    # ################################
     ax = plt.subplot(grid[1, 1])
+    extent = [xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
+              zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
     plt.imshow(np.nanmax(fit_roi_unskew, axis=1), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
-               extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[2], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[2], center_guess[0], 'gx')
+
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
     plt.xlabel("X (um)")
     plt.ylabel("Z (um)")
 
+    # ################################
+    # YZ, fit
+    # ################################
     ax = plt.subplot(grid[1, 2])
+    extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+              zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
     plt.imshow(np.nanmax(fit_roi_unskew, axis=2), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
-               extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[0], 'gx')
+
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
     plt.xlabel("Y (um)")
     plt.ylabel("Z (um)")
 
@@ -921,19 +961,10 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     # plot fits in raw OPM coords
     # ################################
     figh_raw = plt.figure(figsize=figsize)
-    st_str = "ROI single PSF fit, ROI = [%d, %d, %d, %d, %d, %d]\n" \
-             "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
-                 (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
-                  fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
-    if init_params is not None:
-        st_str += "\nguess A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
-                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5],
-                   init_params[6])
 
-    plt.suptitle(st_str)
+    plt.suptitle("ROI single PSF fit, " + st_str)
     grid = plt.GridSpec(3, roi[1] - roi[0])
 
-    # todo: need to correct these coordinates for offsets
     xp = np.arange(imgs.shape[2]) * dc + x.min()
     yp = np.arange(imgs.shape[1]) * dc
     extent_roi = [xp[roi[4]] - 0.5 * dc, xp[roi[5] - 1] + 0.5 * dc,
@@ -954,6 +985,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
         else:
             plt.plot(xp, yp, 'rx')
 
+        ax.set_xlim(extent_roi[0:2])
+        ax.set_ylim(extent_roi[2:4])
         plt.title("%0.2fum" % stage_pos_roi[jj])
 
         if jj == 0:
@@ -963,10 +996,13 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
 
         ax = plt.subplot(grid[1, jj])
         plt.imshow(fit_volume[jj], vmin=vmin_fit, vmax=vmax_fit, extent=extent_roi, origin="lower", cmap="bone")
+
         if jj != jj_min:
             plt.plot(xp, yp, 'mx')
         else:
             plt.plot(xp, yp, 'rx')
+        ax.set_xlim(extent_roi[0:2])
+        ax.set_ylim(extent_roi[2:4])
 
         if jj == 0:
             plt.ylabel("Fit\ny' (um)")
@@ -979,6 +1015,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
             plt.plot(xp, yp, 'mx')
         else:
             plt.plot(xp, yp, 'rx')
+        ax.set_xlim(extent_roi[0:2])
+        ax.set_ylim(extent_roi[2:4])
 
         if jj == 0:
             plt.ylabel("Data - fit\ny' (um)")
