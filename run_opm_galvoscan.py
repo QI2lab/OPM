@@ -3,6 +3,7 @@
 '''
 OPM galvo scan using Pycromanager.
 
+D. Shepherd 09/21 - bring metadata in line with new reconstruction code. Attempt timelapse with pause using event structure.
 D. Shepherd 04/21 - streamline code for fast acquisition and immediate upload to server
 P. Brown 03/21 - multiline digital and analog NI DAQ control using camera as master
 D. Shepherd 01/21 - initial pycromanager work, ported from stage control code
@@ -12,12 +13,9 @@ D. Shepherd 01/21 - initial pycromanager work, ported from stage control code
 from pycromanager import Bridge, Acquisition
 from pathlib import Path
 import numpy as np
-import time
-import pandas as pd
 import PyDAQmx as daq
 import ctypes as ct
 import subprocess
-from itertools import compress
 import shutil
 from threading import Thread
 import data_io
@@ -30,8 +28,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-    channel_powers = [0, 5, 90, 10, 100] # (0 -> 100%)
+    channel_states = [True, True, True, False, False] # true -> active, false -> inactive
+    channel_powers = [30, 30, 30, 0, 0] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -44,21 +42,25 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 50.0 #unit: ms
+    exposure_ms = 20.0 #unit: ms
 
     # scan axis range
-    scan_axis_range_um = 100.0 # unit: microns
+    scan_axis_range_um = 150.0 # unit: microns
     
     # galvo voltage at neutral
     #galvo_neutral_volt = 0 # unit: volts
     galvo_neutral_volt = -.150
+    scan_axis_step_um = 0.4  # unit: um
 
     # timepoints
-    timepoints = 1
+    timepoints = 100
+
+    # timepoint interval (s)
+    timing_interval = 10
 
     # setup file name
-    save_directory=Path('D:/20210831/galvo_scan')
-    save_name = 'view3'
+    save_directory=Path('D:/20210920m/')
+    save_name = 'timelapse'
 
     # automatically transfer files to NAS at end of dataset
     transfer_files = False
@@ -70,67 +72,64 @@ def main():
     #----------------------------------------------End setup of scan parameters----------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------
 
-    bridge = Bridge()
-    core = bridge.get_core()
+    with Bridge() as bridge:
+        core = bridge.get_core()
 
-    # give camera time to change modes if necessary
-    core.set_config('Camera-Setup','ScanMode3')
-    core.wait_for_config('Camera-Setup','ScanMode3')
+        # give camera time to change modes if necessary
+        core.set_config('Camera-Setup','ScanMode3')
+        core.wait_for_config('Camera-Setup','ScanMode3')
 
-    # set camera to internal trigger
-    core.set_config('Camera-TriggerSource','INTERNAL')
-    core.wait_for_config('Camera-TriggerSource','INTERNAL')
-    
-    # set camera to internal trigger
-    # give camera time to change modes if necessary
-    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[0]','EXPOSURE')
-    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[1]','EXPOSURE')
-    core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[2]','EXPOSURE')
-    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-    core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+        # set camera to internal trigger
+        core.set_config('Camera-TriggerSource','INTERNAL')
+        core.wait_for_config('Camera-TriggerSource','INTERNAL')
+        
+        # set camera to internal trigger
+        # give camera time to change modes if necessary
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[0]','EXPOSURE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[1]','EXPOSURE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER KIND[2]','EXPOSURE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+        core.set_property('OrcaFusionBT','OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
-    # set exposure time
-    core.set_exposure(exposure_ms)
+        # set exposure time
+        core.set_exposure(exposure_ms)
 
-    # determine image size
-    core.snap_image()
-    y_pixels = core.get_image_height()
-    x_pixels = core.get_image_width()
+        # determine image size
+        core.snap_image()
+        y_pixels = core.get_image_height()
+        x_pixels = core.get_image_width()
 
-    # turn all lasers on
-    core.set_config('Laser','Off')
-    core.wait_for_config('Laser','Off')
+        # turn all lasers on
+        core.set_config('Laser','Off')
+        core.wait_for_config('Laser','Off')
 
-    # set all laser to external triggering
-    core.set_config('Modulation-405','External-Digital')
-    core.wait_for_config('Modulation-405','External-Digital')
-    core.set_config('Modulation-488','External-Digital')
-    core.wait_for_config('Modulation-488','External-Digital')
-    core.set_config('Modulation-561','External-Digital')
-    core.wait_for_config('Modulation-561','External-Digital')
-    core.set_config('Modulation-637','External-Digital')
-    core.wait_for_config('Modulation-637','External-Digital')
-    core.set_config('Modulation-730','External-Digital')
-    core.wait_for_config('Modulation-730','External-Digital')
+        # set all laser to external triggering
+        core.set_config('Modulation-405','External-Digital')
+        core.wait_for_config('Modulation-405','External-Digital')
+        core.set_config('Modulation-488','External-Digital')
+        core.wait_for_config('Modulation-488','External-Digital')
+        core.set_config('Modulation-561','External-Digital')
+        core.wait_for_config('Modulation-561','External-Digital')
+        core.set_config('Modulation-637','External-Digital')
+        core.wait_for_config('Modulation-637','External-Digital')
+        core.set_config('Modulation-730','External-Digital')
+        core.wait_for_config('Modulation-730','External-Digital')
 
-    # turn all lasers on
-    core.set_config('Laser','AllOn')
-    core.wait_for_config('Laser','AllOn')
+        # turn all lasers on
+        core.set_config('Laser','AllOn')
+        core.wait_for_config('Laser','AllOn')
 
-    core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
-    core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
-    core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
-    core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
-    core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
+        core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
+        core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
+        core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
+        core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
+        core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
 
     # camera pixel size
     pixel_size_um = .115 # unit: um
 
     # galvo scan setup
-    scan_axis_step_um = 0.4  # unit: um
-    #scan_axis_calibration = 0.039 # unit: V / um
-    #scan_axis_calibration = 0.0453 # unit: V / um
     scan_axis_calibration = 0.043 # unit: V / um
 
     min_volt = -(scan_axis_range_um * scan_axis_calibration / 2.) + galvo_neutral_volt # unit: volts
@@ -150,8 +149,7 @@ def main():
 
     # create events to execute scan
     events = []
-    ch_idx = 0
-    
+   
     # Changes to event structure motivated by Henry's notes that pycromanager struggles to read "non-standard" axes. 
     # https://github.com/micro-manager/pycro-manager/issues/220
     for t in range(timepoints):
@@ -159,7 +157,11 @@ def main():
             ch_idx = 0
             for c in range(len(do_ind)):
                 if channel_states[c]:
-                    evt = { 'axes': {'t': t, 'z': x, 'c': ch_idx }}
+                    if timing_interval == 0:
+                        evt = { 'axes': {'t': t, 'z': x, 'c': ch_idx }}
+                    else:
+                        evt = { 'axes': {'t': t, 'z': x, 'c': ch_idx },
+                                'min_start_time': t*timing_interval}
                     ch_idx = ch_idx+1
                     events.append(evt)
     print("Generated %d events" % len(events))
@@ -274,6 +276,7 @@ def main():
     scan_param_data = [{'root_name': str(save_name),
                         'scan_type': 'galvo',
                         'theta': 30.0, 
+                        'exposure_ms': exposure_ms,
                         'scan_step': scan_axis_step_um*1000., 
                         'pixel_size': pixel_size_um*1000.,
                         'galvo_scan_range_um': scan_axis_range_um,
@@ -291,42 +294,43 @@ def main():
                         '635_active': channel_states[3],
                         '730_active': channel_states[4]}]
     
-    # df_galvo_scan_params = pd.DataFrame(scan_param_data)
-    # save_name_galvo_params = save_directory / 'scan_metadata.csv'
-    # df_galvo_scan_params.to_csv(save_name_galvo_params)
     data_io.write_metadata(scan_param_data[0], save_directory / 'scan_metadata.csv')
 
-    # turn all lasers off
-    core.set_config('Laser','Off')
-    core.wait_for_config('Laser','Off')
 
-    # set all lasers back to software control
-    core.set_config('Modulation-405','CW (constant power)')
-    core.wait_for_config('Modulation-405','CW (constant power)')
-    core.set_config('Modulation-488','CW (constant power)')
-    core.wait_for_config('Modulation-488','CW (constant power)')
-    core.set_config('Modulation-561','CW (constant power)')
-    core.wait_for_config('Modulation-561','CW (constant power)')
-    core.set_config('Modulation-637','CW (constant power)')
-    core.wait_for_config('Modulation-637','CW (constant power)')
-    core.set_config('Modulation-730','CW (constant power)')
-    core.wait_for_config('Modulation-730','CW (constant power)')
+    with Bridge() as bridge:
 
-    # set all laser to zero power
-    channel_powers=[0,0,0,0,0]
-    core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
-    core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
-    core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
-    core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
-    core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
+        core = bridge.get_core()
+        # turn all lasers off
+        core.set_config('Laser','Off')
+        core.wait_for_config('Laser','Off')
 
-    # put the galvo back to neutral
-    # first, set the galvo to the initial point if it is not already
-    taskAO_last = daq.Task()
-    taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
-    taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
-    taskAO_last.StopTask()
-    taskAO_last.ClearTask()
+        # set all lasers back to software control
+        core.set_config('Modulation-405','CW (constant power)')
+        core.wait_for_config('Modulation-405','CW (constant power)')
+        core.set_config('Modulation-488','CW (constant power)')
+        core.wait_for_config('Modulation-488','CW (constant power)')
+        core.set_config('Modulation-561','CW (constant power)')
+        core.wait_for_config('Modulation-561','CW (constant power)')
+        core.set_config('Modulation-637','CW (constant power)')
+        core.wait_for_config('Modulation-637','CW (constant power)')
+        core.set_config('Modulation-730','CW (constant power)')
+        core.wait_for_config('Modulation-730','CW (constant power)')
+
+        # set all laser to zero power
+        channel_powers=[0,0,0,0,0]
+        core.set_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)',channel_powers[0])
+        core.set_property('Coherent-Scientific Remote','Laser 488-150C - PowerSetpoint (%)',channel_powers[1])
+        core.set_property('Coherent-Scientific Remote','Laser OBIS LS 561-150 - PowerSetpoint (%)',channel_powers[2])
+        core.set_property('Coherent-Scientific Remote','Laser 637-140C - PowerSetpoint (%)',channel_powers[3])
+        core.set_property('Coherent-Scientific Remote','Laser 730-30C - PowerSetpoint (%)',channel_powers[4])
+
+        # put the galvo back to neutral
+        # first, set the galvo to the initial point if it is not already
+        taskAO_last = daq.Task()
+        taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
+        taskAO_last.WriteAnalogScalarF64(True, -1, galvo_neutral_volt, None)
+        taskAO_last.StopTask()
+        taskAO_last.ClearTask()
 
     if transfer_files:
         # make parent directory on NAS and start reconstruction script on the server
