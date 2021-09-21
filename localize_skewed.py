@@ -487,20 +487,24 @@ def get_skewed_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     return [n0, n1, n2]
 
 
-def get_skewed_roi(center, imgs, x, y, z, sizes):
+def get_skewed_roi(center, imgs, coords, sizes):
     """
+    Given a center value (not necessarily aligned to the coordinates), find the closest region of interest (ROI)
+    centered around that point.
 
     :param float center: [cz, cy, cx] in same units as x, y, z
-    :param x:
-    :param y:
-    :param z:
-    :param int sizes: [n0, n1, n2]
-    :param shape: shape of full image ... todo: should infer from x, y, z
-    :return:
+    :param coords: a tuple of coordinates (z, y, x), where z, y, and x are broadcastable to the same shape as imgs.
+    These coordinates are supplied as produced by get_skewed_coords()
+    :param list[int] sizes: [n0, n1, n2], the size of the desired ROI in number of pixels along the skewed coordinate
+    directions. This can be calculated with the help of get_skewed_roi_size()
+    :return roi, img_roi, x_roi, y_roi, z_roi:
     """
+    z, y, x = coords
     shape = imgs.shape
-    i2 = np.argmin(np.abs(x.ravel() - center[2]))
-    i0, i1, _ = np.unravel_index(np.argmin((y - center[1]) ** 2 + (z - center[0]) ** 2), y.shape)
+    i2 = np.argmin(np.abs(x[0, 0, :].ravel() - center[2]))
+    i1 = np.argmin(np.abs(z[0, :, 0] - center[0]))
+    i0 = np.argmin(np.abs(y[:, i1, 0] - center[1]))
+    # i0, i1, _ = np.unravel_index(np.argmin((y - center[1]) ** 2 + (z - center[0]) ** 2), y.shape)
     roi = np.array(rois.get_centered_roi([i0, i1, i2], sizes, min_vals=[0, 0, 0], max_vals=np.array(shape)))
 
     img_roi = rois.cut_roi(roi, imgs)
@@ -509,6 +513,9 @@ def get_skewed_roi(center, imgs, x, y, z, sizes):
     y_roi = y[roi[0]:roi[1], roi[2]:roi[3], :]
     z_roi = z[:, roi[2]:roi[3], :]
     z_roi, y_roi, x_roi = np.broadcast_arrays(z_roi, y_roi, x_roi)
+    # x_roi = rois.cut_roi(roi, x)
+    # y_roi = rois.cut_roi(roi, y)
+    # z_roi = rois.cut_roi(roi, z)
 
     return roi, img_roi, x_roi, y_roi, z_roi
 
@@ -525,7 +532,7 @@ def get_roi_mask(center, max_seps, coords):
     """
     z_roi, y_roi, x_roi = coords
     x_roi_full, y_roi_full, z_roi_full = np.broadcast_arrays(x_roi, y_roi, z_roi)
-    mask = np.ones(x_roi_full.shape, dtype=np.bool)
+    mask = np.ones(x_roi_full.shape, dtype=bool)
 
     # roi is parallelogram, so still want to cut out points which are too far from center
     too_far_xy = np.sqrt((x_roi - center[2]) ** 2 + (y_roi - center[1]) ** 2) > max_seps[1]
@@ -540,19 +547,20 @@ def get_roi_mask(center, max_seps, coords):
 # filtering
 def get_filter_kernel_skewed(sigmas, dc, theta, dstage, sigma_cutoff=2):
     """
-    Gaussian filter kernel
-    :param sigmas:
-    :param dc:
-    :param theta:
-    :param dstage:
-    :param sigma_cutoff:
-    :return:
+    Get gaussian filter convolution kernel in skewed coordinates
+
+    :param sigmas: (sz, sy, sx) in the same units as dc and stage
+    :param dc: pixel size
+    :param theta: angle in radians
+    :param dstage: stage step
+    :param sigma_cutoff: number of standard deviations to include in the filter. This parameter determines the fitler size
+    :return kernel:
     """
     # normalize everything to camera pixel size
     sigma_x_pix = sigmas[2] / dc
     sigma_y_pix = sigmas[2] / dc
     sigma_z_pix = sigmas[0] / dc
-    nk_x = 2 * int(np.round(sigmas[2] * sigma_cutoff)) + 1
+    nk_x = 2 * int(np.round(sigma_x_pix * sigma_cutoff)) + 1
     nk_y = 2 * int(np.round(sigma_y_pix * sigma_cutoff)) + 1
     nk_z = 2 * int(np.round(sigma_z_pix * sigma_cutoff)) + 1
     # determine how large the OPM geometry ROI needs to be to fit the desired filter
@@ -570,18 +578,60 @@ def get_filter_kernel_skewed(sigmas, dc, theta, dstage, sigma_cutoff=2):
     return kernel
 
 
+def get_lapl_gauss_filter_kernel_skewed(sigmas_small, sigmas_large, dc, theta, dstage, sigma_cutoff=2):
+    """
+    Get Laplacian of Gaussian filter convolution kernel in skewed coordinates
+
+    :param sigmas_small: (sz, sy, sx) in the same units as dc and stage
+    :param sigmas_large: (sz, sy, sx) in the same units as dc and stage
+    :param dc: pixel size
+    :param theta: angle in radians
+    :param dstage: stage step
+    :param sigma_cutoff: number of standard deviations to include in the filter. This parameter determines the fitler size
+    :return kernel:
+    """
+    # normalize everything to camera pixel size
+    sxs_pix = sigmas_small[2] / dc
+    sys_pix = sigmas_small[2] / dc
+    szs_pix = sigmas_small[0] / dc
+
+    sxl_pix = sigmas_large[2] / dc
+    syl_pix = sigmas_large[2] / dc
+    szl_pix = sigmas_large[0] / dc
+    nk_x = 2 * int(np.round(sxl_pix * sigma_cutoff)) + 1
+    nk_y = 2 * int(np.round(syl_pix * sigma_cutoff)) + 1
+    nk_z = 2 * int(np.round(szl_pix * sigma_cutoff)) + 1
+    # determine how large the OPM geometry ROI needs to be to fit the desired filter
+    roi_sizes = get_skewed_roi_size([nk_z, nk_y, nk_x], theta, 1, dstage / dc, ensure_odd=True)
+
+    # get coordinates to evaluate kernel at
+    xk, yk, zk = get_skewed_coords(roi_sizes, 1, dstage / dc, theta)
+    xk = xk - np.mean(xk)
+    yk = yk - np.mean(yk)
+    zk = zk - np.mean(zk)
+
+    kl = np.exp(-xk ** 2 / 2 / sxl_pix ** 2 - yk ** 2 / 2 / syl_pix ** 2 - zk ** 2 / 2 / szl_pix ** 2)
+    kl = kl / np.sum(kl)
+    ks = np.exp(-xk ** 2 / 2 / sxs_pix ** 2 - yk ** 2 / 2 / sys_pix ** 2 - zk ** 2 / 2 / szs_pix ** 2)
+    ks = ks / np.sum(ks)
+    kernel = ks - kl
+
+    return kernel
+
+
 # identify peaks
 def get_skewed_footprint(min_sep_allowed, dc, ds, theta):
     """
-    Get footprint for maximum filter
+    Get footprint for maximum filter in skewed coordinates
+
     :param min_sep_allowed: (dz, dy, dx)
-    :param dc:
-    :param ds:
-    :param theta:
-    :return:
+    :param dc: pixel size
+    :param ds: stage step
+    :param theta: angle in radians
+    :return footprint:
     """
     footprint_roi_size = get_skewed_roi_size(min_sep_allowed, theta, dc, ds, ensure_odd=True)
-    footprint_form = np.ones(footprint_roi_size, dtype=np.bool)
+    footprint_form = np.ones(footprint_roi_size, dtype=bool)
     xf, yf, zf = get_skewed_coords(footprint_form.shape, dc, ds, theta)
     xf = xf - xf.mean()
     yf = yf - yf.mean()
@@ -595,6 +645,9 @@ def get_skewed_footprint(min_sep_allowed, dc, ds, theta):
 
 # localization functions
 def localize_radial_symm(img, coords, mode="radial-symmetry"):
+    """
+
+    """
     # todo: check quality of localizations
     if img.ndim != 3:
         raise ValueError("img must be a 3D array, but was %dD" % img.ndim)
@@ -716,10 +769,12 @@ def localize_radial_symm(img, coords, mode="radial-symmetry"):
 
 
 # plotting functions
-def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, same_color_scale=True, figsize=(16, 8),
-                    prefix="", save_dir=None):
+def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, same_color_scale=True,
+                    fit_fn=fit_psf.gaussian3d_psf,
+                    figsize=(16, 8), prefix="", save_dir=None):
     """
     plot results from fit_roi()
+
     :param fit_params:
     :param roi:
     :param imgs:
@@ -736,11 +791,9 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     dc = x[0, 0, 1] - x[0, 0, 0]
     stage_pos = y[:, 0]
 
+    center_fit = np.array([fit_params[3], fit_params[2], fit_params[1]])
     if init_params is not None:
         center_guess = np.array([init_params[3], init_params[2], init_params[1]])
-
-    center_fit = np.array([fit_params[3], fit_params[2], fit_params[1]])
-    #normal = np.array([0, -np.sin(theta), np.cos(theta)])
 
     # get ROI and coordinates
     img_roi = rois.cut_roi(roi, imgs)
@@ -752,7 +805,7 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     vmax_roi = np.percentile(img_roi[np.logical_not(np.isnan(img_roi))], 99.9)
 
     # get fit
-    fit_volume = fit_psf.gaussian3d_psf(x_roi, y_roi, z_roi, dc, fit_params, sf=3, angles=np.array([0., theta, 0.]))
+    fit_volume = fit_fn(x_roi, y_roi, z_roi, dc, fit_params, sf=3, angles=np.array([0., theta, 0.]))
 
     if same_color_scale:
         vmin_fit = vmin_roi
@@ -771,91 +824,132 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     dzi_roi = zi_roi[1] - zi_roi[0]
 
     # fit on regular grid
-    fit_roi_unskew = fit_psf.gaussian3d_psf(xi_roi[None, None, :], yi_roi[None, :, None], zi_roi[:, None, None]
-                                              , dc, fit_params, sf=1)
+    fit_roi_unskew = fit_fn(xi_roi[None, None, :], yi_roi[None, :, None], zi_roi[:, None, None], dc, fit_params, sf=1)
 
     # ################################
     # plot results interpolated on regular grid
     # ################################
     figh_interp = plt.figure(figsize=figsize)
-    st_str = "Fit, max projections, interpolated, ROI = [%d, %d, %d, %d, %d, %d]\n" \
-             "      A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
-             (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
-              fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
+
+    st_str = "fn = %s, " % fit_fn.__name__ + "ROI = [%d, %d, %d, %d, %d, %d]\n" % tuple(roi) + \
+             ("params = (" + "%3.5f, " * (len(fit_params) - 1) + "%3.5f)") % tuple(fit_params)
     if init_params is not None:
-        st_str += "\nguess A=%3.3f, cx=%3.5f, cy=%3.5f, cz=%3.5f, sxy=%3.5f, sz=%3.5f, bg=%3.3f" % \
-                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5], init_params[6])
-    plt.suptitle(st_str)
+        st_str += ("\nguess  = (" + "%3.5f, " * (len(fit_params) - 1) + "%3.5f)") % tuple(init_params)
+
+    plt.suptitle("Fit, max projections, interpolated, " +st_str)
     grid = plt.GridSpec(2, 3)
 
+    # ################################
+    # XY, data
+    # ################################
     ax = plt.subplot(grid[0, 0])
+    extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+              xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi]
     plt.imshow(np.nanmax(img_roi_unskew, axis=0).transpose(), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-               extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[2], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[2], 'gx')
-    plt.xlabel("Y (um)")
-    plt.ylabel("X (um)")
-    plt.title("XY")
 
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
+    ax.set_xlabel("Y (um)")
+    ax.set_ylabel("X (um)")
+    ax.set_title("XY")
+
+    # ################################
+    # XZ, data
+    # ################################
     ax = plt.subplot(grid[0, 1])
+    extent = [xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
+              zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
     plt.imshow(np.nanmax(img_roi_unskew, axis=1), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-               extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[2], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[2], center_guess[0], 'gx')
-    plt.xlabel("X (um)")
-    plt.ylabel("Z (um)")
-    plt.title("XZ")
 
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
+    ax.set_xlabel("X (um)")
+    ax.set_ylabel("Z (um)")
+    ax.set_title("XZ")
+
+    # ################################
+    # YZ, data
+    # ################################
     ax = plt.subplot(grid[0, 2])
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', r'All-NaN (slice|axis) encountered')
+        extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+                  zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
+
         plt.imshow(np.nanmax(img_roi_unskew, axis=2), vmin=vmin_roi, vmax=vmax_roi, origin="lower",
-                   extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-                   cmap="bone")
+                   extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[0], 'gx')
-    plt.xlabel("Y (um)")
-    plt.ylabel("Z (um)")
-    plt.title("YZ")
 
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
+    ax.set_xlabel("Y (um)")
+    ax.set_ylabel("Z (um)")
+    ax.set_title("YZ")
+
+    # ################################
+    # XY, fit
+    # ################################
     ax = plt.subplot(grid[1, 0])
+    extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+              xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi]
     plt.imshow(np.nanmax(fit_roi_unskew, axis=0).transpose(), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
-               extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[2], 'mx')
     if init_params is not None:
         plt.plot(center_guess[ 1], center_guess[2], 'gx')
+
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
     plt.xlabel("Y (um)")
     plt.ylabel("X (um)")
 
+    # ################################
+    # XZ, fit
+    # ################################
     ax = plt.subplot(grid[1, 1])
+    extent = [xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
+              zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
     plt.imshow(np.nanmax(fit_roi_unskew, axis=1), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
-               extent=[xi_roi[0] - 0.5 * dxi_roi, xi_roi[-1] + 0.5 * dxi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[2], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[2], center_guess[0], 'gx')
+
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
     plt.xlabel("X (um)")
     plt.ylabel("Z (um)")
 
+    # ################################
+    # YZ, fit
+    # ################################
     ax = plt.subplot(grid[1, 2])
+    extent = [yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
+              zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi]
     plt.imshow(np.nanmax(fit_roi_unskew, axis=2), vmin=vmin_fit, vmax=vmax_fit, origin="lower",
-               extent=[yi_roi[0] - 0.5 * dyi_roi, yi_roi[-1] + 0.5 * dyi_roi,
-                       zi_roi[0] - 0.5 * dzi_roi, zi_roi[-1] + 0.5 * dzi_roi],
-               cmap="bone")
+               extent=extent, cmap="bone")
+
     plt.plot(center_fit[1], center_fit[0], 'mx')
     if init_params is not None:
         plt.plot(center_guess[1], center_guess[0], 'gx')
+
+    ax.set_xlim(extent[0:2])
+    ax.set_ylim(extent[2:4])
     plt.xlabel("Y (um)")
     plt.ylabel("Z (um)")
 
@@ -867,19 +961,10 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
     # plot fits in raw OPM coords
     # ################################
     figh_raw = plt.figure(figsize=figsize)
-    st_str = "ROI single PSF fit, ROI = [%d, %d, %d, %d, %d, %d]\n" \
-             "A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
-                 (roi[0], roi[1], roi[2], roi[3], roi[4], roi[5],
-                  fit_params[0], fit_params[1], fit_params[2], fit_params[3], fit_params[4], fit_params[5], fit_params[6])
-    if init_params is not None:
-        st_str += "\nguess A=%0.5g, cx=%0.5g, cy=%0.5g, cz=%0.5g, sxy=%0.5g, sz=%0.5g, bg=%0.5g" % \
-                  (init_params[0], init_params[1], init_params[2], init_params[3], init_params[4], init_params[5],
-                   init_params[6])
 
-    plt.suptitle(st_str)
+    plt.suptitle("ROI single PSF fit, " + st_str)
     grid = plt.GridSpec(3, roi[1] - roi[0])
 
-    # todo: need to correct these coordinates for offsets
     xp = np.arange(imgs.shape[2]) * dc + x.min()
     yp = np.arange(imgs.shape[1]) * dc
     extent_roi = [xp[roi[4]] - 0.5 * dc, xp[roi[5] - 1] + 0.5 * dc,
@@ -900,6 +985,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
         else:
             plt.plot(xp, yp, 'rx')
 
+        ax.set_xlim(extent_roi[0:2])
+        ax.set_ylim(extent_roi[2:4])
         plt.title("%0.2fum" % stage_pos_roi[jj])
 
         if jj == 0:
@@ -909,10 +996,13 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
 
         ax = plt.subplot(grid[1, jj])
         plt.imshow(fit_volume[jj], vmin=vmin_fit, vmax=vmax_fit, extent=extent_roi, origin="lower", cmap="bone")
+
         if jj != jj_min:
             plt.plot(xp, yp, 'mx')
         else:
             plt.plot(xp, yp, 'rx')
+        ax.set_xlim(extent_roi[0:2])
+        ax.set_ylim(extent_roi[2:4])
 
         if jj == 0:
             plt.ylabel("Fit\ny' (um)")
@@ -925,6 +1015,8 @@ def plot_skewed_roi(fit_params, roi, imgs, theta, x, y, z, init_params=None, sam
             plt.plot(xp, yp, 'mx')
         else:
             plt.plot(xp, yp, 'rx')
+        ax.set_xlim(extent_roi[0:2])
+        ax.set_ylim(extent_roi[2:4])
 
         if jj == 0:
             plt.ylabel("Data - fit\ny' (um)")
@@ -988,7 +1080,7 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
     tstart = time.perf_counter()
 
     if allowed_polygon is None:
-        mask = np.expand_dims(np.ones(imgs_filtered[0].shape, dtype=np.bool), axis=0)
+        mask = np.expand_dims(np.ones(imgs_filtered[0].shape, dtype=bool), axis=0)
     else:
         p = Path(allowed_polygon)
         xx, yy = np.meshgrid(range(imgs.shape[2]), range(imgs.shape[1]))
@@ -1104,8 +1196,10 @@ def localize_skewed(imgs, params, abs_threshold, roi_size, filter_sigma_small, f
 def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_spot_sep,
                          sigma_bounds, amp_min=0, dist_boundary_min=(0, 0), mode="skewed"):
     """
-    :param fit_params:
-    :param init_params:
+    Given a collection of fits, determine which fits are plausible localizations based on the fit parameters.
+
+    :param fit_params: nfits x 7 array
+    :param init_params: nfits x 7 array
     :param coords: (z, y, x)
     :param fit_dist_max_err = (dz_max, dxy_max)
     :param min_spot_sep: (dz, dxy) assume points separated by less than this distance come from one spot
@@ -1183,17 +1277,17 @@ def filter_localizations(fit_params, init_params, coords, fit_dist_max_err, min_
         _, unique_inds = localize.filter_nearby_peaks(centers_fit[to_keep_temp], dxy, dz, mode="keep-one")
 
         # unique mask for those in to_keep_temp
-        is_unique = np.zeros(np.sum(to_keep_temp), dtype=np.bool)
+        is_unique = np.zeros(np.sum(to_keep_temp), dtype=bool)
         is_unique[unique_inds] = True
 
         # get indices of non-unique points among all points
-        not_unique_inds_full = np.arange(len(to_keep_temp), dtype=np.int)[to_keep_temp][np.logical_not(is_unique)]
+        not_unique_inds_full = np.arange(len(to_keep_temp), dtype=int)[to_keep_temp][np.logical_not(is_unique)]
 
         # get mask in full space
-        unique = np.ones(len(fit_params), dtype=np.bool)
+        unique = np.ones(len(fit_params), dtype=bool)
         unique[not_unique_inds_full] = False
     else:
-        unique = np.ones(len(fit_params), dtype=np.bool)
+        unique = np.ones(len(fit_params), dtype=bool)
 
     conditions = np.concatenate((conditions, np.expand_dims(unique, axis=1)), axis=1)
     condition_names += ["unique"]

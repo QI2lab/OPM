@@ -48,8 +48,8 @@ def calc_flatfield(images,if_darkfield=True,if_baseline_drift=False,lambda_flatf
     """
 
     _saved_size = images[0].shape
-    nrows = _saved_size[0]//8
-    ncols = _saved_size[1]//8
+    nrows = _saved_size[0]//16
+    ncols = _saved_size[1]//16
 
     D = np.zeros((images.shape[0],nrows,ncols), dtype=np.uint16)
 
@@ -135,7 +135,7 @@ def calc_flatfield(images,if_darkfield=True,if_baseline_drift=False,lambda_flatf
     else:
         darkfield = np.zeros_like(flatfield)
         
-    return flatfield, darkfield
+    return flatfield.astype(np.float32), darkfield.astype(np.float32)
 
 def baseline_drift(images_list,working_size = 128, flatfield: np.ndarray = None, darkfield: np.ndarray = None, **kwargs):
     #TODO: Rename s.t. fluorescence is included? E.g. background_fluorescence?
@@ -316,7 +316,7 @@ def _inexact_alm_rspca_l1(images,lambda_flatfield,if_darkfield,lambda_darkfield,
             # limit B1_offset: 0<B1_offset<B1_uplimit
 
             B1_offset = np.maximum(B1_offset, 0)
-            B1_offset = np.minimum(B1_offset, B1_uplimit / np.mean(W_idct_hat))
+            B1_offset = np.minimum(B1_offset, B1_uplimit / (np.mean(W_idct_hat)+1e-5))
 
             B_offset = B1_offset * np.reshape(W_idct_hat, -1, order='F') * (-1)
 
