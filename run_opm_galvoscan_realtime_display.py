@@ -30,7 +30,7 @@ def img_process_fn(image, metadata):
     global counter
     global images_to_grab
     global scan_finished
-    
+
     image_stack[counter,:,:]=image
     counter = counter + 1
 
@@ -60,7 +60,7 @@ def acquire_data():
         # set up lasers
         channel_labels = ["405", "488", "561", "635", "730"]
         channel_states = [False, False, True, False, False] # true -> active, false -> inactive
-        channel_powers = [0, 0, 0, 90, 0] # (0 -> 100%)
+        channel_powers = [0, 0, 5, 0, 0] # (0 -> 100%)
         do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
         # parse which channels are active
@@ -73,7 +73,7 @@ def acquire_data():
         print("")
 
         # exposure time
-        exposure_ms = 50.0 #unit: ms
+        exposure_ms = 5 #unit: ms
 
         # scan axis range
         scan_axis_range_um = 50.0 # unit: microns
@@ -81,8 +81,11 @@ def acquire_data():
         # galvo voltage at neutral
         galvo_neutral_volt = -.150 # unit: volts
 
+        # scan step size
+        scan_axis_step_um = 0.4  # unit: um
+
         # timepoints
-        timepoints = 1
+        timepoints = 100
 
         # display data
         display_flag = False
@@ -149,8 +152,6 @@ def acquire_data():
         pixel_size_um = .115 # unit: um
 
         # galvo scan setup
-        scan_axis_step_um = 0.4  # unit: um
-        #scan_axis_calibration = 0.039 # unit: V / um
         scan_axis_calibration = 0.043 # unit: V / um
 
         min_volt = -(scan_axis_range_um * scan_axis_calibration / 2.) + galvo_neutral_volt # unit: volts
@@ -272,8 +273,8 @@ def acquire_data():
             print("DAQmx Error %s"%err)
 
         counter = 0
-        image_stack = np.empty([scan_steps,y_pixels,x_pixels]).astype(np.uint16)
-        images_to_grab = scan_steps
+        image_stack = np.empty([n_active_channels,scan_steps,y_pixels,x_pixels]).astype(np.uint16)
+        images_to_grab = n_active_channels*scan_steps
         scan_finished = False
 
         # run acquisition
@@ -310,9 +311,9 @@ def acquire_data():
             print("DAQmx Error %s"%err)
 
         deskew_parameters = np.empty([3])
-        deskew_parameters[0] = 30         # (degrees)
+        deskew_parameters[0] = 30                           # (degrees)
         deskew_parameters[1] = 400        # (nm)
-        deskew_parameters[2] = 115        # (nm)
+        deskew_parameters[2] = 115                          # (nm)
         deskewed_image = deskew(np.flipud(image_stack),*deskew_parameters)
 
         yield deskewed_image.astype(np.uint16)
