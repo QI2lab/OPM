@@ -42,6 +42,34 @@ def read_metadata(fname):
 
     return metadata
 
+def read_config_file(config_path):
+    """
+    Read data from csv file consisting of one line giving titles, and the other giving values. Return as dictionary
+
+    :param config_path: Path
+        Location of configuration file
+    :return dict_from_csv: dict
+        instrument configuration metadata
+    """
+
+    dict_from_csv = pd.read_csv(config_path, header=None, index_col=0, squeeze=True).to_dict()
+
+    return dict_from_csv
+
+def read_fluidics_program(program_path):
+    """
+    Read fluidics program from CSV file as pandas dataframe
+
+    :param program_path: Path
+        location of fluidics program
+
+    :return df_program: Dataframe
+        dataframe containing fluidics program 
+    """
+
+    df_program = pd.read_csv(program_path)
+    return df_program
+
 def write_metadata(data_dict, save_path):
     """
 
@@ -50,7 +78,6 @@ def write_metadata(data_dict, save_path):
     :return:
     """
     pd.DataFrame([data_dict]).to_csv(save_path)
-
 
 def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_images, y_pixels,x_pixels):
     """
@@ -151,3 +178,5 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
             read_affine_success = True
 
     return affine_xforms
+
+

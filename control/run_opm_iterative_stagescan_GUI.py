@@ -41,7 +41,7 @@ from pathlib import Path
 import numpy as np
 
 # qi2lab OPM functions
-from utils.data_io import read_config_file, read_fluidics_program, read_metadata, write_metadata
+from utils.data_io import read_config_file, read_fluidics_program, write_metadata
 from utils.fluidics_control import run_fluidic_program
 from utils.opm_setup import setup_asi_tiger, setup_obis_laser_boxx, camera_hook_fn, retrieve_setup_from_MM
 from utils.autofocus_remote_unit import manage_O3_focus
@@ -55,7 +55,7 @@ def main():
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
-    setup_metadata=False
+    setup_metadata=True
     copy_data = False
     setup_processing=False
     debug_flag = False
@@ -63,7 +63,7 @@ def main():
     #maintain_03_focus = False
     correct_stage_drift = False
 
-    resume_r_idx = 8
+    resume_r_idx = 0
     resume_y_tile_idx = 0
     resume_z_tile_idx = 0
 
@@ -156,8 +156,8 @@ def main():
     with Bridge() as bridge:
         core = bridge.get_core()
 
-        roi_imaging = [180,644,1960,512]
-        core.set_roi(*roi_imaging)
+        #roi_imaging = [180,644,1960,512]
+        #core.set_roi(*roi_imaging)
 
         '''
         # make sure camera does not have an ROI set
@@ -235,7 +235,7 @@ def main():
         time.sleep(1)
 
         # galvo voltage at neutral
-        galvo_neutral_volt = -0.15 # unit: volts
+        galvo_neutral_volt = -0.10 # unit: volts
 
         # pull galvo line from config file
         galvo_ao_line = str(df_config['galvo_ao_pin'])
@@ -458,6 +458,9 @@ def main():
                 # turn off 'transmit repeated commands' for Tiger
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
+                # give MM time to return for proper port cleanup
+                time.sleep(1)
+
             gc.collect()            
                 
             for z_idx in range(resume_z_tile_idx,int(df_MM_setup['height_axis_positions'])):
@@ -596,6 +599,7 @@ def main():
                         scan_param_data = [{'root_name': str(df_MM_setup['save_name']),
                                             'scan_type': str('OPM-stage'),
                                             'interleaved': bool(True),
+                                            'exposure': float(df_MM_setup['exposure_ms']),
                                             'scan_axis_start': float(df_MM_setup['scan_axis_start_um']),
                                             'scan_axis_end': float(df_MM_setup['scan_axis_end_um']),
                                             'tile_axis_start': float(df_MM_setup['tile_axis_start_um']),

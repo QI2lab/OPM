@@ -388,6 +388,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
                     '561_power': float(channel_powers[2]),
                     '635_power': float(channel_powers[3]),
                     '730_power': float(channel_powers[4]),
-                    'active_channel_indices': active_channel_indices}
+                    'active_channel_indices': active_channel_indices,
+                    'exposure_ms': exposure_ms}
 
     return df_MM_setup, active_channel_indices
