@@ -55,7 +55,7 @@ def main():
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
-    setup_metadata=True
+    setup_metadata=False
     copy_data = False
     setup_processing=False
     debug_flag = False
@@ -63,9 +63,9 @@ def main():
     #maintain_03_focus = False
     correct_stage_drift = False
 
-    resume_r_idx = 0
-    resume_y_tile_idx = 0
-    resume_z_tile_idx = 0
+    resume_r_idx = 5
+    resume_y_tile_idx = 2
+    resume_z_tile_idx = 1
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -459,19 +459,14 @@ def main():
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
                 # give MM time to return for proper port cleanup
-                time.sleep(1)
-
-            gc.collect()            
+                time.sleep(1)           
                 
-            for z_idx in range(resume_z_tile_idx,int(df_MM_setup['height_axis_positions'])):
-                if df_MM_setup['height_strategy'] == 'tile':
-                    # calculate height axis position
-                    height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*z_idx)
-                elif df_MM_setup['height_strategy'] == 'track':
-                    height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*y_idx)
-
-                with Bridge() as bridge: 
-                    core = bridge.get_core()
+                for z_idx in range(resume_z_tile_idx,int(df_MM_setup['height_axis_positions'])):
+                    if df_MM_setup['height_strategy'] == 'tile':
+                        # calculate height axis position
+                        height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*z_idx)
+                    elif df_MM_setup['height_strategy'] == 'track':
+                        height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*y_idx)
 
                     # move Z stage to new height axis position
                     core.set_position(height_position_um)
@@ -579,8 +574,6 @@ def main():
                     with Acquisition(directory=str(df_MM_setup['save_directory']), name=str(save_name_ryz),
                                     post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
                         acq.acquire(events)
-
-                    gc.collect()
                     
                     # stop DAQ and make sure it is at zero
                     try:
