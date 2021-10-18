@@ -55,7 +55,7 @@ def main():
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
-    setup_metadata=False
+    setup_metadata=True
     copy_data = False
     setup_processing=False
     debug_flag = False
@@ -63,9 +63,12 @@ def main():
     #maintain_03_focus = False
     correct_stage_drift = False
 
-    resume_r_idx = 5
-    resume_y_tile_idx = 2
-    resume_z_tile_idx = 1
+    resume_r_idx = 0
+    resume_y_tile_idx = 0
+    resume_z_tile_idx = 0
+
+    z_offset = 2
+    z_pos_offet = 24.0
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -475,9 +478,9 @@ def main():
                     # update save_name with current tile information
                     
                     if (r_idx == resume_r_idx) and (y_idx == resume_y_tile_idx) and (z_idx == resume_z_tile_idx):
-                        save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a')
+                        save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx+z_offset).zfill(4)+'_a')
                     else:
-                        save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4))
+                        save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx+z_offset).zfill(4))
 
                     # turn on 'transmit repeated commands' for Tiger
                     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
@@ -505,7 +508,7 @@ def main():
                         pass
 
                     offset_y = 0.
-                    offset_z = 0.
+                    offset_z = 24.
 
                     # apply YZ offsets
                     # do offset X for now since it is the scan direction, since that is easier to post-correct for
@@ -630,9 +633,9 @@ def main():
 
                     # save stage scan positions after each tile
                     if (r_idx == resume_r_idx) and (y_idx == resume_y_tile_idx) and (z_idx == resume_z_tile_idx):
-                        save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a_stage_positions.csv')
+                        save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx+z_offset).zfill(4)+'_a_stage_positions.csv')
                     else:
-                        save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
+                        save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx+z_offset).zfill(4)+'_stage_positions.csv')
                     save_name_stage_path = Path(df_MM_setup['save_directory']) / save_name_stage_positions
                     write_metadata(current_stage_data[0], save_name_stage_path)
 
