@@ -1,6 +1,6 @@
 '''
 Paired down image post processing for napari-OPM control. Contains only orthogonal deskew.
-D. Shepherd - 09/2021
+D. Shepherd - 12/2021
 '''
 
 #!/usr/bin/env python
