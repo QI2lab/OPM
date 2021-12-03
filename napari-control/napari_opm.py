@@ -1,6 +1,6 @@
 '''
 Initial work on napari interface using pycro-manager, magic-class, and magic-gui
-D. Shepherd - 09/2021
+D. Shepherd - 12/2021
 '''
 
 from pycromanager import Bridge, Acquisition, start_headless
