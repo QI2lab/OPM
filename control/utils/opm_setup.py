@@ -154,10 +154,13 @@ def camera_hook_fn(event,bridge,event_queue):
     :return None:
     """
 
-    with Bridge() as bridge:
-        core = bridge.get_core()
+    with Bridge() as bridge_trigger:
+        core_trigger = bridge_trigger.get_core()
         command='1SCAN'
-        core.set_property('TigerCommHub','SerialCommand',command)
+        core_trigger.set_property('TigerCommHub','SerialCommand',command)
+
+        core_trigger = None
+        del core_trigger
 
     gc.collect()
 

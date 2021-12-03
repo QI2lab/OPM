@@ -67,8 +67,8 @@ def main():
     resume_y_tile_idx = 0
     resume_z_tile_idx = 0
 
-    z_offset = 2
-    z_pos_offet = 24.0
+    z_offset = 0
+    z_pos_offset = 0
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -426,7 +426,11 @@ def main():
 
             # set camera to internal control
             core.set_config('Camera-TriggerSource','INTERNAL')
-            core.wait_for_config('Camera-TriggerSource','INTERNAL')   
+            core.wait_for_config('Camera-TriggerSource','INTERNAL')
+
+            core = None
+            studio = None
+            del core, studio
 
         gc.collect()
 
@@ -508,7 +512,7 @@ def main():
                         pass
 
                     offset_y = 0.
-                    offset_z = 24.
+                    offset_z = 0.
 
                     # apply YZ offsets
                     # do offset X for now since it is the scan direction, since that is easier to post-correct for
@@ -690,7 +694,10 @@ def main():
                         reference_image, found_focus_position = manage_O3_focus(core,roi_alignment,shutter_controller,piezo_channel,initialize=False,reference_image=reference_image)
                     '''
 
-                gc.collect()
+                core = None
+                del core
+
+            gc.collect()
 
             resume_z_tile_idx = 0
 

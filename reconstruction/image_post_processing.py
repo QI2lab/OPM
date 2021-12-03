@@ -2,7 +2,6 @@
 import sys
 import numpy as np
 from numba import njit, prange
-from flat_field import calc_flatfield
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
@@ -102,6 +101,9 @@ def deskew(data,theta,distance,pixel_size):
 
 
 def manage_flat_field_py(stack):
+
+    from flat_field import calc_flatfield
+    
     """
     Manage performing flat and dark-field using python adapation of BaSiC algorithm.
 
