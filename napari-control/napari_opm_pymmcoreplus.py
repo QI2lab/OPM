@@ -2,14 +2,15 @@
 Initial work on napari interface to OPM using pymmcore-plus, magic-gui, and magic-class
 
 Relevant hardware:
-NI DAQ
-Hamamatsu Fusion-BT
-Coherent OBIS LaserBoxxx
+NI USB-6341 DAQ (controlled via PyDAQmx)
+Hamamatsu Fusion-BT (controlled via micro-manager through pymmcore-plus)
+Coherent OBIS LaserBoxx (controlled via  micro-manager through pymmcore-plus)
 
-This will work with any setup that can setup the camera as master, lasers can driven ON/OFF during camera readout time using digital input, 
-galvo can be moved during camera readout time, and DAQ can update digital/analog lines based on trigger from camera during camera readout time.
+This will work with any OPM that can run the camera as master, lasers can be triggered ON/OFF during camera readout time using digital input, 
+galvo can be moved during camera readout time using analog voltage, and DAQ can update digital/analog lines based on trigger from camera 
+during camera readout time
 
-For different hardware, the specific calls will have to modified to get the hardware triggering working.
+For different hardware, the specific hardware calls will have to modified to get the hardware triggering working.
 
 D. Shepherd - 12/2021
 '''
@@ -596,12 +597,13 @@ class OpmControl:
 
     # set camera crop
     @magicgui(
-        auto_call=True,
+        auto_call=False,
         uleft_corner_x={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI center (non-tilt)'},
         uleft_corner_y={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI center (tilt)'},
         width_x={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI width (non-tilt)'},
         width_y={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI height (tilt)'},
-        layout='vertical'
+        layout='vertical', 
+        call_button="Crop"
     )
     def set_ROI(self, uleft_corner_x=200,uleft_corner_y=896,width_x=1800,width_y=512):
         
@@ -749,7 +751,8 @@ class OpmControl:
     @magicgui(
         auto_call=False,
         save_path={"widget_type": "FileEdit","mode": "d", "label": 'Save path:'},
-        layout='horizontal'
+        layout='horizontal', 
+        call_button="Set"
     )
     def set_save_path(self, save_path='d:/'):
         self.save_path = Path(save_path)
