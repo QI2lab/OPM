@@ -18,7 +18,7 @@ D. Shepherd - 12/2021
 from pymmcore_plus import RemoteMMCore
 from magicclass import magicclass, set_design
 from magicgui import magicgui
-from magicgui.widgets import ProgressBar
+from magicgui.tqdm import trange
 import napari
 from pathlib import Path
 import numpy as np
@@ -330,31 +330,26 @@ class OpmControl:
             #------------------------------------------------------------------------------------------------------------------------------------
 
             # run hardware triggered acquisition
-            self.manual_progress_bar.pbar.max = self.n_timepoints
             if self.wait_time == 0:
                 mmc_3d_t.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
-                for t in range(self.n_timepoints,label="Timepoints"):
-                    for z in range(self.scan_steps):
+                for t in trange(self.n_timepoints,desc="t", position=0):
+                    for z in trange(self.scan_steps,desc="z", position=1, leave=False):
                         for c in range(self.n_active_channels):
                             while mmc_3d_t.getRemainingImageCount()==0:
                                 pass
                             opm_data[t, c, z, :, :]  = mmc_3d_t.popNextImage()
-                    self.manual_progress_bar.pbar.value = t
                 mmc_3d_t.stopSequenceAcquisition()
             else:
-                for t in range(self.n_timepoints,label="Timepoints"):
+                for t in trange(self.n_timepoints,desc="t", position=0):
                     mmc_3d_t.startSequenceAcquisition(int(self.n_active_channels*self.scan_steps),0,True)
-                    for z in range(self.scan_steps):
+                    for z in trange(self.scan_steps,desc="z", position=1, leave=False):
                         for c in range(self.n_active_channels):
                             while mmc_3d_t.getRemainingImageCount()==0:
                                 pass
                             opm_data[t, c, z, :, :]  = mmc_3d_t.popNextImage()
                     mmc_3d_t.stopSequenceAcquisition()
-                    self.manual_progress_bar.pbar.value = t
                     time.sleep(self.wait_time)
                     
-            self.manual_progress_bar.pbar.value = 0
-
             # construct metadata and save
 
             #------------------------------------------------------------------------------------------------------------------------------------
@@ -753,7 +748,6 @@ class OpmControl:
     )
     def set_save_path(self, save_path='d:/'):
         self.save_path = Path(save_path)
-        print(self.save_path)
 
     # control timelapse 3D volume (hardware triggering)
     @magicgui(
@@ -765,14 +759,6 @@ class OpmControl:
         if not(self.worker_2d_running) and not(self.worker_3d_running):
             self.worker_3d_t.start()
             self.worker_3d_t.returned.connect(self._create_3d_t_worker)
-
-    # attempt at progress bar
-    @magicgui(
-        auto_call=True, 
-        pbar={"min": 0, "max": 100, "value": 0,"gui_only": "True", "label": "t (%)","visible": "True"},
-        layout='horizontal')
-    def manual_progress_bar(pbar: ProgressBar):
-        pass
 
 def main():
 
