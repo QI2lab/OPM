@@ -28,6 +28,7 @@ from image_post_processing import deskew
 from napari.qt.threading import thread_worker
 import time
 import zarr
+from data_io import write_metadata
 from datetime import datetime
 
 # OPM control UI element            
@@ -97,6 +98,38 @@ class OpmControl:
     # set viewer
     def _set_viewer(self,viewer):
         self.viewer = viewer
+
+    # create and save metadata
+    def _save_metadata(self):
+        scan_param_data = [{'root_name': str("OPM_data"),
+                            'scan_type': 'galvo',
+                            'theta': self.opm_tilt, 
+                            'exposure_ms': self.exposure_ms,
+                            'scan_step': self.scan_axis_step_um, 
+                            'pixel_size': self.camera_pixel_size_um,
+                            'galvo_scan_range_um': self.scan_axis_range_um,
+                            'galvo_volts_per_um': self.scan_axis_calibration, 
+                            'num_t': int(self.n_timepoints),
+                            'time_delay': float(self.wait_time),
+                            'num_y': 1, 
+                            'num_z': 1,
+                            'num_ch': int(self.n_active_channels),
+                            'scan_axis_positions': int(self.scan_steps),
+                            'y_pixels': self.ROI_width_y,
+                            'x_pixels': self.ROI_width_x,
+                            '405_active': self.channel_states[0],
+                            '488_active': self.channel_states[1],
+                            '561_active': self.channel_states[2],
+                            '635_active': self.channel_states[3],
+                            '730_active': self.channel_states[4],
+                            '405_power': self.channel_powers[0],
+                            '488_power': self.channel_powers[1],
+                            '561_power': self.channel_powers[2],
+                            '635_power': self.channel_powers[3],
+                            '730_power': self.channel_powers[4],
+                            }]
+        
+        write_metadata(scan_param_data[0], self.output_dir_path / Path('scan_metadata.csv'))
 
     # update viewer layers
     def _update_layers(self,values):
@@ -311,11 +344,12 @@ class OpmControl:
 
             # create directory for timelapse
             time_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S")
-            zarr_output_dir_path = self.save_path / Path('timelapse_'+time_string)
-            zarr_output_dir_path.mkdir(parents=True, exist_ok=True)
+            self.output_dir_path = self.save_path / Path('timelapse_'+time_string)
+            self.output_dir_path.mkdir(parents=True, exist_ok=True)
+
 
             # create name for zarr directory
-            zarr_output_path = zarr_output_dir_path / Path('OPM_data.zarr')
+            zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
 
             # create and open zarr file
             opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x), dtype=np.uint16)
@@ -351,6 +385,7 @@ class OpmControl:
                     time.sleep(self.wait_time)
                     
             # construct metadata and save
+            self._save_metadata()
 
             #------------------------------------------------------------------------------------------------------------------------------------
             #--------------------------------------------------------End acquisition-------------------------------------------------------------
@@ -791,7 +826,7 @@ def main():
     # start Napari
     napari.run()
 
-    # shutdown threads
+    # shutdown acquistion threads
     worker_2d.quit()
     worker_3d.quit()
 
