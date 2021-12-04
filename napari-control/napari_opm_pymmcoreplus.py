@@ -18,7 +18,7 @@ D. Shepherd - 12/2021
 from pymmcore_plus import RemoteMMCore
 from magicclass import magicclass, set_design
 from magicgui import magicgui
-from magicgui.tqdm import trange
+from magicgui.widgets import ProgressBar
 import napari
 from pathlib import Path
 import numpy as np
@@ -99,16 +99,18 @@ class OpmControl:
         self.viewer = viewer
 
     # update viewer layers
-    def _update_layers(self,new_image):
+    def _update_layers(self,values):
+        current_channel = values[0]
+        new_image = values[1]
         channel_names = ['405nm','488nm','561nm','635nm','730nm']
         colormaps = ['bop purple','bop blue','bop orange','red','grey']
 
-        for c in self.active_channel_indices:
-            channel_name = channel_names[c]
-            try:
-                self.viewer.layers[channel_name].data = new_image[c,:]
-            except:
-                self.viewer.add_image(new_image[c,:], name=channel_name, blending='additive', colormap=colormaps[c],contrast_limits=[100,.9*np.max(new_image[c,:])])
+        channel_name = channel_names[current_channel]
+        colormap = colormaps[current_channel]
+        try:
+            self.viewer.layers[channel_name].data = new_image
+        except:
+            self.viewer.add_image(new_image, name=channel_name, blending='additive', colormap=colormap,contrast_limits=[110,.9*np.max(new_image)])
 
     @thread_worker
     def _acquire_2d_data(self):
@@ -146,14 +148,11 @@ class OpmControl:
                     mmc_2d.setExposure(self.exposure_ms)
                     self.exposure_changed = False
 
-                # create ndarray to hold data
-                raw_image_2d = np.zeros([self.do_ind[-1],self.ROI_width_y,self.ROI_width_x],dtype=np.uint16)
-
                 for c in self.active_channel_indices:
                     mmc_2d.snapImage()
-                    raw_image_2d[c,:] = mmc_2d.getImage()
+                    raw_image_2d = mmc_2d.getImage()
                     time.sleep(.01)
-                    yield raw_image_2d
+                    yield c, raw_image_2d
 
     @thread_worker
     def _acquire_3d_data(self):
@@ -209,19 +208,6 @@ class OpmControl:
                     self._start_DAQ()
                     self.raw_image_stack = np.zeros([self.do_ind[-1],self.scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
 
-                    # change step size from physical space (nm) to camera space (pixels)
-                    pixel_step = self.scan_axis_step_um/self.camera_pixel_size_um    # (pixels)
-
-                    # calculate the number of pixels scanned during stage scan 
-                    scan_end = self.scan_steps * pixel_step  # (pixels)
-
-                    # calculate properties for final image
-                    final_ny = np.int64(np.ceil(scan_end+self.ROI_width_y*np.cos(self.opm_tilt*np.pi/180))) # (pixels)
-                    final_nz = np.int64(np.ceil(self.ROI_width_y*np.sin(self.opm_tilt*np.pi/180)))          # (pixels)
-                    final_nx = np.int64(self.ROI_width_x)                                                   # (pixels)
-
-                    deskewed_image = np.zeros([self.do_ind[-1],final_nz,final_ny,final_nx]).astype(np.uint16)
-
                     self.channels_changed = False
                     self.footprint_changed = False
                 
@@ -257,8 +243,8 @@ class OpmControl:
                 deskew_parameters[2] = self.camera_pixel_size_um*100        # (nm)
 
                 for c in self.active_channel_indices:
-                    deskewed_image[c,:] = deskew(self.raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)    
-                yield deskewed_image
+                    deskewed_image = deskew(self.raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)    
+                    yield c, deskewed_image
 
                 #------------------------------------------------------------------------------------------------------------------------------------
                 #-----------------------------------------------End acquisition and deskew-----------------------------------------------------------
@@ -323,14 +309,13 @@ class OpmControl:
                 print('Galvo neutral (Volt): ' + str(self.galvo_neutral_volt)+', Min voltage (volt): '+str(self.min_volt))
                 print('Time points:  ' + str(self.n_timepoints))
 
-            # create directory for data type
-            zarr_output_dir_path = self.save_path / Path('zarr')
+            # create directory for timelapse
+            time_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S")
+            zarr_output_dir_path = self.save_path / Path('timelapse_'+time_string)
             zarr_output_dir_path.mkdir(parents=True, exist_ok=True)
 
-            time_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S")
-
             # create name for zarr directory
-            zarr_output_path = zarr_output_dir_path / Path('OPM_'+time_string+'_zarr.zarr')
+            zarr_output_path = zarr_output_dir_path / Path('OPM_data.zarr')
 
             # create and open zarr file
             opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x), dtype=np.uint16)
@@ -345,17 +330,19 @@ class OpmControl:
             #------------------------------------------------------------------------------------------------------------------------------------
 
             # run hardware triggered acquisition
+            self.manual_progress_bar.pbar.max = self.n_timepoints
             if self.wait_time == 0:
                 mmc_3d_t.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
-                for t in trange(self.n_timepoints,label="Timepoints"):
+                for t in range(self.n_timepoints,label="Timepoints"):
                     for z in range(self.scan_steps):
                         for c in range(self.n_active_channels):
                             while mmc_3d_t.getRemainingImageCount()==0:
                                 pass
                             opm_data[t, c, z, :, :]  = mmc_3d_t.popNextImage()
+                    self.manual_progress_bar.pbar.value = t
                 mmc_3d_t.stopSequenceAcquisition()
             else:
-                for t in trange(self.n_timepoints,label="Timepoints"):
+                for t in range(self.n_timepoints,label="Timepoints"):
                     mmc_3d_t.startSequenceAcquisition(int(self.n_active_channels*self.scan_steps),0,True)
                     for z in range(self.scan_steps):
                         for c in range(self.n_active_channels):
@@ -363,12 +350,18 @@ class OpmControl:
                                 pass
                             opm_data[t, c, z, :, :]  = mmc_3d_t.popNextImage()
                     mmc_3d_t.stopSequenceAcquisition()
+                    self.manual_progress_bar.pbar.value = t
                     time.sleep(self.wait_time)
+                    
+            self.manual_progress_bar.pbar.value = 0
+
+            # construct metadata and save
 
             #------------------------------------------------------------------------------------------------------------------------------------
             #--------------------------------------------------------End acquisition-------------------------------------------------------------
             #------------------------------------------------------------------------------------------------------------------------------------
 
+            # clean up DAQ
             self._stop_DAQ()
             self._reset_galvo()
 
@@ -422,13 +415,13 @@ class OpmControl:
     def _reset_galvo(self):
 
         # put the galvo back to neutral
-        # first, set the galvo to the initial point if it is not already
         taskAO_last = daq.Task()
         taskAO_last.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
         taskAO_last.WriteAnalogScalarF64(True, -1, self.galvo_neutral_volt, None)
         taskAO_last.StopTask()
         taskAO_last.ClearTask()
     
+    # set laser power using MM property
     def _set_mmc_laser_power(self):
 
         with RemoteMMCore() as mmc_laser_power:
@@ -439,6 +432,7 @@ class OpmControl:
             mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 637-140C - PowerSetpoint (%)',float(self.channel_powers[3]))
             mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 730-30C - PowerSetpoint (%)',float(self.channel_powers[4]))
 
+    # create waveforms for playback on the DAQ with  camera as master signal to advance playback 
     def _create_DAQ_arrays(self):
         # setup DAQ
         nvoltage_steps = self.scan_steps
@@ -473,6 +467,7 @@ class OpmControl:
 
         self.waveform = waveform
 
+    # create DAQ tasks using stored digital input configuration and digital/analog output waveforms
     def _start_DAQ(self):
         try:    
             # ----- DIGITAL input -------
@@ -532,6 +527,7 @@ class OpmControl:
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)
 
+    # stop DAQ tasks
     def _stop_DAQ(self):
             # stop DAQ
             try:
@@ -547,6 +543,7 @@ class OpmControl:
             except daq.DAQError as err:
                 print("DAQmx Error %s"%err)
 
+    # set FusionBT to fastest readout mode and setup trigger ouputs
     def _setup_camera(self):
         with RemoteMMCore() as mmc_camera_setup:
 
@@ -768,6 +765,14 @@ class OpmControl:
         if not(self.worker_2d_running) and not(self.worker_3d_running):
             self.worker_3d_t.start()
             self.worker_3d_t.returned.connect(self._create_3d_t_worker)
+
+    # attempt at progress bar
+    @magicgui(
+        auto_call=True, 
+        pbar={"min": 0, "max": 100, "value": 0,"gui_only": "True", "label": "t (%)","visible": "True"},
+        layout='horizontal')
+    def manual_progress_bar(pbar: ProgressBar):
+        pass
 
 def main():
 
