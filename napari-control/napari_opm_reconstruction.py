@@ -13,6 +13,7 @@ import numpy as np
 from image_post_processing import deskew
 from napari.qt.threading import thread_worker
 import zarr
+import dask.array as da
 from data_io import read_metadata, return_data_from_zarr_to_numpy
 from skimage.measure import block_reduce
 from image_post_processing import deskew
@@ -63,6 +64,7 @@ class OpmReconstruction:
         n_active_channels = len(channels_in_data)
 
         self.active_channels = active_channels
+        self.channels_in_data = channels_in_data
 
         # calculate pixel sizes of deskewed image in microns
         deskewed_x_pixel = pixel_size
@@ -110,8 +112,7 @@ class OpmReconstruction:
         nx = np.int64(x_pixels)                                           # (pixels)
 
         # create and open zarr file
-        root = zarr.open(str(zarr_output_path), mode="w")
-        opm_data = root.zeros("opm_processed_data", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, int(nz), int(ny), int(nx)), dtype=np.uint16)
+        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, int(nz), int(ny), int(nx)), dtype=np.uint16)
             
         # if retrospective flatfield is requested, try to import CuPY based flat-fielding
         if self.flatfield:
@@ -174,7 +175,7 @@ class OpmReconstruction:
                 gc.collect()
 
         # exit
-        self.dataset_zarr = opm_data
+        self.dataset_zarr = zarr_output_path
         return None
 
     def _create_processing_worker(self):
@@ -241,25 +242,24 @@ class OpmReconstruction:
     def _update_viewer(self,display_data):
 
         # clean up viewer
-        #self.viewer.layers.clear()
+        self.viewer.layers.clear()
 
         # channel names and colormaps to match control software
         channel_names = ['405nm','488nm','561nm','635nm','730nm']
         colormaps = ['bop purple','bop blue','bop orange','red','grey']
 
+        active_channel_names=[]
+        active_colormaps=[]
+
+        dataset = da.from_zarr(zarr.open(self.dataset_zarr,mode='r'))
+
         # iterate through active channels and populate viewer
-        ch_zarr_idx = 0
-        for ch_idx in self.channel_idxs:
-            if self.active_channels[ch_idx]:
-                channel_name = channel_names[ch_idx]
-                colormap = colormaps[ch_idx]
-                try:
-                    self.viewer.layers[channel_name].data = self.dataset_zarr[:,ch_zarr_idx,:,:,:]
-                except:
-                    zarr_shape = self.dataset_zarr.shape
-                    z_middle = zarr_shape[2]//2
-                    self.viewer.add_image(self.dataset_zarr[:,ch_zarr_idx,:,:,:], name=channel_name, blending='additive', colormap=colormap,contrast_limits=[110,.9*np.max(self.dataset_zarr[0,ch_zarr_idx,z_middle,:,:])])
-                ch_zarr_idx=ch_zarr_idx+1
+        for channel in self.channels_in_data:
+            active_channel_names.append(channel_names[channel])
+            active_colormaps.append(colormaps[channel])
+        self.viewer.add_image(dataset, channel_axis=1, name=active_channel_names, blending='additive', colormap=active_colormaps)
+        #self.viewer.add_image(self.dataset_zarr, channel_axis=1, blending='additive')
+
 
 def main():
 
