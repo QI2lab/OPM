@@ -24,11 +24,12 @@ import gc
 @set_design(text="ASU Snouty-OPM timelapse reconstruction")
 class OpmReconstruction:
 
-    def _init_(self):
-        self.data_path = None
+    def __init__(self):
         self.decon = False
         self.flatfield = False
         self.debug = False
+        self.channel_idxs=[0,1,2,3,4]
+        self.active_channels=[False,False,False,False,False]
 
     # set viewer
     def _set_viewer(self,viewer):
@@ -61,6 +62,8 @@ class OpmReconstruction:
         channels_in_data = list(compress(channel_idxs, active_channels))
         n_active_channels = len(channels_in_data)
 
+        self.active_channels = active_channels
+
         # calculate pixel sizes of deskewed image in microns
         deskewed_x_pixel = pixel_size
         deskewed_y_pixel = pixel_size
@@ -78,16 +81,16 @@ class OpmReconstruction:
         z_down_sample = 1
 
         # load dataset
-        dataset_zarr = zarr.open(self.process_path / Path(root_name),mode='r')
+        dataset_zarr = zarr.open(self.data_path / Path(root_name+'.zarr'),mode='r')
 
         # create output directory
-        if self.decon_flag == 0 and self.flatfield_flag == 0:
+        if self.decon == 0 and self.flatfield == 0:
             output_dir_path = self.data_path / 'deskew_output'
-        elif self.decon_flag == 0 and self.flatfield_flag == 1:
+        elif self.decon == 0 and self.flatfield == 1:
             output_dir_path = self.data_path / 'deskew_flatfield_output'
-        elif self.decon_flag == 1 and self.flatfield_flag == 0:
+        elif self.decon == 1 and self.flatfield == 0:
             output_dir_path = self.data_path / 'deskew_decon_output'
-        elif self.decon_flag == 1 and self.flatfield_flag == 1:
+        elif self.decon == 1 and self.flatfield == 1:
             output_dir_path = self.data_path / 'deskew_flatfield_decon_output'
         output_dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -108,7 +111,7 @@ class OpmReconstruction:
 
         # create and open zarr file
         root = zarr.open(str(zarr_output_path), mode="w")
-        opm_data = root.zeros("opm_processed_data", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, 32, 256, 256), dtype=np.uint16)
+        opm_data = root.zeros("opm_processed_data", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, int(nz), int(ny), int(nx)), dtype=np.uint16)
             
         # if retrospective flatfield is requested, try to import CuPY based flat-fielding
         if self.flatfield:
@@ -118,12 +121,8 @@ class OpmReconstruction:
         if self.decon:
             pass
 
-        # initialize counters
-        timepoints_in_data = list(range(num_t))
-        ch_in_zarr = list(range(n_active_channels))
-
         # loop over all timepoints and channels
-        for t_idx in trange(timepoints_in_data,desc='t',position=0):
+        for t_idx in trange(num_t,desc='t',position=0):
             for ch_idx in trange(n_active_channels,desc='c',position=1, leave=False):
 
                 # pull data stack into memory
@@ -167,14 +166,16 @@ class OpmReconstruction:
 
                 if self.debug:
                     print('Write data into Zarr container')
-                opm_data[t_idx, ch_in_zarr, :, :, :] = deskewed_downsample
+
+                opm_data[t_idx, ch_idx, :, :, :] = deskewed_downsample
 
                 # free up memory
                 del deskewed_downsample
                 gc.collect()
 
         # exit
-        return opm_data
+        self.dataset_zarr = opm_data
+        return None
 
     def _create_processing_worker(self):
         worker_processing = self._process_data()
@@ -190,7 +191,7 @@ class OpmReconstruction:
         use_decon = {"widget_type": "CheckBox", "label": "Deconvolution"},
         layout="horizontal"
     )
-    def set_deconvolution_option(self,use_decon: False):
+    def set_deconvolution_option(self,use_decon = False):
         self.decon = use_decon
         
     # set flatfield option
@@ -200,28 +201,65 @@ class OpmReconstruction:
         use_flatfield = {"widget_type": "CheckBox", "label": "Flatfield"},
         layout="horizontal"
     )
-    def set_deconvolution_option(self,use_flatfield: False):
+    def set_flatfield_option(self,use_flatfield = False):
         self.flatfield = use_flatfield
 
     # process dataset
     @magicgui(
         auto_call=False,
-        process_path={"widget_type": "FileEdit","mode": "d", "label": 'Data to process:'},
-        layout='horizontal', 
+        data_path={"widget_type": "FileEdit","mode": "d", "label": 'Data to process:'},
+        layout='vertical', 
         call_button="Set"
     )
-    def run_data_processing(self, process_path=None):
-        self.process_path = process_path
+    def run_data_processing(self, data_path='d:/'):
+        self.data_path = data_path
 
-    # control timelapse 3D volume (hardware triggering)
+    # control data reconstruction
     @magicgui(
         auto_call=True,
-        timelapse_mode_3D={"widget_type": "PushButton", "label": 'Run reconstruction'},
+        start_processing={"widget_type": "PushButton", "label": 'Run reconstruction'},
         layout='horizontal'
     )
-    def timelapse_mode_3D(self,timelapse_mode_3D):
-            self.dataset_zarr = self.worker_processing.start()
+    def run_processing(self,start_processing):
+        if not(self.data_path is None):
+            self.worker_processing.start()
             self.worker_processing.returned.connect(self._create_processing_worker)
+            self.worker_processing.returned.connect(self._update_viewer)
+
+    # load already processed dataset
+    @magicgui(
+        auto_call=False,
+        zarr_path={"widget_type": "FileEdit","mode": "d", "label": 'Processed data to load:'},
+        layout='vertical', 
+        call_button="Set"
+    )
+    def load_processed_data(self, zarr_path='d:/'):
+        self.zarr_path = zarr_path
+        #self._load_existing_zarr()
+
+    # update viewer
+    def _update_viewer(self,display_data):
+
+        # clean up viewer
+        #self.viewer.layers.clear()
+
+        # channel names and colormaps to match control software
+        channel_names = ['405nm','488nm','561nm','635nm','730nm']
+        colormaps = ['bop purple','bop blue','bop orange','red','grey']
+
+        # iterate through active channels and populate viewer
+        ch_zarr_idx = 0
+        for ch_idx in self.channel_idxs:
+            if self.active_channels[ch_idx]:
+                channel_name = channel_names[ch_idx]
+                colormap = colormaps[ch_idx]
+                try:
+                    self.viewer.layers[channel_name].data = self.dataset_zarr[:,ch_zarr_idx,:,:,:]
+                except:
+                    zarr_shape = self.dataset_zarr.shape
+                    z_middle = zarr_shape[2]//2
+                    self.viewer.add_image(self.dataset_zarr[:,ch_zarr_idx,:,:,:], name=channel_name, blending='additive', colormap=colormap,contrast_limits=[110,.9*np.max(self.dataset_zarr[0,ch_zarr_idx,z_middle,:,:])])
+                ch_zarr_idx=ch_zarr_idx+1
 
 def main():
 
@@ -230,7 +268,7 @@ def main():
     viewer = napari.Viewer()
 
     # these methods have to be private to not show using magic-class. Maybe a better solution is available?
-    OpmReconstruction._set_viewer(viewer)
+    reconstruction_widget._set_viewer(viewer)
 
     # create processing worker
     reconstruction_widget._create_processing_worker()
