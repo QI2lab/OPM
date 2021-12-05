@@ -81,6 +81,23 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
     return data_numpy
 
 
+def return_data_from_zarr_to_numpy(dataset, time_idx, channel_idx, num_images, y_pixels,x_pixels):
+    """
+    :param dataset: zarr dataset object
+    :param time_idx: integer time_axis
+    :param channel_idx: integer channel index
+    :param num_images: integer for number of images from sweep to return 
+    :param y_pixels: integer for y pixel size
+    :param x_pixels: integer for x pixel size
+    :return data_numpy: 3D numpy array of requested data
+    """
+
+    data_numpy = np.empty([num_images,y_pixels,x_pixels]).astype(np.uint16)
+    data_numpy = dataset[time_idx,channel_idx,0:num_images,:]
+
+    return data_numpy
+
+
 def return_data_numpy_widefield(dataset, channel_axis, ch_BDV_idx, num_z, y_pixels,x_pixels):
     """
     :param dataset: pycromanager dataset object

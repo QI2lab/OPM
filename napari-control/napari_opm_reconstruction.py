@@ -1,0 +1,244 @@
+'''
+Initial work on napari interface to reconstruct OPM timelapse data
+
+D. Shepherd - 12/2021
+'''
+
+from magicclass import magicclass, set_design
+from magicgui import magicgui
+from magicgui.tqdm import trange
+import napari
+from pathlib import Path
+import numpy as np
+from image_post_processing import deskew
+from napari.qt.threading import thread_worker
+import zarr
+from data_io import read_metadata, return_data_from_zarr_to_numpy
+from skimage.measure import block_reduce
+from image_post_processing import deskew
+from itertools import compress
+import gc
+
+# OPM control UI element            
+@magicclass(labels=False)
+@set_design(text="ASU Snouty-OPM timelapse reconstruction")
+class OpmReconstruction:
+
+    def _init_(self):
+        self.data_path = None
+        self.decon = False
+        self.flatfield = False
+        self.debug = False
+
+    # set viewer
+    def _set_viewer(self,viewer):
+        self.viewer = viewer
+
+    @thread_worker
+    def _process_data(self):
+        
+        # create parameter array from scan parameters saved by acquisition code
+        df_metadata = read_metadata(self.data_path / Path('scan_metadata.csv'))
+        root_name = df_metadata['root_name']
+        scan_type = df_metadata['scan_type']
+        theta = df_metadata['theta']
+        scan_step = df_metadata['scan_step']
+        pixel_size = df_metadata['pixel_size']
+        num_t = df_metadata['num_t']
+        num_y = df_metadata['num_y']
+        num_z  = df_metadata['num_z']
+        num_ch = df_metadata['num_ch']
+        num_images = df_metadata['scan_axis_positions']
+        y_pixels = df_metadata['y_pixels']
+        x_pixels = df_metadata['x_pixels']
+        chan_405_active = df_metadata['405_active']
+        chan_488_active = df_metadata['488_active']
+        chan_561_active = df_metadata['561_active']
+        chan_635_active = df_metadata['635_active']
+        chan_730_active = df_metadata['730_active']
+        active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_635_active,chan_730_active]
+        channel_idxs = [0,1,2,3,4]
+        channels_in_data = list(compress(channel_idxs, active_channels))
+        n_active_channels = len(channels_in_data)
+
+        # calculate pixel sizes of deskewed image in microns
+        deskewed_x_pixel = pixel_size
+        deskewed_y_pixel = pixel_size
+        deskewed_z_pixel = pixel_size
+        if self.debug:
+            print('Deskewed pixel sizes before downsampling (um). x='+str(deskewed_x_pixel)+', y='+str(deskewed_y_pixel)+', z='+str(deskewed_z_pixel)+'.')
+
+        # deskew parameters
+        deskew_parameters = np.empty([3])
+        deskew_parameters[0] = theta            # (degrees)
+        deskew_parameters[1] = scan_step*100    # (nm)
+        deskew_parameters[2] = pixel_size*100   # (nm)
+
+        # amount of down sampling in z
+        z_down_sample = 1
+
+        # load dataset
+        dataset_zarr = zarr.open(self.process_path / Path(root_name),mode='r')
+
+        # create output directory
+        if self.decon_flag == 0 and self.flatfield_flag == 0:
+            output_dir_path = self.data_path / 'deskew_output'
+        elif self.decon_flag == 0 and self.flatfield_flag == 1:
+            output_dir_path = self.data_path / 'deskew_flatfield_output'
+        elif self.decon_flag == 1 and self.flatfield_flag == 0:
+            output_dir_path = self.data_path / 'deskew_decon_output'
+        elif self.decon_flag == 1 and self.flatfield_flag == 1:
+            output_dir_path = self.data_path / 'deskew_flatfield_decon_output'
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+
+        # create name for zarr directory
+        zarr_output_path = output_dir_path / Path('OPM_processed.zarr')
+
+        # calculate size of one volume
+        # change step size from physical space (nm) to camera space (pixels)
+        pixel_step = scan_step/pixel_size    # (pixels)
+
+        # calculate the number of pixels scanned during stage scan 
+        scan_end = num_images * pixel_step  # (pixels)
+
+        # calculate properties for final image
+        ny = np.int64(np.ceil(scan_end+y_pixels*np.cos(theta*np.pi/180))) # (pixels)
+        nz = np.int64(np.ceil(y_pixels*np.sin(theta*np.pi/180)))          # (pixels)
+        nx = np.int64(x_pixels)                                           # (pixels)
+
+        # create and open zarr file
+        root = zarr.open(str(zarr_output_path), mode="w")
+        opm_data = root.zeros("opm_processed_data", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, 32, 256, 256), dtype=np.uint16)
+            
+        # if retrospective flatfield is requested, try to import CuPY based flat-fielding
+        if self.flatfield:
+            pass
+
+        # if decon is requested, try to import microvolution wrapper or dexp library
+        if self.decon:
+            pass
+
+        # initialize counters
+        timepoints_in_data = list(range(num_t))
+        ch_in_zarr = list(range(n_active_channels))
+
+        # loop over all timepoints and channels
+        for t_idx in trange(timepoints_in_data,desc='t',position=0):
+            for ch_idx in trange(n_active_channels,desc='c',position=1, leave=False):
+
+                # pull data stack into memory
+                if self.debug:
+                    print('Process timepoint '+str(t_idx)+'; channel '+str(ch_idx) +'.')
+                raw_data = return_data_from_zarr_to_numpy(dataset_zarr, t_idx, ch_idx, num_images, y_pixels,x_pixels)
+
+                # run deconvolution on deskewed image
+                if self.decon:
+                    decon = raw_data
+                else:
+                    if self.debug:
+                        print('Deconvolve.')
+                    decon = raw_data
+                    pass
+                del raw_data
+
+                # perform flat-fielding
+                if self.flatfield:
+                    corrected=decon
+                else:
+                    if self.debug:
+                        print('Flatfield.')
+                    corrected=decon
+                del decon
+
+                # deskew
+                if self.debug:
+                    print('Deskew.')
+                deskewed = deskew(np.flipud(corrected),*deskew_parameters)
+                del corrected
+
+                # downsample in z due to oversampling when going from OPM to coverslip geometry
+                if z_down_sample==1:
+                    deskewed_downsample = deskewed
+                else:
+                    if self.debug:
+                        print('Downsample.')
+                    deskewed_downsample = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
+                del deskewed
+
+                if self.debug:
+                    print('Write data into Zarr container')
+                opm_data[t_idx, ch_in_zarr, :, :, :] = deskewed_downsample
+
+                # free up memory
+                del deskewed_downsample
+                gc.collect()
+
+        # exit
+        return opm_data
+
+    def _create_processing_worker(self):
+        worker_processing = self._process_data()
+        self._set_worker_processing(worker_processing)
+
+    # set 3D timelapse acquistion thread worker
+    def _set_worker_processing(self,worker_processing):
+        self.worker_processing = worker_processing
+
+    # set deconvoluton option
+    @magicgui(
+        auto_call=True,
+        use_decon = {"widget_type": "CheckBox", "label": "Deconvolution"},
+        layout="horizontal"
+    )
+    def set_deconvolution_option(self,use_decon: False):
+        self.decon = use_decon
+        
+    # set flatfield option
+    # set deconvoluton option
+    @magicgui(
+        auto_call=True,
+        use_flatfield = {"widget_type": "CheckBox", "label": "Flatfield"},
+        layout="horizontal"
+    )
+    def set_deconvolution_option(self,use_flatfield: False):
+        self.flatfield = use_flatfield
+
+    # process dataset
+    @magicgui(
+        auto_call=False,
+        process_path={"widget_type": "FileEdit","mode": "d", "label": 'Data to process:'},
+        layout='horizontal', 
+        call_button="Set"
+    )
+    def run_data_processing(self, process_path=None):
+        self.process_path = process_path
+
+    # control timelapse 3D volume (hardware triggering)
+    @magicgui(
+        auto_call=True,
+        timelapse_mode_3D={"widget_type": "PushButton", "label": 'Run reconstruction'},
+        layout='horizontal'
+    )
+    def timelapse_mode_3D(self,timelapse_mode_3D):
+            self.dataset_zarr = self.worker_processing.start()
+            self.worker_processing.returned.connect(self._create_processing_worker)
+
+def main():
+
+    # setup OPM GUI and Napari viewer
+    reconstruction_widget = OpmReconstruction()
+    viewer = napari.Viewer()
+
+    # these methods have to be private to not show using magic-class. Maybe a better solution is available?
+    OpmReconstruction._set_viewer(viewer)
+
+    # create processing worker
+    reconstruction_widget._create_processing_worker()
+
+    viewer.window.add_dock_widget(reconstruction_widget,name='ASU Snouty-OPM reconstruction')
+
+    # start Napari
+    napari.run()
+
+if __name__ == "__main__":
+    main()
