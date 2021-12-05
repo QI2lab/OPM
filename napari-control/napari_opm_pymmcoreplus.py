@@ -352,7 +352,7 @@ class OpmControl:
             zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
 
             # create and open zarr file
-            opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x), dtype=np.uint16)
+            opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x),compressor=None, dtype=np.uint16)
 
             #------------------------------------------------------------------------------------------------------------------------------------
             #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -362,6 +362,11 @@ class OpmControl:
             #------------------------------------------------------------------------------------------------------------------------------------
             #----------------------------------------------------Start acquisition---------------------------------------------------------------
             #------------------------------------------------------------------------------------------------------------------------------------
+
+            # set circular buffer to be large
+            mmc_3d_t.clearCircularBuffer()
+            circ_buffer_mb = 96000
+            mmc_3d_t.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
             # run hardware triggered acquisition
             if self.wait_time == 0:
@@ -394,6 +399,11 @@ class OpmControl:
             # clean up DAQ
             self._stop_DAQ()
             self._reset_galvo()
+
+            # set circular buffer to be small 
+            mmc_3d_t.clearCircularBuffer()
+            circ_buffer_mb = 4000
+            mmc_3d_t.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
     # laser to hardware control
     def _lasers_to_hardware(self):
