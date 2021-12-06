@@ -176,7 +176,7 @@ class OpmReconstruction:
 
         # exit
         self.dataset_zarr = zarr_output_path
-        return None
+        self.scale = [1,deskewed_z_pixel,deskewed_y_pixel,deskewed_x_pixel]
 
     def _create_processing_worker(self):
         worker_processing = self._process_data()
@@ -185,6 +185,35 @@ class OpmReconstruction:
     # set 3D timelapse acquistion thread worker
     def _set_worker_processing(self,worker_processing):
         self.worker_processing = worker_processing
+
+    # update viewer
+    def _update_viewer(self,display_data):
+
+        # clean up viewer
+        self.viewer.layers.clear()
+
+        # channel names and colormaps to match control software
+        channel_names = ['405nm','488nm','561nm','635nm','730nm']
+        colormaps = ['bop purple','bop blue','bop orange','red','grey']
+
+        active_channel_names=[]
+        active_colormaps=[]
+
+        dataset = da.from_zarr(zarr.open(self.dataset_zarr,mode='r'))
+
+        # iterate through active channels and populate viewer
+        for channel in self.channels_in_data:
+            active_channel_names.append(channel_names[channel])
+            active_colormaps.append(colormaps[channel])
+        self.viewer.add_image(
+            dataset, 
+            channel_axis=1, 
+            name=active_channel_names, 
+            scale = self.scale,
+            blending='additive', 
+            colormap=active_colormaps)
+        self.viewer.scale_bar.visible = True
+        self.viewer.scale_bar.unit = 'um'
 
     # set deconvoluton option
     @magicgui(
@@ -196,7 +225,6 @@ class OpmReconstruction:
         self.decon = use_decon
         
     # set flatfield option
-    # set deconvoluton option
     @magicgui(
         auto_call=True,
         use_flatfield = {"widget_type": "CheckBox", "label": "Flatfield"},
@@ -205,7 +233,7 @@ class OpmReconstruction:
     def set_flatfield_option(self,use_flatfield = False):
         self.flatfield = use_flatfield
 
-    # process dataset
+    # set path to dataset for procesing
     @magicgui(
         auto_call=False,
         data_path={"widget_type": "FileEdit","mode": "d", "label": 'Data to process:'},
@@ -215,7 +243,7 @@ class OpmReconstruction:
     def run_data_processing(self, data_path='d:/'):
         self.data_path = data_path
 
-    # control data reconstruction
+    # control data processing
     @magicgui(
         auto_call=True,
         start_processing={"widget_type": "PushButton", "label": 'Run reconstruction'},
@@ -237,29 +265,6 @@ class OpmReconstruction:
     def load_processed_data(self, zarr_path='d:/'):
         self.zarr_path = zarr_path
         #self._load_existing_zarr()
-
-    # update viewer
-    def _update_viewer(self,display_data):
-
-        # clean up viewer
-        self.viewer.layers.clear()
-
-        # channel names and colormaps to match control software
-        channel_names = ['405nm','488nm','561nm','635nm','730nm']
-        colormaps = ['bop purple','bop blue','bop orange','red','grey']
-
-        active_channel_names=[]
-        active_colormaps=[]
-
-        dataset = da.from_zarr(zarr.open(self.dataset_zarr,mode='r'))
-
-        # iterate through active channels and populate viewer
-        for channel in self.channels_in_data:
-            active_channel_names.append(channel_names[channel])
-            active_colormaps.append(colormaps[channel])
-        self.viewer.add_image(dataset, channel_axis=1, name=active_channel_names, blending='additive', colormap=active_colormaps)
-        #self.viewer.add_image(self.dataset_zarr, channel_axis=1, blending='additive')
-
 
 def main():
 
