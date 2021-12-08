@@ -120,7 +120,16 @@ class OpmReconstruction:
 
         # if decon is requested, try to import microvolution wrapper or dexp library
         if self.decon:
-            pass
+            from opm_psf import generate_skewed_psf
+            from decon_dexp import lr_deconvolution_cupy
+
+            ex_wavelengths = [.405,.488,.561,.635,.730]
+            em_wavelengths = [.420,.520,.605,.680,.760]
+
+            skewed_psf = []
+
+            for ch_idx in active_channels:
+                skewed_psf.append(generate_skewed_psf(0.1,ex_wavelengths[ch_idx],em_wavelengths[ch_idx]))
 
         # loop over all timepoints and channels
         for t_idx in trange(num_t,desc='t',position=0):
@@ -133,10 +142,11 @@ class OpmReconstruction:
 
                 # run deconvolution on deskewed image
                 if self.decon:
-                    decon = raw_data
-                else:
                     if self.debug:
                         print('Deconvolve.')
+                    decon = lr_deconvolution_cupy(raw_data,skewed_psf[ch_idx])
+                else:
+
                     decon = raw_data
                     pass
                 del raw_data

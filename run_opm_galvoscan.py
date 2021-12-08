@@ -28,8 +28,8 @@ def main():
 
     # set up lasers
     channel_labels = ["405", "488", "561", "635", "730"]
-    channel_states = [True, True, True, False, False] # true -> active, false -> inactive
-    channel_powers = [30, 30, 30, 0, 0] # (0 -> 100%)
+    channel_states = [False, False, True, False, False] # true -> active, false -> inactive
+    channel_powers = [30, 30, 100, 100, 0] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel
 
     # parse which channels are active
@@ -42,10 +42,10 @@ def main():
     print("")
 
     # exposure time
-    exposure_ms = 20.0 #unit: ms
+    exposure_ms = 2.0 #unit: ms
 
     # scan axis range
-    scan_axis_range_um = 150.0 # unit: microns
+    scan_axis_range_um = 20.0 # unit: microns
     
     # galvo voltage at neutral
     #galvo_neutral_volt = 0 # unit: volts
@@ -53,14 +53,14 @@ def main():
     scan_axis_step_um = 0.4  # unit: um
 
     # timepoints
-    timepoints = 100
+    timepoints = 400
 
     # timepoint interval (s)
-    timing_interval = 10
+    timing_interval = 0
 
     # setup file name
-    save_directory=Path('D:/20210920m/')
-    save_name = 'timelapse'
+    save_directory=Path('D:/20211204')
+    save_name = 'fla-suc40'
 
     # automatically transfer files to NAS at end of dataset
     transfer_files = False
