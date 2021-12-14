@@ -116,8 +116,7 @@ def manage_flat_field_py(stack):
     print('Calculating flat-field correction using python BaSiC adaption.')
     if stack.shape[0] > 1000:
         stack_for_flat_field = stack[np.random.choice(stack.shape[0], 1000, replace=False)]
-    else:
-        stack_for_flat_field = stack
+    else:        stack_for_flat_field = stack
 
     flat_field, dark_field = calc_flatfield(images=stack_for_flat_field)
 

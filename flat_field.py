@@ -12,7 +12,6 @@ CellProfiler plugin framework
 Last updated: Shepherd 06/21
 '''
 
-from numba.np.ufunc import parallel
 import numpy as np
 from typing import List
 from skimage.transform import resize as skresize
