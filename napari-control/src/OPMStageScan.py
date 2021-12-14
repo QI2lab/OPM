@@ -372,7 +372,7 @@ class OPMStageScan:
                 deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
 
                 for c in self.active_channel_indices:
-                    deskewed_image = deskew(self.raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
+                    deskewed_image = deskew(np.flipud(self.raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)
                     time.sleep(.05)    
                     yield c, deskewed_image
 
