@@ -31,4 +31,4 @@ class OPMStageMonitor:
 
             self.x_stage_pos.value = (f"{x:.1f}")
             self.y_stage_pos.value = (f"{y:.1f}")
-            self.y_stage_pos.value = (f"{z:.1f}")
+            self.z_stage_pos.value = (f"{z:.1f}")

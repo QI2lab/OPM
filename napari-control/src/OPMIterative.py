@@ -1,6 +1,7 @@
 # napari imports
 from magicclass import magicclass, set_design, MagicTemplate, set_options
 from magicgui import magicgui, widgets
+from napari.qt.threading import thread_worker
 
 #general python imports
 from pathlib import Path
@@ -61,6 +62,10 @@ class OPMIterative(MagicTemplate):
         self.setup_complete = False
 
         self.debug = False
+
+    # thread worker for cross-class communication of setup
+    def _set_worker_iterative_setup(self,worker_iterative_setup):
+        self.worker_iterative_setup = worker_iterative_setup
 
     # calculate scan volume, pulling ROI from camera settings
     def _calculate_scan_volume(self):
@@ -236,14 +241,6 @@ class OPMIterative(MagicTemplate):
                     f"Lasers powers: {str(self.channel_powers_nuclei)} \n\n")
         self.experiment_summary.value = exp_data
 
-    # return fluidics, codebook, and experimental setup for running stage scan
-    def _return_experiment_setup(self):
-
-        if (self.stage_volume_set and self.first_round_run and self.fluidics_loaded and self.channels_set):
-            return self.codebook, self.df_fluidics, self.scan_settings, self.valve_controller,self.pump_controller
-        else:
-            raise Exception ('Iterative setup not complete.') 
-
     @magicgui(
         auto_call=False,
         fluidics_file_path={"widget_type": "FileEdit", 'label': 'Fluidics program'},
@@ -354,9 +351,16 @@ class OPMIterative(MagicTemplate):
     )
     def accept_setup(self, accept_setup_btn):
         if (self.stage_volume_set and self.channels_set and self.first_round_run and self.fluidics_loaded):
+            self.worker_iterative_setup.start()
             self.setup_complete = True
         else:
             raise Exception('Configure fluidics, ruin intial round, configure channels, and configure stage scan volume first.')
+    
+    
+    # return fluidics, codebook, and experimental setup for running stage scan
+    @thread_worker
+    def _return_experiment_setup(self):
+        return self.codebook, self.df_fluidics, self.scan_settings, self.valve_controller,self.pump_controller
 
 def main():
 

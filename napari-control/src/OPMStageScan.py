@@ -16,15 +16,16 @@ import npy2bdv
 
 # hardware control imports
 from pymmcore_plus import RemoteMMCore
-from hardware.OPMNIDAQ import OPMNIDAQ
-import hardware.ASI as ASIstage
-from hardware.HamiltonMVP import HamiltonMVP
-from hardware.APump import APump
+from src.hardware.OPMNIDAQ import OPMNIDAQ
+import src.hardware.ASI as ASIstage
+from src.hardware.HamiltonMVP import HamiltonMVP
+from src.hardware.APump import APump
 
 # ASU OPM specific functions
-from utils.fluidics_control import run_fluidic_program
-from utils.data_io import write_metadata
-from utils.image_post_processing import deskew
+from src.utils.fluidics_control import run_fluidic_program
+from src.utils.data_io import write_metadata
+from src.utils.image_post_processing import deskew
+from src.OPMIterative import OPMIterative
 
 # OPM control UI element            
 @magicclass(labels=False)
@@ -32,18 +33,18 @@ from utils.image_post_processing import deskew
 class OPMStageScan:
 
     # initialize
-    def __init__(self,OPMIterative):
+    def __init__(self, OPMIterative: OPMIterative):
         # OPM parameters
         self.active_channel = "Off"
         self.channel_powers = np.zeros(5,dtype=np.int8)
         self.channel_states=[False,False,False,False,False]
-        self.exposure_ms = 10.0             # unit: ms
-        self.scan_axis_step_um = 0.4        # unit: um
-        self.scan_axis_calibration = 0.043  # unit: V / um
-        self.galvo_neutral_volt = -.15      # unit: V
-        self.scan_axis_range_um = 50.0      # unit: um
-        self.camera_pixel_size_um = .115    # unit: um
-        self.opm_tilt = 30                  # unit: degrees
+        self.exposure_ms = 10.0                 # unit: ms
+        self.scan_axis_step_um = 0.4            # unit: um
+        self.scan_axis_calibration = 0.043      # unit: V / um
+        self.galvo_neutral_volt = -.15          # unit: V
+        self.scan_mirror_footprint_um = 50.0      # unit: um
+        self.camera_pixel_size_um = .115        # unit: um
+        self.opm_tilt = 30                      # unit: degrees
 
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
@@ -80,13 +81,12 @@ class OPMStageScan:
         self.ROI_changed = True
         self.exposure_changed = True
         self.footprint_changed = True
-        self.galvo_step_changed = True
         self.DAQ_running = False
+        self.iterative_setup = False
 
         # debug flag
         self.debug=False
 
-        # OPMIterative reference
         self.OPMIterative = OPMIterative
 
     # set 2D acquistion thread worker
@@ -249,24 +249,26 @@ class OPMStageScan:
     def _acquire_2d_data(self):
         while True:
             # parse which channels are active
-            self.active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
-            self.n_active_channels = len(self.active_channel_indices)
-            if self.n_active_channels == 0:
+            active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
+            n_active_channels = len(active_channel_indices)
+            if n_active_channels == 0:
                 yield None
                 
             if self.debug:
-                print("%d active channels: " % self.n_active_channels, end="")
-                for ind in self.active_channel_indices:
+                print("%d active channels: " % n_active_channels, end="")
+                for ind in active_channel_indices:
                     print("%s " % self.channel_labels[ind], end="")
                 print("")
 
             if self.powers_changed:
                 self._set_mmc_laser_power()
+
+            if self.channels_changed:
                 if self.DAQ_running:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
                     self.opmdaq.reset_scan_mirror()
-                self.opmdaq.set_scan_type='stage'
+                self.opmdaq.set_scan_type('stage')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
                 self.opmdaq.generate_waveforms()
@@ -285,7 +287,7 @@ class OPMStageScan:
                     mmc_2d.setExposure(self.exposure_ms)
                     self.exposure_changed = False
 
-                for c in self.active_channel_indices:
+                for c in active_channel_indices:
                     mmc_2d.snapImage()
                     raw_image_2d = mmc_2d.getImage()
                     time.sleep(.05)
@@ -300,12 +302,12 @@ class OPMStageScan:
                 #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
                 #------------------------------------------------------------------------------------------------------------------------------------
                 # parse which channels are active
-                self.active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
-                self.n_active_channels = len(self.active_channel_indices)
+                active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
+                n_active_channels = len(active_channel_indices)
                     
                 if self.debug:
-                    print("%d active channels: " % self.n_active_channels, end="")
-                    for ind in self.active_channel_indices:
+                    print("%d active channels: " % n_active_channels, end="")
+                    for ind in active_channel_indices:
                         print("%s " % self.channel_labels[ind], end="")
                     print("")
 
@@ -328,23 +330,22 @@ class OPMStageScan:
                     if self.DAQ_running:
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running = False
-                    self.opmdaq.set_scan_type='mirror'
+                    self.opmdaq.set_scan_type('mirror')
                     self.opmdaq.set_channels_to_use(self.channel_states)
                     self.opmdaq.set_interleave_mode(True)
-                    scan_steps = self.opmdaq.set_scan_mirror_range(self.galvo_step,self.galvo_footprint_um)
+                    scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
                     self.opmdaq.generate_waveforms()
                     self.opmdaq.start_waveform_playback()
                     self.DAQ_running = True
-                    raw_image_stack = np.zeros([self.do_ind[-1],scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
-
                     self.channels_changed = False
                     self.footprint_changed = False
                 
+                raw_image_stack = np.zeros([self.do_ind[-1],scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
+                
                 if self.debug:
                     # output experiment info
-                    print("Scan axis range: %.1f um = %0.3fV, Scan axis step: %.1f nm = %0.3fV , Number of galvo positions: %d" % 
-                        (self.scan_axis_range_um, self.scan_axis_range_volts, self.scan_axis_step_um * 1000, self.scan_axis_step_volts, self.scan_steps))
-                    print('Galvo neutral (Volt): ' + str(self.galvo_neutral_volt)+', Min voltage (volt): '+str(self.min_volt))
+                    print("Scan axis range: %.1f um, Scan axis step: %.1f nm, Number of galvo positions: %d" % 
+                        (self.scan_mirror_footprint_um,  self.scan_axis_step_um * 1000, scan_steps))
                     print('Time points:  ' + str(n_timepoints))
 
                 #------------------------------------------------------------------------------------------------------------------------------------
@@ -357,9 +358,9 @@ class OPMStageScan:
                 #------------------------------------------------------------------------------------------------------------------------------------
 
                 # run hardware triggered acquisition
-                mmc_3d.startSequenceAcquisition(int(self.n_active_channels*self.scan_steps),0,True)
-                for z in range(self.scan_steps):
-                    for c in self.active_channel_indices:
+                mmc_3d.startSequenceAcquisition(int(n_active_channels*scan_steps),0,True)
+                for z in range(scan_steps):
+                    for c in active_channel_indices:
                         while mmc_3d.getRemainingImageCount()==0:
                             pass
                         raw_image_stack[c,z,:] = mmc_3d.popNextImage()
@@ -371,10 +372,12 @@ class OPMStageScan:
                 deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
                 deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
 
-                for c in self.active_channel_indices:
-                    deskewed_image = deskew(np.flipud(self.raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)
+                for c in active_channel_indices:
+                    deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)
                     time.sleep(.05)    
                     yield c, deskewed_image
+
+                del raw_image_stack
 
                 #------------------------------------------------------------------------------------------------------------------------------------
                 #-----------------------------------------------End acquisition and deskew-----------------------------------------------------------
@@ -529,7 +532,7 @@ class OPMStageScan:
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running = False
                         self.opmdaq.reset_scan_mirror()
-                    self.opmdaq.set_scan_type='stage'
+                    self.opmdaq.set_scan_type('stage')
                     self.opmdaq.set_channels_to_use(self.channel_states)
                     self.opmdaq.set_interleave_mode(True)
                     self.opmdaq.generate_waveforms()
@@ -548,7 +551,7 @@ class OPMStageScan:
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running = False
                         self.opmdaq.reset_scan_mirror()
-                    self.opmdaq.set_scan_type='stage'
+                    self.opmdaq.set_scan_type('stage')
                     self.opmdaq.set_channels_to_use(self.channel_states)
                     self.opmdaq.set_interleave_mode(True)
                     self.opmdaq.generate_waveforms()
@@ -778,7 +781,7 @@ class OPMStageScan:
 
     def _setup_camera(self):
         """
-        Setup camera readout and triggering for OPM instrument
+        Setup camera readout and triggering for OPM
 
         :return None:
         """
@@ -831,8 +834,9 @@ class OPMStageScan:
 
         # set camera to OPM specific setup
         self._setup_camera()
-        self._enforce_DCAM_external_trigger()
+        #self._enforce_DCAM_external_trigger()
 
+        '''
         # connect to pump
         self.pump_controller = APump(self.pump_parameters)
         # set pump to remote control
@@ -842,6 +846,7 @@ class OPMStageScan:
         self.valve_controller = HamiltonMVP(com_port=self.valve_COM_port)
         # initialize valves
         self.valve_controller.autoAddress()
+        '''
 
         # connect to DAQ
         self.opmdaq = OPMNIDAQ()
@@ -865,9 +870,10 @@ class OPMStageScan:
         self.opmdaq.reset_scan_mirror()
 
     @magicgui(
-        auto_call=True,
+        auto_call=False,
         exposure_ms={"widget_type": "FloatSpinBox", "min": 1, "max": 500,'label': 'Camera exposure (ms)'},
-        layout='horizontal'
+        layout='horizontal',
+        call_button='Update exposure'
     )
     def set_exposure(self, exposure_ms=10.0):
         """
@@ -891,7 +897,7 @@ class OPMStageScan:
         width_x={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI width (non-tilt)'},
         width_y={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI height (tilt)'},
         layout='vertical', 
-        call_button="Crop"
+        call_button="Update crop"
     )
     def set_ROI(self, uleft_corner_x=200,uleft_corner_y=896,width_x=1800,width_y=512):
         """
@@ -918,13 +924,14 @@ class OPMStageScan:
             self.ROI_changed = False
 
     @magicgui(
-        auto_call=True,
+        auto_call=False,
         power_405={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '405nm power (%)'},
         power_488={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '488nm power (%)'},
         power_561={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '561nm power (%)'},
         power_635={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '635nm power (%)'},
         power_730={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '730nm power (%)'},
-        layout='vertical'
+        layout='vertical',
+        call_button='Update powers'
     )
     def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=0.0, power_730=0.0):
         """
@@ -970,15 +977,15 @@ class OPMStageScan:
                 states = [False,False,False,False,False]
                 break
             if channel == '405':
-                states[0]='True'
+                states[0]=True
             elif channel == '488':
-                states[1]='True'
+                states[1]=True
             elif channel == '561':
-                states[2]='True'
+                states[2]=True
             elif channel == '635':
-                states[3]='True'
+                states[3]=True
             elif channel == '730':
-                states[4]='True'
+                states[4]=True
 
         if not(np.all(states == self.channel_states)):
             self.channel_states=states
@@ -987,9 +994,10 @@ class OPMStageScan:
             self.channels_changed = False
 
     @magicgui(
-        auto_call=True,
+        auto_call=False,
         scan_mirror_footprint_um={"widget_type": "FloatSpinBox", "min": 5, "max": 200, "label": 'Mirror sweep (um)'},
-        layout='horizontal'
+        layout='horizontal',
+        call_button='Update scan range'
     )
     def set_galvo_sweep(self, scan_mirror_footprint_um=50.0):
         """
@@ -1000,8 +1008,8 @@ class OPMStageScan:
         :return None:
         """
 
-        if not(scan_mirror_footprint_um==self.scan_axis_range_um):
-            self.galvo_footprint_um=scan_mirror_footprint_um
+        if not(scan_mirror_footprint_um==self.scan_mirror_footprint_um):
+            self.scan_mirror_footprint_um=scan_mirror_footprint_um
             self.footprint_changed = True
         else:
             self.footprint_changed = False
@@ -1014,25 +1022,28 @@ class OPMStageScan:
     )
     def live_mode_2D(self,live_mode_2D=False):
 
-        if not(self.worker_3d_running) and not(self.worker_iterative_running):
-            if self.worker_2d_running:
-                self.worker_2d.pause()
-                self.worker_2d_running = False
-            else:
-                if not(self.worker_2d_started):
-                    self.worker_2d_started = True
-                    self.worker_2d_running = True
-                    self.worker_2d.start()
+        if (np.any(self.channel_states)):
+            if not(self.worker_3d_running) and not(self.worker_iterative_running):
+                if self.worker_2d_running:
+                    self.worker_2d.pause()
+                    self.worker_2d_running = False
                 else:
-                    self.worker_2d.resume()
-                    self.worker_2d_running = True
-        else:
-            if self.worker_3d_running:
-                raise Exception('Stop live 3D acquisition first.')
-            elif self.worker_iterative_running:
-                raise Exception('Iterative acquisition in process.')
+                    if not(self.worker_2d_started):
+                        self.worker_2d_started = True
+                        self.worker_2d_running = True
+                        self.worker_2d.start()
+                    else:
+                        self.worker_2d.resume()
+                        self.worker_2d_running = True
             else:
-                raise Exception('Unknown error.')
+                if self.worker_3d_running:
+                    raise Exception('Stop live 3D acquisition first.')
+                elif self.worker_iterative_running:
+                    raise Exception('Iterative acquisition in process.')
+                else:
+                    raise Exception('Unknown error.')
+        else:
+            raise Exception('Set at least one active channel before starting.')
     
 
     # control continuous 3D volume (hardware triggering)
@@ -1043,28 +1054,31 @@ class OPMStageScan:
     )
     def live_mode_3D(self,live_mode_3D):
 
-        if not(self.worker_2d_running) and not(self.worker_iterative_running):
-            self.galvo_scan = True
-            if self.worker_3d_running:
-                self.worker_3d.pause()
-                self.worker_3d_running = False
-                self._stop_DAQ()
-                self._reset_galvo()
-            else:
-                if not(self.worker_3d_started):
-                    self.worker_3d.start()
-                    self.worker_3d_started = True
-                    self.worker_3d_running = True
+        if (np.any(self.channel_states)):
+            if not(self.worker_2d_running) and not(self.worker_iterative_running):
+                self.galvo_scan = True
+                if self.worker_3d_running:
+                    self.worker_3d.pause()
+                    self.worker_3d_running = False
+                    self.opmdaq.stop_waveform_playback()
+                    self.opmdaq.reset_scan_mirror()
                 else:
-                    self.worker_3d.resume()
-                    self.worker_3d_running = True
-        else:
-            if self.worker_2d_running:
-                raise Exception('Stop live 2D acquisition first.')
-            elif self.worker_iterative_running:
-                raise Exception('Iterative acquisition in process.')
+                    if not(self.worker_3d_started):
+                        self.worker_3d.start()
+                        self.worker_3d_started = True
+                        self.worker_3d_running = True
+                    else:
+                        self.worker_3d.resume()
+                        self.worker_3d_running = True
             else:
-                raise Exception('Unknown error.')
+                if self.worker_2d_running:
+                    raise Exception('Stop live 2D acquisition first.')
+                elif self.worker_iterative_running:
+                    raise Exception('Iterative acquisition in process.')
+                else:
+                    raise Exception('Unknown error.')
+        else:
+            raise Exception('Set at least one active channel before starting.')
 
     # set filepath for saving data
     @magicgui(
@@ -1077,20 +1091,14 @@ class OPMStageScan:
         self.save_path = Path(save_path)
         self.save_path_setup = True
 
-    # pull configuration from OPMIterative
-    @magicgui(
-        auto_call=True,
-        config_loaded={"widget_type": "PushButton", "label": 'Load configuration'},
-        layout='horizontal'
-    )
-    def set_iterative_configuration(self,config_loaded):
-        codebook, df_fluidics, scan_settings, valve_controller, pump_controller = self.OPMiterative._return_experiment_setup()
-        self.codebook = codebook
-        self.df_fluidics = df_fluidics
-        self.scan_settings = scan_settings
-        self.valve_controller = valve_controller
-        self.pump_controller = pump_controller
-        self.iterative_setup = True
+    def _set_iterative_configuration(self,values):
+        if len(values) > 0:
+            self.codebook = values[0]
+            self.df_fluidics = values[1]
+            self.scan_settings = values[2]
+            self.valve_controller = values[3]
+            self.pump_controller = values[4]
+            self.iterative_setup = True
 
     # control stage scan (hardware triggering)
     @magicgui(

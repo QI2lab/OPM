@@ -33,7 +33,7 @@ class OPMNIDAQ:
         self.num_DI_channels = 8
         self.dataDO = None
         self.dataAO = None
-        self.channelAO = "/Devl1/ao0"
+        self.channelAO = "/Dev1/ao0"
         self.min_AO_voltage = -7.0
         self.max_AO_voltage = 7.0
         self.channelDO = "/Dev1/port0/line0:7"
@@ -50,6 +50,7 @@ class OPMNIDAQ:
         
     def set_scan_type(self,scan_type):
         self.scan_type = scan_type
+        print(self.scan_type)
 
     def reset_scan_mirror(self):
         self.taskAO = daq.Task()
@@ -61,9 +62,9 @@ class OPMNIDAQ:
     
     def set_scan_mirror_range(self,scan_mirrror_step_size_um,scan_mirror_sweep_um):
         # determine sweep footprint
-        self.min_volt = -(scan_mirror_sweep_um * self.scan_axis_calibration / 2.) + self.scan_mirror_neutral # unit: volts
-        self.scan_axis_step_volts = scan_mirrror_step_size_um * self.scan_axis_calibration # unit: V
-        self.scan_axis_range_volts = scan_mirror_sweep_um * self.scan_axis_calibration # unit: V
+        self.min_volt = -(scan_mirror_sweep_um * self.scan_mirror_calibration / 2.) + self.scan_mirror_neutral # unit: volts
+        self.scan_axis_step_volts = scan_mirrror_step_size_um * self.scan_mirror_calibration # unit: V
+        self.scan_axis_range_volts = scan_mirror_sweep_um * self.scan_mirror_calibration # unit: V
         self.scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
 
         return self.scan_steps
@@ -81,10 +82,10 @@ class OPMNIDAQ:
             nvoltage_steps = self.scan_steps
             # 2 time steps per frame, except for first frame plus one final frame to reset voltage
             #samples_per_ch = (nvoltage_steps * 2 - 1) + 1
-            samples_per_ch = (nvoltage_steps * 2 * self.n_active_channels - 1) + 1
+            self.samples_per_ch = (nvoltage_steps * 2 * self.n_active_channels - 1) + 1
  
             # Generate values for DO
-            dataDO = np.zeros((samples_per_ch, self.num_DI_channels), dtype=np.uint8)
+            dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
             for ii, ind in enumerate(self.active_channel_indices):
                 dataDO[2*ii::2*self.n_active_channels, ind] = 1
             dataDO[-1, :] = 0
@@ -109,10 +110,10 @@ class OPMNIDAQ:
             self.dataAO = waveform
         elif self.scan_type == 'stage':
             # setup digital trigger buffer on DAQ
-            samples_per_ch = 2 * int(self.n_active_channels)
+            self.samples_per_ch = 2 * int(self.n_active_channels)
 
             # create DAQ pattern for laser strobing controlled via rolling shutter
-            dataDO = np.zeros((samples_per_ch, self.num_DI_channels), dtype=np.uint8)
+            dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
             for ii, ind in enumerate(self.active_channel_indices):
                 dataDO[2*ii::2*int(self.n_active_channels), int(ind)] = 1
             
@@ -154,7 +155,7 @@ class OPMNIDAQ:
                 # first, set the galvo to the initial point if it is not already
                 self.taskAO_first = daq.Task()
                 self.taskAO_first.CreateAOVoltageChan(self.channelAO, "", self.min_AO_voltage, self.max_AO_voltage, daq.DAQmx_Val_Volts, None)
-                self.taskAO_first.WriteAnalogScalarF64(True, -1, self.waveform[0], None)
+                self.taskAO_first.WriteAnalogScalarF64(True, -1, self.dataAO[0], None)
                 self.taskAO_first.StopTask()
                 self.taskAO_first.ClearTask()
 
@@ -167,7 +168,7 @@ class OPMNIDAQ:
                 
                 ## Write the output waveform
                 samples_per_ch_ct = ct.c_int32()
-                self.taskAO.WriteAnalogF64(self.samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByScanNumber, self.waveform, ct.byref(samples_per_ch_ct), None)
+                self.taskAO.WriteAnalogF64(self.samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByScanNumber, self.dataAO, ct.byref(samples_per_ch_ct), None)
                 
                 # start analog tasks
                 self.taskAO.StartTask()

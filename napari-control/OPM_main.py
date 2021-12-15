@@ -10,7 +10,7 @@ class OPMmain():
     def __init__(self):
 
         self.path_to_fluidics_flush_program = Path('c:/flush.csv')
-        self.path_to_mm_config = Path('')
+        self.path_to_mm_config = Path('C:/Program Files/Micro-Manager-2.0gamma/temp_HamDCAM.cfg')
         self.pump_COM_port = 'COM5'
         self.valve_COM_port = 'COM6'
         self.pump_parameters = {'pump_com_port': self.pump_COM_port,
@@ -35,7 +35,7 @@ class OPMmain():
         call_button ='Select mode'
     )
     def select_mode(self,opm_mode):
-        if opm_mode=="Flush fluidics":
+        if opm_mode[0]=="Flush fluidics":
             # import fluidics libraries
             from src.hardware.APump import APump
             from src.hardware.HamiltonMVP import HamiltonMVP
@@ -59,22 +59,21 @@ class OPMmain():
             for r_idx in df_fluidics['rounds'].max():             
                 run_fluidic_program(df_fluidics,valve_controller,pump_controller)
             
-        elif opm_mode=="Setup iterative experiment":
+        elif opm_mode[0]=="Setup iterative experiment":
             import opm_iterative_control 
             opm_iterative_control.main(self.path_to_mm_config)
-        elif opm_mode=="Setup timelapse experiment":
+        elif opm_mode[0]=="Setup timelapse experiment":
             #import 
             #opm_timelapse_control(self.path_to_mm_config)
             pass
-        elif opm_mode=="Reconstruct iterative experiment":
+        elif opm_mode[0]=="Reconstruct iterative experiment":
             #import 
             #opm_iterative_reconstruct()
             pass
-        elif opm_mode=="Reconstruct timelapse experiment":
+        elif opm_mode[0]=="Reconstruct timelapse experiment":
             #import 
             #opm_timelapse_reconstruct()
             pass
-        self.close()
 
 def main():
 
