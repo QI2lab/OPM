@@ -7,7 +7,6 @@ from pymmcore_plus import RemoteMMCore
 
 # Stage monitor class
 @magicclass(labels=False)
-@set_design(text="Stage monitor")
 class OPMStageMonitor:
 
     def __init__(self):

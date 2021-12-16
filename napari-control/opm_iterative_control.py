@@ -52,7 +52,7 @@ def main(path_to_mm_config=Path('C:/Program Files/Micro-Manager-2.0gamma/temp_Ha
 
         # instrument setup
         worker_iterative_setup = iterative_control_widget._return_experiment_setup()
-        worker_iterative_setup.returned.connect(instrument_control_widget._set_iterative_configuration)
+        worker_iterative_setup.returned.connect(instrument_control_widget._set_iterative_configuration)        
         iterative_control_widget._set_worker_iterative_setup(worker_iterative_setup)
         
         # add widgets to Napari viewer
@@ -62,6 +62,11 @@ def main(path_to_mm_config=Path('C:/Program Files/Micro-Manager-2.0gamma/temp_Ha
 
         # start Napari
         napari.run(max_loop_level=2)
+
+        worker_2d.quit()
+        worker_3d.quit()
+
+        instrument_control_widget._shutdown()
 
 if __name__ == "__main__":
     main()

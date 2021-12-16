@@ -16,7 +16,7 @@ douglas.shepherd@asu.edu
 from pymmcore_plus import RemoteMMCore
 import time
 
-def check_if_busy(mmcore_stage: RemoteMMCore):
+def check_if_busy(mmcore_stage):
     '''
     Check if ASI Tiger controller is busy executing a command
 
@@ -26,7 +26,7 @@ def check_if_busy(mmcore_stage: RemoteMMCore):
     '''
 
     # turn on 'transmit repeated commands' for Tiger
-    mmcore_stage.setProperty('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+    mmcore_stage.setProperty('TigerCommHub','OnlySendSerialCommandOnChange','No')
 
     # check to make sure Tiger is not busy
     ready='B'
@@ -34,12 +34,12 @@ def check_if_busy(mmcore_stage: RemoteMMCore):
         command = 'STATUS'
         mmcore_stage.setProperty('TigerCommHub','SerialCommand',command)
         ready = mmcore_stage.getProperty('TigerCommHub','SerialResponse')
-        time.sleep(.500)
+        time.sleep(.010)
 
     # turn off 'transmit repeated commands' for Tiger
     mmcore_stage.setProperty('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
-def set_joystick_mode(mmcore_stage: RemoteMMCore, x_stage_name,z_stage_name,joystick_mode):
+def set_joystick_mode(mmcore_stage,x_stage_name,z_stage_name,joystick_mode):
     '''
     Turn ASI Tiger joystick input on or off 
 
@@ -53,29 +53,14 @@ def set_joystick_mode(mmcore_stage: RemoteMMCore, x_stage_name,z_stage_name,joys
         joystick input state
     :return None:
     '''
-
     if joystick_mode:
         mmcore_stage.setProperty(x_stage_name,'JoystickEnabled','Yes')
         mmcore_stage.setProperty(z_stage_name,'JoystickInput','22 - right wheel')
     else:
-        pass
+        mmcore_stage.setProperty(x_stage_name,'JoystickEnabled','No')
+        mmcore_stage.setProperty(z_stage_name,'JoystickInput','0 - none')
 
-def set_z_axis_mode(mmcore_stage: RemoteMMCore, z_stage_name, z_axis_mode):
-    '''
-    Change ASI Tiger z axis motor stage
-
-    :param mmcore_stage: RemoteMMCore
-        handle to existing RemoteMMCore
-    :param z_stage_name: str
-        name of z stage in MM config
-    :param z_axi_mode: str
-        z axis motor state
-    :return None:
-    '''
-
-    pass
-
-def set_axis_speed(mmcore_stage: RemoteMMCore,axis,axis_speed):
+def set_axis_speed(mmcore_stage,axis,axis_speed):
     '''
     Change ASI Tiger X/Y axis movement speed
 
@@ -95,7 +80,7 @@ def set_axis_speed(mmcore_stage: RemoteMMCore,axis,axis_speed):
         command = 'SPEED Y='+str(axis_speed)
         mmcore_stage.setProperty('TigerCommHub','SerialCommand',command)
 
-def set_xy_position(mmcore_stage: RemoteMMCore,stage_x,stage_y):
+def set_xy_position(mmcore_stage,stage_x,stage_y):
     '''
     Set ASI Tiger XY stage position
 
@@ -108,9 +93,10 @@ def set_xy_position(mmcore_stage: RemoteMMCore,stage_x,stage_y):
     :return None:
     '''
 
-    pass
+    mmcore_stage.setXYPosition(stage_x,stage_y)
+    mmcore_stage.waitForDevice(mmcore_stage.getXYStageDevice())
 
-def set_z_position(mmcore_stage: RemoteMMCore,stage_z):
+def set_z_position(mmcore_stage,stage_z):
     '''
     Set ASI Tiger Z stage position
 
@@ -120,10 +106,10 @@ def set_z_position(mmcore_stage: RemoteMMCore,stage_z):
         z axis position in um
     :return None:
     '''
-    
-    pass
+    mmcore_stage.setZPosition(stage_z)
+    mmcore_stage.waitForDevice(mmcore_stage.getFocusDevice())
 
-def set_1d_stage_scan(mmcore_stage: RemoteMMCore):
+def set_1d_stage_scan(mmcore_stage):
     '''
     Setup ASI Tiger for constant speed stage scan on X axis
 
@@ -131,11 +117,10 @@ def set_1d_stage_scan(mmcore_stage: RemoteMMCore):
         handle to existing RemoteMMCore
     :return None:
     '''
-
     command = '1SCAN X? Y=0 Z=9 F=0'
     mmcore_stage.setProperty('TigerCommHub','SerialCommand',command)
 
-def set_1d_stage_scan_area(mmcore_stage: RemoteMMCore,scan_axis_start_mm,scan_axis_end_mm):
+def set_1d_stage_scan_area(mmcore_stage,scan_axis_start_mm,scan_axis_end_mm):
     '''
     Setup ASI Tiger limits for X axis constant speed scan
 
@@ -147,13 +132,12 @@ def set_1d_stage_scan_area(mmcore_stage: RemoteMMCore,scan_axis_start_mm,scan_ax
         z axis position in mm
     :return None:
     '''
-
     scan_axis_start_mm = scan_axis_start_mm
     scan_axis_end_mm = scan_axis_end_mm
     command = '1SCANR X='+str(scan_axis_start_mm)+' Y='+str(scan_axis_end_mm)+' R=10'
     mmcore_stage.setProperty('TigerCommHub','SerialCommand',command)
 
-def setup_start_trigger_output(mmcore_stage: RemoteMMCore):
+def setup_start_trigger_output(mmcore_stage):
     '''
     Setup ASI Tiger trigger ouput on PLC add-on card
 
@@ -171,7 +155,7 @@ def setup_start_trigger_output(mmcore_stage: RemoteMMCore):
     mmcore_stage.setProperty(plcName, propPosition, addrOutputBNC1)
     mmcore_stage.setProperty(plcName, propCellConfig, addrStageSync)
 
-def start_1d_stage_scan(mmcore_stage: RemoteMMCore):
+def start_1d_stage_scan(mmcore_stage):
     '''
     Send ASI Tiger "start" command for constant speed stage scan. 
     Should be called after acquisition sequence is started.
@@ -180,11 +164,10 @@ def start_1d_stage_scan(mmcore_stage: RemoteMMCore):
         handle to existing RemoteMMCore
     :return None:
     '''
-
     command='1SCAN'
     mmcore_stage.setProperty('TigerCommHub','SerialCommand',command)
 
-def get_xyz_position(mmcore_stage: RemoteMMCore):
+def get_xyz_position(mmcore_stage):
     '''
     Get ASI Tiger stage position
 
@@ -197,10 +180,9 @@ def get_xyz_position(mmcore_stage: RemoteMMCore):
     :return stage_z_um: float
         z stage position in micron
     '''
-
-    xy_pos = mmcore_stage.getXYStagePosition()
-    stage_x_um = xy_pos.x
-    stage_y_um = xy_pos.y
+    xy_pos = mmcore_stage.getXYPosition()
+    stage_x_um = xy_pos[0]
+    stage_y_um = xy_pos[1]
     stage_z_um = mmcore_stage.getPosition()
 
     return stage_x_um,stage_y_um,stage_z_um

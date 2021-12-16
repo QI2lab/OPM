@@ -142,7 +142,7 @@ def tiled_lr_decon(image,skewed_psf,num_iterations,padding,internal_dtype):
 
     return _c(result)
 
-def lr_deconvolution_cupy(image,psf,iterations=50):
+def lr_deconvolution_cupy(image,skewed_psf,iterations=50):
     """
     Tiled Lucy-Richardson deconvolution using dask and dexp library
     :param image: ndarray
@@ -155,16 +155,19 @@ def lr_deconvolution_cupy(image,psf,iterations=50):
         deconvolved image
     """
 
+
     nz,ny,nx = image.shape
-    lr_dask = partial(tiled_lr_decon,psf=psf,num_iterations=iterations,padding=16,internal_dtype=np.float16)
-    dask_raw = da.from_array(image.astype(np.float16),chunks=(nz,2048,nx))
-    dask_decon = da.map_overlap(lr_dask,dask_raw,depth=100,boundary=None,trim=True,dtype=np.float16)
-
-    with CupyBackend():
-        decon = dask_decon.compute(scheduler='single-threaded')
-        
+    if nz > 300:
+        lr_dask = partial(tiled_lr_decon,skewed_psf=skewed_psf,num_iterations=iterations,padding=16,internal_dtype=np.float16)
+        dask_raw = da.from_array(image.astype(np.float16),chunks=(300,ny,nx))
+        dask_decon = da.map_overlap(lr_dask,dask_raw,depth=100,boundary=None,trim=True,dtype=np.float16)
+        with CupyBackend():
+            decon = dask_decon.compute(scheduler='single-threaded')
+    else:
+        with CupyBackend():
+            decon = tiled_lr_decon(image,skewed_psf=skewed_psf,num_iterations=iterations,padding=16,internal_dtype=np.float16)
+            
     return decon.astype(np.uint16)
-
 
 def manage_flat_field_py(stack):
     """

@@ -1,4 +1,5 @@
 # napari imports
+from re import T
 from magicclass import magicclass, set_design
 from magicgui import magicgui
 from magicgui.tqdm import trange
@@ -12,6 +13,7 @@ import time
 
 # data i/o imports
 import zarr
+from zarr import blosc
 import npy2bdv
 
 # hardware control imports
@@ -55,15 +57,6 @@ class OPMStageScan:
 
         # fluidics parameters
         self.path_to_fluidics_program = None
-        self.iterative_mode = 0             # 0: flush fluidics, 1: single stage-scan w/o fluidics, 2: iterative stage-scan w/ fluidics
-        self.pump_COM_port = 'COM5'
-        self.valve_COM_port = 'COM6'
-        self.pump_parameters = {'pump_com_port': self.pump_COM_port,
-                                'pump_ID': 30,
-                                'verbose': True,
-                                'simulate_pump': False,
-                                'serial_verbose': False,
-                                'flip_flow_direction': False}
 
         # MM parameters
         self.x_stage_name = 'XYStage:XY:31'
@@ -73,7 +66,7 @@ class OPMStageScan:
 
         # scan parameters
         self.save_path = Path('D:/')        
-        self.excess_stage_steps = 20       # excess stage steps to allow stage to come up to speed
+        self.excess_stage_steps = 40       # excess stage steps to allow stage to come up to speed
 
         # flags for instrument setup
         self.powers_changed = True
@@ -86,8 +79,6 @@ class OPMStageScan:
 
         # debug flag
         self.debug=False
-
-        self.OPMIterative = OPMIterative
 
     # set 2D acquistion thread worker
     def _set_worker_2d(self,worker_2d):
@@ -217,23 +208,24 @@ class OPMStageScan:
                             '730_power': float(self.channel_powers[4]),
                             }]
         
-        write_metadata(scan_param_data[0], self.metadata_dir_path / Path('scan_'+str(r_idx)+'_metadata.csv'))
+        write_metadata(scan_param_data[0], self.metadata_dir_path / Path('scan_'+str(r_idx).zfill(3)+'_metadata.csv'))
 
-    def _save_stage_positions(self,r_idx,tile_idx,current_stage_data):
+    def _save_stage_positions(self,r_idx,tile_xy_idz,tile_z_idx,current_stage_data):
         """
         Construct stage position metadata dictionary and save
 
         :param r_idx: int
             round index
-        :param tile_idx: int
-            tile index
+        :param tile_xy_idx: int
+            xy tile index
+        :param tile_xy_idx: int
+            z tile index
         :param current_stage_data: dict
             dictionary of stage positions
         :return None:
         """
 
-        write_metadata(current_stage_data[0], self.metadata_dir_path / Path('stage_'+str(r_idx)+'_'+str(tile_idx)+'_metadata.csv'))
-
+        write_metadata(current_stage_data[0], self.metadata_dir_path / Path('stage_r'+str(r_idx).zfill(3)+'_y'+str(tile_xy_idz).zfill(3)+'_z'+str(tile_z_idx).zfill(3)+'_metadata.csv'))
 
     def _save_full_metadata(self):
         """
@@ -241,7 +233,7 @@ class OPMStageScan:
 
         :return None:
         """
-
+        
         write_metadata(self.codebook[0], self.metadata_dir_path / Path('full_codebook_metadata.csv'))
         write_metadata(self.scan_settings[0], self.metadata_dir_path / Path('full_scan_settings_metadata.csv'))
 
@@ -262,6 +254,7 @@ class OPMStageScan:
 
             if self.powers_changed:
                 self._set_mmc_laser_power()
+                self.powers_changed = False
 
             if self.channels_changed:
                 if self.DAQ_running:
@@ -273,7 +266,12 @@ class OPMStageScan:
                 self.opmdaq.set_interleave_mode(True)
                 self.opmdaq.generate_waveforms()
                 self.opmdaq.start_waveform_playback()
-                self.powers_changed = False
+                self.DAQ_running=True
+                self.channels_changed = False
+            
+            if not(self.DAQ_running):
+                self.opmdaq.start_waveform_playback()
+                self.DAQ_running=True
 
             with RemoteMMCore() as mmc_2d:
 
@@ -335,11 +333,9 @@ class OPMStageScan:
                     self.opmdaq.set_interleave_mode(True)
                     scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
                     self.opmdaq.generate_waveforms()
-                    self.opmdaq.start_waveform_playback()
-                    self.DAQ_running = True
                     self.channels_changed = False
                     self.footprint_changed = False
-                
+
                 raw_image_stack = np.zeros([self.do_ind[-1],scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
                 
                 if self.debug:
@@ -357,6 +353,8 @@ class OPMStageScan:
                 #----------------------------------------------Start acquisition and deskew----------------------------------------------------------
                 #------------------------------------------------------------------------------------------------------------------------------------
 
+                self.opmdaq.start_waveform_playback()
+                self.DAQ_running = True
                 # run hardware triggered acquisition
                 mmc_3d.startSequenceAcquisition(int(n_active_channels*scan_steps),0,True)
                 for z in range(scan_steps):
@@ -365,6 +363,8 @@ class OPMStageScan:
                             pass
                         raw_image_stack[c,z,:] = mmc_3d.popNextImage()
                 mmc_3d.stopSequenceAcquisition()
+                self.opmdaq.stop_waveform_playback()
+                self.DAQ_running = False
 
                 # deskew parameters
                 deskew_parameters = np.empty([3])
@@ -373,8 +373,7 @@ class OPMStageScan:
                 deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
 
                 for c in active_channel_indices:
-                    deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)
-                    time.sleep(.05)    
+                    deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)  
                     yield c, deskewed_image
 
                 del raw_image_stack
@@ -388,54 +387,56 @@ class OPMStageScan:
 
         # unwrap settings from iterative setup widget
 
-        exposure_ms = self.scan_settings['exposure_ms']
-        scan_axis_start_um = self.scan_settings['scan_axis_start_um']
-        scan_axis_end_um =  self.scan_settings['scan_axis_end_um']
-        scan_axis_step_um = self.scan_settings['scan_axis_step_um']
-        tile_axis_start_um = self.scan_settings['tile_axis_start_um']
-        tile_axis_end_um = self.scan_settings['tile_axis_end_um']
-        tile_axis_step_um =self.scan_settings['tile_axis_step_um']
-        height_axis_start_um = self.scan_settings['height_axis_start_um']
-        height_axis_end_um = self.scan_settings['height_axis_end_um']
-        height_axis_step_um = self.scan_settings['height_axis_step_um']
-        n_iterative_rounds = self.scan_settings['n_iterative_rounds']
-        nuclei_round = self.scan_settings['nuclei_round']
-        num_xy_tiles = self.scan_settings['num_xy_tiles']
-        num_z_tiles = self.scan_settings['num_z_tiles']
-        n_active_channels_readout = self.scan_settings['n_active_channels_readout']
-        n_active_channels_nuclei = self.scan_settings['n_active_channels_nuclei']
-        scan_axis_positions = self.scan_settings['scan_axis_positions']
-        scan_axis_speed_readout = self.scan_settings['scan_axis_speed_readout']
-        scan_axis_speed_nuclei = self.scan_settings['scan_axis_speed_nuclei']
-        y_pixels = self.scan_settings['y_pixels']
-        x_pixels = self.scan_settings['x_pixels']
+        self.scan_settings_in_use=self.scan_settings[0]
+
+        exposure_ms = self.scan_settings_in_use['exposure_ms']
+        scan_axis_start_um = self.scan_settings_in_use['scan_axis_start_um']
+        scan_axis_end_um =  self.scan_settings_in_use['scan_axis_end_um']
+        scan_axis_step_um = self.scan_settings_in_use['scan_axis_step_um']
+        tile_axis_start_um = self.scan_settings_in_use['tile_axis_start_um']
+        tile_axis_end_um = self.scan_settings_in_use['tile_axis_end_um']
+        tile_axis_step_um =self.scan_settings_in_use['tile_axis_step_um']
+        height_axis_start_um = self.scan_settings_in_use['height_axis_start_um']
+        height_axis_end_um = self.scan_settings_in_use['height_axis_end_um']
+        height_axis_step_um = self.scan_settings_in_use['height_axis_step_um']
+        n_iterative_rounds = self.scan_settings_in_use['n_iterative_rounds']
+        nuclei_round = self.scan_settings_in_use['nuclei_round']
+        num_xy_tiles = self.scan_settings_in_use['num_xy_tiles']
+        num_z_tiles = self.scan_settings_in_use['num_z_tiles']
+        n_active_channels_readout = self.scan_settings_in_use['n_active_channels_readout']
+        n_active_channels_nuclei = self.scan_settings_in_use['n_active_channels_nuclei']
+        scan_axis_positions = self.scan_settings_in_use['scan_axis_positions']
+        scan_axis_speed_readout = self.scan_settings_in_use['scan_axis_speed_readout']
+        scan_axis_speed_nuclei = self.scan_settings_in_use['scan_axis_speed_nuclei']
+        y_pixels = self.scan_settings_in_use['y_pixels']
+        x_pixels = self.scan_settings_in_use['x_pixels']
         channel_states_readout = [
-            self.scan_settings['405_active_readout'],
-            self.scan_settings['488_active_readout'],
-            self.scan_settings['561_active_readout'],
-            self.scan_settings['635_active_readout'],
-            self.scan_settings['730_active_readout']
+            self.scan_settings_in_use['405_active_readout'],
+            self.scan_settings_in_use['488_active_readout'],
+            self.scan_settings_in_use['561_active_readout'],
+            self.scan_settings_in_use['635_active_readout'],
+            self.scan_settings_in_use['730_active_readout']
             ]
         channel_powers_readout = [
-            self.scan_settings['405_power_readout'],
-            self.scan_settings['488_power_readout'],
-            self.scan_settings['561_power_readout'],
-            self.scan_settings['635_power_readout'],
-            self.scan_settings['730_power_readout']
+            self.scan_settings_in_use['405_power_readout'],
+            self.scan_settings_in_use['488_power_readout'],
+            self.scan_settings_in_use['561_power_readout'],
+            self.scan_settings_in_use['635_power_readout'],
+            self.scan_settings_in_use['730_power_readout']
             ]
         channel_states_nuclei = [
-            self.scan_settings['405_active_nuclei'],
-            self.scan_settings['488_active_nuclei'],
-            self.scan_settings['561_active_nuclei'],
-            self.scan_settings['635_active_nuclei'],
-            self.scan_settings['730_active_nuclei']
+            self.scan_settings_in_use['405_active_nuclei'],
+            self.scan_settings_in_use['488_active_nuclei'],
+            self.scan_settings_in_use['561_active_nuclei'],
+            self.scan_settings_in_use['635_active_nuclei'],
+            self.scan_settings_in_use['730_active_nuclei']
             ]
         channel_powers_nuclei = [
-            self.scan_settings['405_power_nuclei'],
-            self.scan_settings['488_power_nuclei'],
-            self.scan_settings['561_power_nuclei'],
-            self.scan_settings['635_power_nuclei'],
-            self.scan_settings['730_power_nuclei']
+            self.scan_settings_in_use['405_power_nuclei'],
+            self.scan_settings_in_use['488_power_nuclei'],
+            self.scan_settings_in_use['561_power_nuclei'],
+            self.scan_settings_in_use['635_power_nuclei'],
+            self.scan_settings_in_use['730_power_nuclei']
             ]
 
         # scan parameters that do not change between readout & nuclei rounds
@@ -472,10 +473,10 @@ class OPMStageScan:
         bdv_output_path = bdv_output_dir_path / Path('fiducial_bdv.h5')
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path), 
                                         nchannels=1, 
-                                        ntiles=self.n_tiles, 
+                                        ntiles=(self.n_xy_tiles*self.n_z_tiles), 
                                         subsamp=((1,1,1),),
                                         blockdim=((1, 128, 128),),
-                                        compression='None')
+                                        compression=None)
 
         # create blank affine transformation to use for stage translation in BDV H5 XML
         unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
@@ -505,15 +506,22 @@ class OPMStageScan:
             mmc_iterative.clearCircularBuffer()
             circ_buffer_mb = 64000
             mmc_iterative.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+            mmc_iterative.setTimeoutMs(120000)
 
+            ASIstage.setup_start_trigger_output(mmc_iterative)
+            ASIstage.check_if_busy(mmc_iterative)
+
+            # set scan stage speed
             ASIstage.set_1d_stage_scan(mmc_iterative)
             ASIstage.check_if_busy(mmc_iterative)
             ASIstage.set_1d_stage_scan_area(mmc_iterative,self.scan_axis_start_um/1000.,self.scan_axis_end_um/1000.)
             ASIstage.check_if_busy(mmc_iterative)
-            ASIstage.setup_start_trigger_output(mmc_iterative)
-            ASIstage.check_if_busy(mmc_iterative)
 
-            for r_idx in trange(self.n_rounds,desc='round',position=0,leave=True):
+            # x stage is always start of scan
+            stage_x = scan_axis_start_um
+
+            # loop through rounds
+            for r_idx in trange(self.n_iterative_rounds,desc='round',position=0,leave=False):
 
                 if r_idx==0:
 
@@ -526,7 +534,7 @@ class OPMStageScan:
 
                     # setup instrument for readout rounds
                     self._crop_camera()
-                    mmc_iterative.setExposure(self.exposure_ms)
+                    mmc_iterative.setExposure(exposure_ms)
                     self._set_mmc_laser_power()
                     if self.DAQ_running:
                         self.opmdaq.stop_waveform_playback()
@@ -556,112 +564,146 @@ class OPMStageScan:
                     self.opmdaq.set_interleave_mode(True)
                     self.opmdaq.generate_waveforms()
 
-                ASIstage.set_axis_speed(mmc_iterative,'X',0.1)
-                ASIstage.check_if_busy(mmc_iterative)
-                ASIstage.set_axis_speed(mmc_iterative,'Y',0.1)
-                ASIstage.check_if_busy(mmc_iterative)
-
                 if (r_idx>0):
                     # run fluidics program for this round
                     success_fluidics = False
-                    success_fluidics = run_fluidic_program(r_idx, self.df_program, self.valve_controller, self.pump_controller)
+                    success_fluidics = run_fluidic_program(r_idx, self.df_fluidics, self.valve_controller, self.pump_controller)
                 else:
                     success_fluidics = True
 
                 if (success_fluidics):
                     # create Zarr for this round
-                    zarr_output_path = self.zarr_dir_path / Path('OPM_stage_data'+str(r_idx)+'.zarr')
+                    zarr_output_path = zarr_dir_path / Path('OPM_stage_data'+str(r_idx)+'.zarr')
+
+                    # configur blosc compressor
+                    # blosc.use_threads=True
+                    # blosc.set_nthreads = 8
 
                     # create and open zarr file
                     opm_round_data = zarr.open(
                         str(zarr_output_path), 
                         mode="w", 
-                        shape=(self.n_xy_tiles, self.n_z_tiles, self.n_active_channels, self.stage_steps, self.ROI_width_y, self.ROI_width_x), 
-                        chunks=(1, 1, 1, 1, self.ROI_width_y, self.ROI_width_x),
+                        shape=(self.n_xy_tiles, self.n_z_tiles, self.n_active_channels, self.scan_steps, self.y_pixels, self.x_pixels), 
+                        chunks=(1, 1, 1, 1, self.y_pixels, self.x_pixels),
                         compressor=None,
-                        dimension_separator="/",
                         dtype=np.uint16)
 
                     bdv_tile_idx = 0
 
                     for xy_idx in trange(self.n_xy_tiles,desc="xy tile",position=1,leave=False):
+
+                        ASIstage.set_axis_speed(mmc_iterative,'X',0.1)
+                        ASIstage.check_if_busy(mmc_iterative)
+                        ASIstage.set_axis_speed(mmc_iterative,'Y',0.1)
+                        ASIstage.check_if_busy(mmc_iterative)
+
+                        stage_y = tile_axis_start_um+(xy_idx*tile_axis_step_um)
+                        ASIstage.set_xy_position(mmc_iterative,stage_x,stage_y)
+                        
+                        ASIstage.set_axis_speed(mmc_iterative,'X',np.round(self.scan_axis_speed,4))
+                        ASIstage.check_if_busy(mmc_iterative)
+
                         for z_idx in trange(self.n_z_tiles,desc="z tile",position=2,leave=False):
+
+                            stage_z = height_axis_start_um+(z_idx*height_axis_step_um)
                     
                             # move stage
-                            ASIstage.set_xy_position(mmc_iterative,stage_x,stage_y)
-                            ASIstage.check_if_busy(mmc_iterative)
-                            ASIstage.set_z_axis_mode(mmc_iterative,stage_z)
-                            ASIstage.check_if_busy(mmc_iterative)
+                            ASIstage.set_z_position(mmc_iterative,stage_z)
 
                             # grab actual stage position
-                            stage_x, stage_y, stage_z = ASIstage.get_xyz_position(mmc_iterative)
-                            ASIstage.check_if_busy(mmc_iterative)
-
-                            # set scan stage speed
-                            ASIstage.set_axis_speed(mmc_iterative,'X',self.scan_axis_speed)
-                            ASIstage.check_if_busy(mmc_iterative)
+                            actual_stage_x, actual_stage_y, actual_stage_z = ASIstage.get_xyz_position(mmc_iterative)
         
                             # create current stage position
-                            current_stage_data = [{'stage_x': float(stage_x), 
-                                                'stage_y': float(stage_y), 
-                                                'stage_z': float(stage_z)}]
+                            current_stage_data = [{'stage_x': float(actual_stage_x), 
+                                                'stage_y': float(actual_stage_y), 
+                                                'stage_z': float(actual_stage_z)}]
 
                             # create affine xform for stage position
                             affine_matrix = unit_matrix
-                            affine_matrix[1,3] = (stage_z)/(self.camera_pixel_size_um)  # x-translation 
+                            affine_matrix[1,3] = (stage_x)/(self.camera_pixel_size_um)  # x-translation 
                             affine_matrix[0,3] = (stage_y)/(self.camera_pixel_size_um)  # y-translation
-                            affine_matrix[2,3] = (stage_x)/(self.camera_pixel_size_um)  # z-translation
+                            affine_matrix[2,3] = (stage_z)/(self.camera_pixel_size_um)  # z-translation
 
                             # Create virtual stack within BDV H5 to place fused z planes into
                             bdv_writer.append_view(stack=None,  
-                                                virtual_stack_dim=(self.stage_steps,self.ROI_width_y,self.ROI_width_x),
+                                                virtual_stack_dim=(self.scan_steps,self.y_pixels,self.x_pixels),
                                                 time=r_idx, 
                                                 channel=0, 
                                                 tile=bdv_tile_idx,
                                                 voxel_size_xyz=(self.camera_pixel_size_um, self.camera_pixel_size_um, self.scan_axis_step_um),
                                                 voxel_units='um',
-                                                calibration = (1,1,np.abs(self.stage_step_size_um/self.camera_pixel_size_um)),
+                                                calibration = (1,1,np.abs(self.scan_axis_step_um/self.camera_pixel_size_um)),
                                                 m_affine=affine_matrix,
                                                 name_affine = 'tile '+str(bdv_tile_idx)+' translation')
 
-                            # enforce camera in START trigger mode
-                            self._enforce_DCAM_external_trigger()
+                            # enforce camera in external trigger mode
+                            mmc_iterative.setConfig('Camera-TriggerSource','EXTERNAL')
+                            mmc_iterative.waitForConfig('Camera-TriggerSource','EXTERNAL')
+                            trigger_value = mmc_iterative.getProperty(self.camera_name,'TRIGGER SOURCE')
+                            while not(trigger_value == 'EXTERNAL'):
+                                mmc_iterative.setConfig('Camera-TriggerSource','EXTERNAL')
+                                mmc_iterative.waitForConfig('Camera-TriggerSource','EXTERNAL')
+                                time.sleep(1)
+                                trigger_value = mmc_iterative.getProperty(self.camera_name,'TRIGGER SOURCE')
+
+                            # enforce camera to start mode
+                            mmc_iterative.setConfig('Camera-TriggerType','START')
+                            mmc_iterative.waitForConfig('Camera-TriggerType','START')
+                            trigger_value = mmc_iterative.getProperty(self.camera_name,'Trigger')
+                            while not(trigger_value == 'START'):
+                                mmc_iterative.setConfig('Camera-TriggerType','START')
+                                mmc_iterative.waitForConfig('Camera-TriggerType','START')
+                                time.sleep(1)
+                                trigger_value = mmc_iterative.getProperty(self.camera_name,'Trigger')
+
+                            # enforce camera looking for a positive trigger
+                            mmc_iterative.setProperty(self.camera_name,r'TriggerPolarity','POSITIVE')
+                            trigger_value = mmc_iterative.getProperty(self.camera_name,r'TriggerPolarity')
+                            while not(trigger_value == 'POSITIVE'):
+                                mmc_iterative.setProperty(self.camera_name,r'TriggerPolarity','POSITIVE')
+                                time.sleep(1)
+                                trigger_value = mmc_iterative.getProperty(self.camera_name,r'TriggerPolarity')
 
                             # start DAQ
                             self.opmdaq.start_waveform_playback()
+                            self.DAQ_running = True
+
+                            # make sure stage is ready
+                            ASIstage.check_if_busy(mmc_iterative)
 
                             # run hardware triggered acquisition
-                            mmc_iterative.startSequenceAcquisition(int(self.n_active_channels*self.stage_steps),0,True)
+                            total_steps=self.scan_steps+self.excess_stage_steps
+                            total_acquistion_images = self.n_active_channels * total_steps
+                            mmc_iterative.startSequenceAcquisition(int(total_acquistion_images),0,True)                           
                             ASIstage.start_1d_stage_scan(mmc_iterative)
-                            # collect and discard excess images while stage is coming up to speed
-                            for excess_idx in range(self.excess_stage_steps):
-                                for c_idx in range(self.n_active_channels):
-                                    excess_image = mmc_iterative.popNextImage()
-
                             # collect interleaved data
-                            # place all data into Zarr
-                            # also place fidicual images into BDV for stitching
-                            for s_idx in trange(self.stage_steps,desc="scan", position=3, leave=False):
+                            # place all data into Zarr, also place fidicual images into BDV for stitching
+                            for s_idx in trange(total_steps,desc="scan", position=3, leave=False):
                                 for c_idx in range(self.n_active_channels):
-                                    while mmc_iterative.getRemainingImageCount()==0:
+                                    while (mmc_iterative.getRemainingImageCount() == 0):
                                         pass
                                     image = mmc_iterative.popNextImage()
-                                    opm_round_data[xy_idx, z_idx, c_idx, s_idx, :, :] =image
-                                    if (c_idx==0 and r_idx<(self.n_rounds-1)) or (c_idx==1 and r_idx==(self.n_rounds-1)):
-                                        #write the fiducial channel into bigstitcher
-                                        bdv_writer.append_plane(
-                                            plane=image, 
-                                            z=s_idx, 
-                                            time=r_idx, 
-                                            channel=0)
+                                    if (s_idx>=self.excess_stage_steps):
+                                        opm_round_data[xy_idx, z_idx, c_idx, s_idx-self.excess_stage_steps, :, :] =image
+                                        if (c_idx==0 and r_idx<(self.n_iterative_rounds-1)) or (c_idx==1 and r_idx==(self.n_iterative_rounds-1)):
+                                            #write the fiducial channel into bigstitcher
+                                            bdv_writer.append_plane(
+                                                plane=image, 
+                                                z=s_idx-self.excess_stage_steps, 
+                                                time=r_idx, 
+                                                channel=0)
                             mmc_iterative.stopSequenceAcquisition()
 
                             # stop DAQ
                             self.opmdaq.stop_waveform_playback()
+                            self.DAQ_running=False
 
                             bdv_tile_idx = bdv_tile_idx + 1
                             
                             self._save_stage_positions(r_idx,xy_idx,z_idx,current_stage_data)
+
+                            # make sure stage has moved back to beginning
+                            ASIstage.check_if_busy(mmc_iterative)
 
                     # del reference to Zarr file
                     opm_round_data = None
@@ -693,10 +735,17 @@ class OPMStageScan:
 
                 # write full metadata
                 self._save_full_metadata()
+
+                # enforce camera in internal trigger mode
+                self._enforce_DCAM_internal_trigger()
             else:
                 # write and close BDV H5 xml file
                 bdv_writer.write_xml()
                 bdv_writer.close()
+
+                # enforce camera in internal trigger mode
+                self._enforce_DCAM_internal_trigger()
+                
                 raise Exception('Error in fluidics. Acquisition failed.')
 
     def _crop_camera(self):
@@ -792,11 +841,16 @@ class OPMStageScan:
             mmc_camera_setup.setConfig('Camera-Setup','ScanMode3')
             mmc_camera_setup.waitForConfig('Camera-Setup','ScanMode3')
 
-            # set camera to internal trigger
-            mmc_camera_setup.setConfig('Camera-TriggerSource','INTERNAL')
-            mmc_camera_setup.waitForConfig('Camera-TriggerSource','INTERNAL')
-            
-            # set camera to internal trigger
+            # set camera to start trigger
+            mmc_camera_setup.setConfig('Camera-TriggerType','START')
+            mmc_camera_setup.waitForConfig('Camera-TriggerType','START')
+            trigger_value = mmc_camera_setup.getProperty(self.camera_name,'Trigger')
+            while not(trigger_value == 'START'):
+                mmc_camera_setup.setConfig('Camera-TriggerType','START')
+                mmc_camera_setup.waitForConfig('Camera-TriggerType','START')
+                time.sleep(2)
+                trigger_value = mmc_camera_setup.getProperty(self.camera_name,'Trigger')
+                
             # give camera time to change modes if necessary
             mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[0]','EXPOSURE')
             mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[1]','EXPOSURE')
@@ -804,10 +858,12 @@ class OPMStageScan:
             mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[0]','POSITIVE')
             mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[1]','POSITIVE')
             mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
-
+            mmc_camera_setup.setProperty(self.camera_name,r'MINIMUM ACQUISITION TIMEOUT','120.0')
+            mmc_camera_setup.setProperty(self.camera_name,r'TriggerPolarity','POSITIVE')
+            
     def _enforce_DCAM_external_trigger(self):
         """
-        Enforce camera being in external trigger = START mode
+        Enforce camera being in trigger = EXTERNAL mode
 
         :return None:
         """
@@ -815,11 +871,39 @@ class OPMStageScan:
         with RemoteMMCore() as mmc_camera_trigger:
 
             # set camera to START mode upon input trigger
-            mmc_camera_trigger.setConfig('Camera-TriggerType','START')
-            mmc_camera_trigger.waitForConfig('Camera-TriggerType','START')
+            mmc_camera_trigger.setConfig('Camera-TriggerSource','EXTERNAL')
+            mmc_camera_trigger.waitForConfig('Camera-TriggerSource','EXTERNAL')
 
             # check if camera actually changed
             # we find that camera doesn't always go back to START mode and need to check it
+            trigger_value = mmc_camera_trigger.getProperty(self.camera_name,'TRIGGER SOURCE')
+            while not(trigger_value == 'EXTERNAL'):
+                mmc_camera_trigger.setConfig('Camera-TriggerSource','EXTERNAL')
+                mmc_camera_trigger.waitForConfig('Camera-TriggerSource','EXTERNAL')
+                time.sleep(2)
+                trigger_value = mmc_camera_trigger.getProperty(self.camera_name,'TRIGGER SOURCE')
+
+    def _enforce_DCAM_internal_trigger(self):
+        """
+        Enforce camera being in trigger = INTERNAL mode
+
+        :return None:
+        """
+
+        with RemoteMMCore() as mmc_camera_trigger:
+
+            # set camera to START mode upon input trigger
+            mmc_camera_trigger.setConfig('Camera-TriggerSource','INTERNAL')
+            mmc_camera_trigger.waitForConfig('Camera-TriggerSource','INTERNAL')
+
+            # check if camera actually changed
+            # we find that camera doesn't always go back to START mode and need to check it
+            trigger_value = mmc_camera_trigger.getProperty(self.camera_name,'TRIGGER SOURCE')
+            while not(trigger_value == 'INTERNAL'):
+                mmc_camera_trigger.setConfig('Camera-TriggerSource','INTERNAL')
+                mmc_camera_trigger.waitForConfig('Camera-TriggerSource','INTERNAL')
+                trigger_value = mmc_camera_trigger.getProperty(self.camera_name,'TRIGGER SOURCE')
+
             
     def _startup(self):
         """
@@ -833,8 +917,9 @@ class OPMStageScan:
         self._lasers_to_hardware()
 
         # set camera to OPM specific setup
+        self._crop_camera()
         self._setup_camera()
-        #self._enforce_DCAM_external_trigger()
+        self._enforce_DCAM_internal_trigger()
 
         '''
         # connect to pump
@@ -868,6 +953,10 @@ class OPMStageScan:
         if self.DAQ_running:
             self.opmdaq.stop_waveform_playback()
         self.opmdaq.reset_scan_mirror()
+
+        if (self.iterative_setup):
+            self.valve_controller.close()
+            self.pump_controller.disconnect()
 
     @magicgui(
         auto_call=False,
@@ -995,7 +1084,7 @@ class OPMStageScan:
 
     @magicgui(
         auto_call=False,
-        scan_mirror_footprint_um={"widget_type": "FloatSpinBox", "min": 5, "max": 200, "label": 'Mirror sweep (um)'},
+        scan_mirror_footprint_um={"widget_type": "FloatSpinBox", "min": 5, "max": 225, "label": 'Mirror sweep (um)'},
         layout='horizontal',
         call_button='Update scan range'
     )
@@ -1026,6 +1115,9 @@ class OPMStageScan:
             if not(self.worker_3d_running) and not(self.worker_iterative_running):
                 if self.worker_2d_running:
                     self.worker_2d.pause()
+                    if self.DAQ_running:
+                        self.opmdaq.stop_waveform_playback()
+                        self.DAQ_running=False
                     self.worker_2d_running = False
                 else:
                     if not(self.worker_2d_started):
@@ -1060,7 +1152,9 @@ class OPMStageScan:
                 if self.worker_3d_running:
                     self.worker_3d.pause()
                     self.worker_3d_running = False
-                    self.opmdaq.stop_waveform_playback()
+                    if self.DAQ_running:
+                        self.opmdaq.stop_waveform_playback()
+                        self.DAQ_running = False
                     self.opmdaq.reset_scan_mirror()
                 else:
                     if not(self.worker_3d_started):

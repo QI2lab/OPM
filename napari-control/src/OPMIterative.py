@@ -1,5 +1,5 @@
 # napari imports
-from magicclass import magicclass, set_design, MagicTemplate, set_options
+from magicclass import magicclass, set_design, MagicTemplate
 from magicgui import magicgui, widgets
 from napari.qt.threading import thread_worker
 
@@ -18,7 +18,6 @@ from src.hardware.HamiltonMVP import HamiltonMVP
 
 # Fluidics loader, exposure, channels, and stage scan definitions
 @magicclass(labels=False,widget_type="tabbed")
-@set_design(text="Iterative scanning")
 class OPMIterative(MagicTemplate):
 
     # initialize
@@ -28,8 +27,17 @@ class OPMIterative(MagicTemplate):
         self.fluidics_program = None
         self.n_iterative_rounds = 0
         self.fluidics_loaded = False
-        
-        self.scan_axis_step_um = 0.400      # unitL um
+
+        self.pump_COM_port = 'COM5'
+        self.valve_COM_port = 'COM6'
+        self.pump_parameters = {'pump_com_port': self.pump_COM_port,
+                                'pump_ID': 30,
+                                'verbose': True,
+                                'simulate_pump': False,
+                                'serial_verbose': False,
+                                'flip_flow_direction': False}
+
+        self.scan_axis_step_um = 0.400      # unit: um
         self.scan_axis_start_um  = 0    # unit: um
         self.scan_axis_end_um  = 0       # unit: um
         self.scan_axis_positions = 0     # positions
@@ -83,8 +91,9 @@ class OPMIterative(MagicTemplate):
                 true_exposure = mmc_stage_setup.getExposure()
 
                 # grab ROI
-                _, _, self.y_pixels, self.x_pixels = mmc_stage_setup.getROI()
-
+                current_ROI = mmc_stage_setup.getROI()
+                self.x_pixels = current_ROI[2]
+                self.y_pixels = current_ROI[3]
                 if not((self.y_pixels == 256) or (self.y_pixels==512)):
                     raise Exception('Set camera ROI first.')
 
@@ -140,8 +149,8 @@ class OPMIterative(MagicTemplate):
                                     'nuclei_round': int(self.codebook['nuclei_round']),
                                     'num_xy_tiles': int(self.n_xy_tiles),
                                     'num_z_tiles': int(self.n_z_tiles),
-                                    'num_ch_readout': int(self.n_active_channels_readout),
-                                    'num_ch_nuclei': int(self.n_active_channels_nuclei),
+                                    'n_active_channels_readout': int(self.n_active_channels_readout),
+                                    'n_active_channels_nuclei': int(self.n_active_channels_nuclei),
                                     'scan_axis_positions': int(self.scan_axis_positions),
                                     'scan_axis_speed_readout': float(self.scan_axis_speed_readout),
                                     'scan_axis_speed_nuclei': float(self.scan_axis_speed_nuclei),
@@ -185,34 +194,37 @@ class OPMIterative(MagicTemplate):
     def _generate_fluidics_summary(self):
 
         self.n_iterative_rounds = int(self.codebook['n_rounds'])
+        if (self.n_iterative_rounds == int(self.df_fluidics['round'].max())):
 
-        self.n_active_channels_readout = int(self.codebook['dyes_per_round'])
-        self.channel_states_readout = [
-            False,
-            bool(strtobool(self.codebook['alexa488'])),
-            bool(strtobool(self.codebook['atto565'])),
-            bool(strtobool(self.codebook['alexa647'])),
-            bool(strtobool(self.codebook['cy7']))]
-
-        if not(self.codebook['nuclei_round']==-1):
-            self.n_active_channels_nuclei = 2
-            self.channel_states_nuclei = [
-                True,
-                True,
+            self.n_active_channels_readout = int(self.codebook['dyes_per_round'])
+            self.channel_states_readout = [
                 False,
-                False,
-                False]
+                bool(strtobool(self.codebook['alexa488'])),
+                bool(strtobool(self.codebook['atto565'])),
+                bool(strtobool(self.codebook['alexa647'])),
+                bool(strtobool(self.codebook['cy7']))]
 
-        fluidics_data = (f"Experiment type: {str(self.codebook['type'])} \n"
-                         f"Number of iterative rounds: {str(self.codebook['n_rounds'])} \n\n"
-                         f"Number of targets: {str(self.codebook['targets'])} \n"
-                         f"Channels per round: {str(self.codebook['dyes_per_round'])} \n"
-                         f"Alexa488 fidicual: {str(self.codebook['alexa488'])} \n"
-                         f"Atto565 readout: {str(self.codebook['atto565'])} \n"
-                         f"Alexa647 readout: {str(self.codebook['alexa647'])} \n"
-                         f"Cy7 readout: {str(self.codebook['cy7'])} \n"
-                         f"Nuclear marker round: {str(self.codebook['nuclei_round'])} \n\n")
-        self.fluidics_summary.value = fluidics_data
+            if not(self.codebook['nuclei_round']==-1):
+                self.n_active_channels_nuclei = 2
+                self.channel_states_nuclei = [
+                    True,
+                    True,
+                    False,
+                    False,
+                    False]
+
+            fluidics_data = (f"Experiment type: {str(self.codebook['type'])} \n"
+                            f"Number of iterative rounds: {str(self.codebook['n_rounds'])} \n\n"
+                            f"Number of targets: {str(self.codebook['targets'])} \n"
+                            f"Channels per round: {str(self.codebook['dyes_per_round'])} \n"
+                            f"Alexa488 fidicual: {str(self.codebook['alexa488'])} \n"
+                            f"Atto565 readout: {str(self.codebook['atto565'])} \n"
+                            f"Alexa647 readout: {str(self.codebook['alexa647'])} \n"
+                            f"Cy7 readout: {str(self.codebook['cy7'])} \n"
+                            f"Nuclear marker round: {str(self.codebook['nuclei_round'])} \n\n")
+            self.fluidics_summary.value = fluidics_data
+        else:
+            raise Exception('Number of rounds in codebook file and fluidics file do not match.')
 
     # generate summary of experimental setup
     def _generate_experiment_summary(self):
@@ -248,18 +260,22 @@ class OPMIterative(MagicTemplate):
         layout='vertical',
         call_button='Load fluidics'
     )
-    def load_fluidics_program(self, fluidics_file_path: Path, codebook_file_path: Path):
+    def load_fluidics_program(self, 
+                            fluidics_file_path = Path('C:/Users/qi2lab/Documents/GitHub/common_fluidics_programs'), 
+                            codebook_file_path = Path('C:/Users/qi2lab/Documents/GitHub/common_codebooks')):
         self.fluidics_file_path = fluidics_file_path
         self.codebook_file_path = codebook_file_path
         self._load_fluidics()
         self._generate_fluidics_summary()
 
+    fluidics_summary = widgets.TextEdit(label='Fluidics Summary', value="None", name="Fluidics summary")
+
     @magicgui(
         auto_call=True,
-        fluidics_file_path={"widget_type": "PushButton", 'label': 'Run first round'},
+        run_fluidics={"widget_type": "PushButton", 'label': 'Load fluidic controller and run first round'},
         layout='vertical'
     )
-    def run_first_fluidics_round(self, fluidics_file_path: Path, codebook_file_path: Path):
+    def run_first_fluidics_round(self, run_fluidics):
         if self.fluidics_loaded:
             # connect to pump
             self.pump_controller = APump(self.pump_parameters)
@@ -341,7 +357,6 @@ class OPMIterative(MagicTemplate):
         else:
             raise Exception("Configure fluidics, run initial round, and configure channels first.")
 
-    fluidics_summary = widgets.TextEdit(label='Fluidics Summary', value="None", name="Fluidics summary")
     experiment_summary = widgets.TextEdit(label='Experiment Summary', value="None", name="Experiment summary")
 
     @magicgui(

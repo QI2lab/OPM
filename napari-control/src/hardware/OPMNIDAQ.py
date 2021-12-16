@@ -32,7 +32,7 @@ class OPMNIDAQ:
         self.DAQ_sample_rate_Hz = 10000
         self.num_DI_channels = 8
         self.dataDO = None
-        self.dataAO = None
+        self.waveform = None
         self.channelAO = "/Dev1/ao0"
         self.min_AO_voltage = -7.0
         self.max_AO_voltage = 7.0
@@ -41,16 +41,11 @@ class OPMNIDAQ:
         self.channelDI_start_trigger = "/Dev1/PFI1"
         self.channelDI_change_trigger = "/Dev1/PFI2"
 
-        self.taskDI = None
-        self.taskDO = None
-        self.taskAO = None
-        
         self.scan_mirror_neutral = scan_mirror_neutral
         self.scan_mirror_calibration = scan_mirror_calibration
         
     def set_scan_type(self,scan_type):
         self.scan_type = scan_type
-        print(self.scan_type)
 
     def reset_scan_mirror(self):
         self.taskAO = daq.Task()
@@ -58,7 +53,6 @@ class OPMNIDAQ:
         self.taskAO.WriteAnalogScalarF64(True, -1, self.scan_mirror_neutral, None)
         self.taskAO.StopTask()
         self.taskAO.ClearTask()
-        self.taskAO = None
     
     def set_scan_mirror_range(self,scan_mirrror_step_size_um,scan_mirror_sweep_um):
         # determine sweep footprint
@@ -107,7 +101,7 @@ class OPMNIDAQ:
             waveform[-1] = voltage_values[0]
 
             self.dataDO = dataDO
-            self.dataAO = waveform
+            self.waveform = waveform
         elif self.scan_type == 'stage':
             # setup digital trigger buffer on DAQ
             self.samples_per_ch = 2 * int(self.n_active_channels)
@@ -118,29 +112,31 @@ class OPMNIDAQ:
                 dataDO[2*ii::2*int(self.n_active_channels), int(ind)] = 1
             
             self.dataDO = dataDO
-            self.dataAO = None
+            self.waveform = None
 
     def start_waveform_playback(self):
         try:    
-            # ----- DIGITAL input -------
             self.taskDI = daq.Task()
-            self.taskDI.CreateDIChan(self.channelDI_trigger_from_camera, "", daq.DAQmx_Val_ChanForAllLines)
+            self.taskDI.CreateDIChan("/Dev1/PFI0", "", daq.DAQmx_Val_ChanForAllLines)
             
             ## Configure change detectin timing (from wave generator)
             self.taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
-            self.taskDI.CfgChangeDetectionTiming(self.channelDI_trigger_from_camera, self.channelDI_trigger_from_camera, daq.DAQmx_Val_ContSamps, 0)
+            self.taskDI.CfgChangeDetectionTiming("/Dev1/PFI0", "/Dev1/PFI0", daq.DAQmx_Val_ContSamps, 0)
 
             ## Set where the starting trigger 
-            self.taskDI.CfgDigEdgeStartTrig(self.channelDI_trigger_from_camera, daq.DAQmx_Val_Rising)
+            self.taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0", daq.DAQmx_Val_Rising)
             
             ## Export DI signal to unused PFI pins, for clock and start
-            self.taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, self.channelDI_change_trigger)
-            self.taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger, self.channelDI_start_trigger)
+            self.taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
+            self.taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger, "/Dev1/PFI1")
             
             # ----- DIGITAL output ------   
             self.taskDO = daq.Task()
             # TO DO: Write each laser line separately!
-            self.taskDO.CreateDOChan(self.channelDO, "", daq.DAQmx_Val_ChanForAllLines)
+            self.taskDO.CreateDOChan("/Dev1/port0/line0:7", "", daq.DAQmx_Val_ChanForAllLines)
+
+            ## Configure timing (from DI task) 
+            self.taskDO.CfgSampClkTiming("/Dev1/PFI2", self.DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, self.samples_per_ch)
 
             ## Configure timing (from DI task) 
             self.taskDO.CfgSampClkTiming(self.channelDI_change_trigger, self.DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, self.samples_per_ch)
@@ -154,21 +150,21 @@ class OPMNIDAQ:
 
                 # first, set the galvo to the initial point if it is not already
                 self.taskAO_first = daq.Task()
-                self.taskAO_first.CreateAOVoltageChan(self.channelAO, "", self.min_AO_voltage, self.max_AO_voltage, daq.DAQmx_Val_Volts, None)
-                self.taskAO_first.WriteAnalogScalarF64(True, -1, self.dataAO[0], None)
+                self.taskAO_first.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
+                self.taskAO_first.WriteAnalogScalarF64(True, -1, self.waveform[0], None)
                 self.taskAO_first.StopTask()
                 self.taskAO_first.ClearTask()
 
                 # now set up the task to ramp the galvo
                 self.taskAO = daq.Task()
-                self.taskAO.CreateAOVoltageChan(self.channelAO, "", self.min_AO_voltage, self.max_AO_voltage, daq.DAQmx_Val_Volts, None)
+                self.taskAO.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
 
                 ## Configure timing (from DI task)
-                self.taskAO.CfgSampClkTiming(self.channelDI_change_trigger, self.DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, self.samples_per_ch)
+                self.taskAO.CfgSampClkTiming("/Dev1/PFI2", self.DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, self.samples_per_ch)
                 
                 ## Write the output waveform
                 samples_per_ch_ct = ct.c_int32()
-                self.taskAO.WriteAnalogF64(self.samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByScanNumber, self.dataAO, ct.byref(samples_per_ch_ct), None)
+                self.taskAO.WriteAnalogF64(self.samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByScanNumber, self.waveform, ct.byref(samples_per_ch_ct), None)
                 
                 # start analog tasks
                 self.taskAO.StartTask()
@@ -184,16 +180,13 @@ class OPMNIDAQ:
         try:
             self.taskDI.StopTask()
             self.taskDO.StopTask()
-            self.taskDI.ClearTask()
-            self.taskDO.ClearTask()
-
             if self.scan_type == 'mirror':
                 self.taskAO.StopTask()
-                self.taskAO.ClearTask()
 
-            self.taskDI = None
-            self.taskDO = None
-            self.taskAO = None
+            self.taskDI.ClearTask()
+            self.taskDO.ClearTask()
+            if self.scan_type == 'mirror':
+                self.taskAO.ClearTask()
 
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)
