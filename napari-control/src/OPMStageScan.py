@@ -15,6 +15,7 @@ import time
 import zarr
 from zarr import blosc
 import npy2bdv
+import gc
 
 # hardware control imports
 from pymmcore_plus import RemoteMMCore
@@ -233,7 +234,7 @@ class OPMStageScan:
 
         :return None:
         """
-        
+
         write_metadata(self.codebook[0], self.metadata_dir_path / Path('full_codebook_metadata.csv'))
         write_metadata(self.scan_settings[0], self.metadata_dir_path / Path('full_scan_settings_metadata.csv'))
 
@@ -467,21 +468,21 @@ class OPMStageScan:
         output_dir_path = self.save_path / Path('iterative_'+time_string)
         output_dir_path.mkdir(parents=True, exist_ok=True)
         
-        # create BDV H5 for registration of fiducial
-        bdv_output_dir_path = output_dir_path / Path('fiducial_data')
-        bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
-        bdv_output_path = bdv_output_dir_path / Path('fiducial_bdv.h5')
-        bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path), 
-                                        nchannels=1, 
-                                        ntiles=(self.n_xy_tiles*self.n_z_tiles), 
-                                        subsamp=((1,1,1),),
-                                        blockdim=((1, 128, 128),),
-                                        compression=None)
+        # # create BDV H5 for registration of fiducial
+        # bdv_output_dir_path = output_dir_path / Path('fiducial_data')
+        # bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
+        # bdv_output_path = bdv_output_dir_path / Path('fiducial_bdv.h5')
+        # bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path), 
+        #                                 nchannels=1, 
+        #                                 ntiles=(self.n_xy_tiles*self.n_z_tiles), 
+        #                                 subsamp=((1,1,1),),
+        #                                 blockdim=((1, y_pixels//2, x_pixels//2),),
+        #                                 compression=None)
 
         # create blank affine transformation to use for stage translation in BDV H5 XML
-        unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
-                                (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
-                                (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
+        # unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
+        #                         (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
+        #                         (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
 
         # create metadata directory in output directory
         self.metadata_dir_path = output_dir_path / Path('metadata')
@@ -500,118 +501,120 @@ class OPMStageScan:
         #----------------------------------------------------Start acquisition---------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
         
-        with RemoteMMCore() as mmc_iterative:
+        with RemoteMMCore() as mmc_iterative_setup:
 
             # set circular buffer to be large
-            mmc_iterative.clearCircularBuffer()
-            circ_buffer_mb = 64000
-            mmc_iterative.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
-            mmc_iterative.setTimeoutMs(120000)
+            mmc_iterative_setup.clearCircularBuffer()
+            circ_buffer_mb = 8000
+            mmc_iterative_setup.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+            mmc_iterative_setup.setTimeoutMs(120000)
 
-            ASIstage.setup_start_trigger_output(mmc_iterative)
-            ASIstage.check_if_busy(mmc_iterative)
+            ASIstage.setup_start_trigger_output(mmc_iterative_setup)
+            ASIstage.check_if_busy(mmc_iterative_setup)
 
             # set scan stage speed
-            ASIstage.set_1d_stage_scan(mmc_iterative)
-            ASIstage.check_if_busy(mmc_iterative)
-            ASIstage.set_1d_stage_scan_area(mmc_iterative,self.scan_axis_start_um/1000.,self.scan_axis_end_um/1000.)
-            ASIstage.check_if_busy(mmc_iterative)
+            ASIstage.set_1d_stage_scan(mmc_iterative_setup)
+            ASIstage.check_if_busy(mmc_iterative_setup)
+            ASIstage.set_1d_stage_scan_area(mmc_iterative_setup,self.scan_axis_start_um/1000.,self.scan_axis_end_um/1000.)
+            ASIstage.check_if_busy(mmc_iterative_setup)
 
-            # x stage is always start of scan
-            stage_x = scan_axis_start_um
+        # x stage is always start of scan
+        stage_x = scan_axis_start_um
 
-            # loop through rounds
-            for r_idx in trange(self.n_iterative_rounds,desc='round',position=0,leave=False):
+        # loop through rounds
+        for r_idx in range(self.n_iterative_rounds):
 
-                if r_idx==0:
+            if r_idx==0:
 
-                    # scan parameters that change between readout and nuclei rounds
-                    self.n_active_channels = n_active_channels_readout
-                    self.scan_steps = scan_axis_positions
-                    self.scan_axis_speed = scan_axis_speed_readout
-                    self.channel_states = channel_states_readout
-                    self.channel_powers = channel_powers_readout
+                # scan parameters that change between readout and nuclei rounds
+                self.n_active_channels = n_active_channels_readout
+                self.scan_steps = scan_axis_positions
+                self.scan_axis_speed = scan_axis_speed_readout
+                self.channel_states = channel_states_readout
+                self.channel_powers = channel_powers_readout
 
-                    # setup instrument for readout rounds
-                    self._crop_camera()
-                    mmc_iterative.setExposure(exposure_ms)
-                    self._set_mmc_laser_power()
-                    if self.DAQ_running:
-                        self.opmdaq.stop_waveform_playback()
-                        self.DAQ_running = False
-                        self.opmdaq.reset_scan_mirror()
-                    self.opmdaq.set_scan_type('stage')
-                    self.opmdaq.set_channels_to_use(self.channel_states)
-                    self.opmdaq.set_interleave_mode(True)
-                    self.opmdaq.generate_waveforms()
+                # setup instrument for readout rounds
+                self._crop_camera()
+                self._set_mmc_laser_power()
+                if self.DAQ_running:
+                    self.opmdaq.stop_waveform_playback()
+                    self.DAQ_running = False
+                    self.opmdaq.reset_scan_mirror()
+                self.opmdaq.set_scan_type('stage')
+                self.opmdaq.set_channels_to_use(self.channel_states)
+                self.opmdaq.set_interleave_mode(True)
+                self.opmdaq.generate_waveforms()
 
-                elif r_idx == (nuclei_round - 1):
+            elif r_idx == (nuclei_round - 1):
 
-                    # scan parameters that change between readout and nuclei rounds
-                    self.n_active_channels = n_active_channels_nuclei
-                    self.scan_axis_speed = scan_axis_speed_nuclei
-                    self.channel_states = channel_states_nuclei
-                    self.channel_powers = channel_powers_nuclei
+                # scan parameters that change between readout and nuclei rounds
+                self.n_active_channels = n_active_channels_nuclei
+                self.scan_axis_speed = scan_axis_speed_nuclei
+                self.channel_states = channel_states_nuclei
+                self.channel_powers = channel_powers_nuclei
 
-                    # setup instrument for nuclei round
-                    self._set_mmc_laser_power()
-                    if self.DAQ_running:
-                        self.opmdaq.stop_waveform_playback()
-                        self.DAQ_running = False
-                        self.opmdaq.reset_scan_mirror()
-                    self.opmdaq.set_scan_type('stage')
-                    self.opmdaq.set_channels_to_use(self.channel_states)
-                    self.opmdaq.set_interleave_mode(True)
-                    self.opmdaq.generate_waveforms()
+                # setup instrument for nuclei round
+                self._set_mmc_laser_power()
+                if self.DAQ_running:
+                    self.opmdaq.stop_waveform_playback()
+                    self.DAQ_running = False
+                    self.opmdaq.reset_scan_mirror()
+                self.opmdaq.set_scan_type('stage')
+                self.opmdaq.set_channels_to_use(self.channel_states)
+                self.opmdaq.set_interleave_mode(True)
+                self.opmdaq.generate_waveforms()
 
-                if (r_idx>0):
-                    # run fluidics program for this round
-                    success_fluidics = False
-                    success_fluidics = run_fluidic_program(r_idx, self.df_fluidics, self.valve_controller, self.pump_controller)
-                else:
-                    success_fluidics = True
+            if (r_idx>0):
+                # run fluidics program for this round
+                success_fluidics = False
+                success_fluidics = run_fluidic_program(r_idx, self.df_fluidics, self.valve_controller, self.pump_controller)
+            else:
+                success_fluidics = True
 
-                if (success_fluidics):
-                    # create Zarr for this round
-                    zarr_output_path = zarr_dir_path / Path('OPM_stage_data'+str(r_idx)+'.zarr')
+            if (success_fluidics):
 
-                    # configur blosc compressor
-                    # blosc.use_threads=True
-                    # blosc.set_nthreads = 8
+                # configur blosc compressor
+                # blosc.use_threads=True
+                # blosc.set_nthreads = 8
 
-                    # create and open zarr file
-                    opm_round_data = zarr.open(
-                        str(zarr_output_path), 
-                        mode="w", 
-                        shape=(self.n_xy_tiles, self.n_z_tiles, self.n_active_channels, self.scan_steps, self.y_pixels, self.x_pixels), 
-                        chunks=(1, 1, 1, 1, self.y_pixels, self.x_pixels),
-                        compressor=None,
-                        dtype=np.uint16)
+                bdv_tile_idx = 0
 
-                    bdv_tile_idx = 0
+                for xy_idx in trange(self.n_xy_tiles,desc="xy tile",position=0):
 
-                    for xy_idx in trange(self.n_xy_tiles,desc="xy tile",position=1,leave=False):
+                    with RemoteMMCore() as mmc_iterative_execute:
 
-                        ASIstage.set_axis_speed(mmc_iterative,'X',0.1)
-                        ASIstage.check_if_busy(mmc_iterative)
-                        ASIstage.set_axis_speed(mmc_iterative,'Y',0.1)
-                        ASIstage.check_if_busy(mmc_iterative)
+                        mmc_iterative_execute.setExposure(exposure_ms)
+                        ASIstage.set_axis_speed(mmc_iterative_execute,'X',0.1)
+                        ASIstage.check_if_busy(mmc_iterative_execute)
+                        ASIstage.set_axis_speed(mmc_iterative_execute,'Y',0.1)
+                        ASIstage.check_if_busy(mmc_iterative_execute)
 
                         stage_y = tile_axis_start_um+(xy_idx*tile_axis_step_um)
-                        ASIstage.set_xy_position(mmc_iterative,stage_x,stage_y)
+                        ASIstage.set_xy_position(mmc_iterative_execute,stage_x,stage_y)
                         
-                        ASIstage.set_axis_speed(mmc_iterative,'X',np.round(self.scan_axis_speed,4))
-                        ASIstage.check_if_busy(mmc_iterative)
+                        ASIstage.set_axis_speed(mmc_iterative_execute,'X',np.round(self.scan_axis_speed,4))
+                        ASIstage.check_if_busy(mmc_iterative_execute)
 
-                        for z_idx in trange(self.n_z_tiles,desc="z tile",position=2,leave=False):
+                        # create Zarr for this round
+                        zarr_output_path = zarr_dir_path / Path('OPM_stage_data_r'+str(r_idx).zfill(3)+'_xy'+str(xy_idx).zfill(3)+'.zarr')
+
+                        # create and open zarr file
+                        opm_round_data = zarr.open(
+                            str(zarr_output_path), 
+                            mode="w", 
+                            shape=(self.n_z_tiles, self.n_active_channels, self.scan_steps, self.y_pixels, self.x_pixels), 
+                            chunks=(1, 1, 1, self.y_pixels, self.x_pixels),
+                            dtype=np.uint16)
+
+                        for z_idx in trange(self.n_z_tiles,desc="z tile",position=1,leave=False):
 
                             stage_z = height_axis_start_um+(z_idx*height_axis_step_um)
                     
                             # move stage
-                            ASIstage.set_z_position(mmc_iterative,stage_z)
+                            ASIstage.set_z_position(mmc_iterative_execute,stage_z)
 
                             # grab actual stage position
-                            actual_stage_x, actual_stage_y, actual_stage_z = ASIstage.get_xyz_position(mmc_iterative)
+                            actual_stage_x, actual_stage_y, actual_stage_z = ASIstage.get_xyz_position(mmc_iterative_execute)
         
                             # create current stage position
                             current_stage_data = [{'stage_x': float(actual_stage_x), 
@@ -619,80 +622,82 @@ class OPMStageScan:
                                                 'stage_z': float(actual_stage_z)}]
 
                             # create affine xform for stage position
-                            affine_matrix = unit_matrix
-                            affine_matrix[1,3] = (stage_x)/(self.camera_pixel_size_um)  # x-translation 
-                            affine_matrix[0,3] = (stage_y)/(self.camera_pixel_size_um)  # y-translation
-                            affine_matrix[2,3] = (stage_z)/(self.camera_pixel_size_um)  # z-translation
+                            # affine_matrix = unit_matrix
+                            # affine_matrix[1,3] = (stage_x)/(self.camera_pixel_size_um)  # x-translation 
+                            # affine_matrix[0,3] = (stage_y)/(self.camera_pixel_size_um)  # y-translation
+                            # affine_matrix[2,3] = (stage_z)/(self.camera_pixel_size_um)  # z-translation
 
                             # Create virtual stack within BDV H5 to place fused z planes into
-                            bdv_writer.append_view(stack=None,  
-                                                virtual_stack_dim=(self.scan_steps,self.y_pixels,self.x_pixels),
-                                                time=r_idx, 
-                                                channel=0, 
-                                                tile=bdv_tile_idx,
-                                                voxel_size_xyz=(self.camera_pixel_size_um, self.camera_pixel_size_um, self.scan_axis_step_um),
-                                                voxel_units='um',
-                                                calibration = (1,1,np.abs(self.scan_axis_step_um/self.camera_pixel_size_um)),
-                                                m_affine=affine_matrix,
-                                                name_affine = 'tile '+str(bdv_tile_idx)+' translation')
+                            # bdv_writer.append_view(stack=None,  
+                            #                     virtual_stack_dim=(self.scan_steps,self.y_pixels,self.x_pixels),
+                            #                     time=r_idx, 
+                            #                     channel=0, 
+                            #                     tile=bdv_tile_idx,
+                            #                     voxel_size_xyz=(self.camera_pixel_size_um, self.camera_pixel_size_um, self.scan_axis_step_um),
+                            #                     voxel_units='um',
+                            #                     calibration = (1,1,np.abs(self.scan_axis_step_um/self.camera_pixel_size_um)),
+                            #                     m_affine=affine_matrix,
+                            #                     name_affine = 'tile '+str(bdv_tile_idx)+' translation')
 
                             # enforce camera in external trigger mode
-                            mmc_iterative.setConfig('Camera-TriggerSource','EXTERNAL')
-                            mmc_iterative.waitForConfig('Camera-TriggerSource','EXTERNAL')
-                            trigger_value = mmc_iterative.getProperty(self.camera_name,'TRIGGER SOURCE')
+                            mmc_iterative_execute.setConfig('Camera-TriggerSource','EXTERNAL')
+                            mmc_iterative_execute.waitForConfig('Camera-TriggerSource','EXTERNAL')
+                            trigger_value = mmc_iterative_execute.getProperty(self.camera_name,'TRIGGER SOURCE')
                             while not(trigger_value == 'EXTERNAL'):
-                                mmc_iterative.setConfig('Camera-TriggerSource','EXTERNAL')
-                                mmc_iterative.waitForConfig('Camera-TriggerSource','EXTERNAL')
+                                mmc_iterative_execute.setConfig('Camera-TriggerSource','EXTERNAL')
+                                mmc_iterative_execute.waitForConfig('Camera-TriggerSource','EXTERNAL')
                                 time.sleep(1)
-                                trigger_value = mmc_iterative.getProperty(self.camera_name,'TRIGGER SOURCE')
+                                trigger_value = mmc_iterative_execute.getProperty(self.camera_name,'TRIGGER SOURCE')
 
                             # enforce camera to start mode
-                            mmc_iterative.setConfig('Camera-TriggerType','START')
-                            mmc_iterative.waitForConfig('Camera-TriggerType','START')
-                            trigger_value = mmc_iterative.getProperty(self.camera_name,'Trigger')
+                            mmc_iterative_execute.setConfig('Camera-TriggerType','START')
+                            mmc_iterative_execute.waitForConfig('Camera-TriggerType','START')
+                            trigger_value = mmc_iterative_execute.getProperty(self.camera_name,'Trigger')
                             while not(trigger_value == 'START'):
-                                mmc_iterative.setConfig('Camera-TriggerType','START')
-                                mmc_iterative.waitForConfig('Camera-TriggerType','START')
+                                mmc_iterative_execute.setConfig('Camera-TriggerType','START')
+                                mmc_iterative_execute.waitForConfig('Camera-TriggerType','START')
                                 time.sleep(1)
-                                trigger_value = mmc_iterative.getProperty(self.camera_name,'Trigger')
+                                trigger_value = mmc_iterative_execute.getProperty(self.camera_name,'Trigger')
 
                             # enforce camera looking for a positive trigger
-                            mmc_iterative.setProperty(self.camera_name,r'TriggerPolarity','POSITIVE')
-                            trigger_value = mmc_iterative.getProperty(self.camera_name,r'TriggerPolarity')
+                            mmc_iterative_execute.setProperty(self.camera_name,r'TriggerPolarity','POSITIVE')
+                            trigger_value = mmc_iterative_execute.getProperty(self.camera_name,r'TriggerPolarity')
                             while not(trigger_value == 'POSITIVE'):
-                                mmc_iterative.setProperty(self.camera_name,r'TriggerPolarity','POSITIVE')
+                                mmc_iterative_execute.setProperty(self.camera_name,r'TriggerPolarity','POSITIVE')
                                 time.sleep(1)
-                                trigger_value = mmc_iterative.getProperty(self.camera_name,r'TriggerPolarity')
+                                trigger_value = mmc_iterative_execute.getProperty(self.camera_name,r'TriggerPolarity')
 
                             # start DAQ
                             self.opmdaq.start_waveform_playback()
                             self.DAQ_running = True
 
                             # make sure stage is ready
-                            ASIstage.check_if_busy(mmc_iterative)
+                            ASIstage.check_if_busy(mmc_iterative_execute)
 
                             # run hardware triggered acquisition
                             total_steps=self.scan_steps+self.excess_stage_steps
                             total_acquistion_images = self.n_active_channels * total_steps
-                            mmc_iterative.startSequenceAcquisition(int(total_acquistion_images),0,True)                           
-                            ASIstage.start_1d_stage_scan(mmc_iterative)
+                            mmc_iterative_execute.waitForDevice(self.camera_name)
+                            mmc_iterative_execute.startSequenceAcquisition(int(total_acquistion_images),0,True)                           
+                            ASIstage.start_1d_stage_scan(mmc_iterative_execute)
                             # collect interleaved data
                             # place all data into Zarr, also place fidicual images into BDV for stitching
-                            for s_idx in trange(total_steps,desc="scan", position=3, leave=False):
+                            for s_idx in trange(total_steps,desc="scan", position=2, leave=False):
                                 for c_idx in range(self.n_active_channels):
-                                    while (mmc_iterative.getRemainingImageCount() == 0):
+                                    while (mmc_iterative_execute.getRemainingImageCount() == 0):
                                         pass
-                                    image = mmc_iterative.popNextImage()
+                                    image = mmc_iterative_execute.popNextImage()
                                     if (s_idx>=self.excess_stage_steps):
-                                        opm_round_data[xy_idx, z_idx, c_idx, s_idx-self.excess_stage_steps, :, :] =image
-                                        if (c_idx==0 and r_idx<(self.n_iterative_rounds-1)) or (c_idx==1 and r_idx==(self.n_iterative_rounds-1)):
-                                            #write the fiducial channel into bigstitcher
-                                            bdv_writer.append_plane(
-                                                plane=image, 
-                                                z=s_idx-self.excess_stage_steps, 
-                                                time=r_idx, 
-                                                channel=0)
-                            mmc_iterative.stopSequenceAcquisition()
+                                        opm_round_data[z_idx, c_idx, s_idx-self.excess_stage_steps, :, :] =image
+                                        #if (c_idx==0 and r_idx<(self.n_iterative_rounds-1)) or (c_idx==1 and r_idx==(self.n_iterative_rounds-1)):
+                                        #    #write the fiducial channel into bigstitcher
+                                        #    bdv_writer.append_plane(
+                                        #        plane=image, 
+                                        #        z=s_idx-self.excess_stage_steps, 
+                                        #        time=r_idx, 
+                                        #        channel=0)
+                            mmc_iterative_execute.stopSequenceAcquisition()
+                            mmc_iterative_execute.clearCircularBuffer()
 
                             # stop DAQ
                             self.opmdaq.stop_waveform_playback()
@@ -703,13 +708,18 @@ class OPMStageScan:
                             self._save_stage_positions(r_idx,xy_idx,z_idx,current_stage_data)
 
                             # make sure stage has moved back to beginning
-                            ASIstage.check_if_busy(mmc_iterative)
+                            ASIstage.check_if_busy(mmc_iterative_execute)
 
-                    # del reference to Zarr file
+                            # clean up memory
+                            gc.collect()
+
+                    # del reference to Zarr file and clean up memory
                     opm_round_data = None
+                    del opm_round_data
+                    gc.collect()
 
-                    # construct round metadata and save
-                    self._save_round_metadata(r_idx)
+                # construct round metadata and save
+                self._save_round_metadata(r_idx)
 
             #------------------------------------------------------------------------------------------------------------------------------------
             #--------------------------------------------------------End acquisition-------------------------------------------------------------
@@ -719,19 +729,15 @@ class OPMStageScan:
                 # clean up DAQ
                 self.opmdaq.reset_scan_mirror()
 
-                # set circular buffer to be small 
-                mmc_iterative.clearCircularBuffer()
-                circ_buffer_mb = 4000
-                mmc_iterative.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
-
+            
                 # create down-sampled views with compression
-                bdv_writer.create_pyramids(subsamp=((4, 8, 8)),
-                                blockdim=((8, 128, 128)),
-                                compression='lzf')
+                # bdv_writer.create_pyramids(subsamp=((4, 8, 8)),
+                #                 blockdim=((8, 128, 128)),
+                #                 compression='lzf')
 
                 # write and close BDV H5 xml file
-                bdv_writer.write_xml()
-                bdv_writer.close()
+                # bdv_writer.write_xml()
+                # bdv_writer.close()
 
                 # write full metadata
                 self._save_full_metadata()
@@ -740,8 +746,8 @@ class OPMStageScan:
                 self._enforce_DCAM_internal_trigger()
             else:
                 # write and close BDV H5 xml file
-                bdv_writer.write_xml()
-                bdv_writer.close()
+                # bdv_writer.write_xml()
+                # bdv_writer.close()
 
                 # enforce camera in internal trigger mode
                 self._enforce_DCAM_internal_trigger()
