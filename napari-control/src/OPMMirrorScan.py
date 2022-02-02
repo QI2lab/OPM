@@ -27,7 +27,7 @@ class OPMMirrorScan(MagicTemplate):
         self.exposure_ms = 10.0                 # unit: ms
         self.scan_axis_step_um = 0.4            # unit: um
         self.scan_axis_calibration = 0.043      # unit: V / um
-        self.galvo_neutral_volt = -.15          # unit: V
+        self.galvo_neutral_volt = -.27          # unit: V
         self.scan_mirror_footprint_um = 50.0      # unit: um
         self.camera_pixel_size_um = .115        # unit: um
         self.opm_tilt = 30                      # unit: degrees
