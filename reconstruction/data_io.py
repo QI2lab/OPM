@@ -202,7 +202,7 @@ def return_opm_psf(wavelength_um):
 
     wavelength_nm = int(np.round(wavelength_um*1000,0))
 
-    psf_path = Path('skewed_psf_'+str(wavelength_nm).zfill(0)+'_nm.tif')
+    psf_path = Path('opm_psf_'+str(wavelength_nm).zfill(0)+'_nm.tif')
     opm_psf = tifffile.imread(psf_path)
 
     return opm_psf

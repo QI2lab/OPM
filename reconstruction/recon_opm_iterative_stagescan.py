@@ -207,7 +207,7 @@ def main(argv):
 
                 # deal with last round channel idx change via brute force right now
                 # need to fix more elegantly! 
-                if r_idx == (rounds_in_data-1) and one_channel_flag:
+                if r_idx == (num_r-1) and one_channel_flag:
                     ch_idx = ch_idx + 1 
                 
                 print('round '+str(r_idx+1)+' of '+str(num_r)+'; y tile '+str(y_idx+1)+' of '+str(num_y)+'; z tile '+str(z_idx+1)+' of '+str(num_z)+'; channel '+str(ch_BDV_idx+1)+' of '+str(n_active_channels))

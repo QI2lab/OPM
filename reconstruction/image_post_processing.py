@@ -138,7 +138,7 @@ def manage_flat_field_py(stack):
     :return corrected_stack: ndarray of deskewed OPM planes on uniform grid
     """
   
-    num_images = 2000
+    num_images = 500
 
     if stack.shape[0] > num_images:
         stack_for_flat_field = stack[np.random.choice(stack.shape[0], num_images, replace=False)]
@@ -187,11 +187,12 @@ def lr_deconvolution(image,psf,iterations=50):
     """
     
     # create dask array
-    if image.shape[0]<256:
+    scan_chunk_size = 512
+    if image.shape[0]<scan_chunk_size:
         dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]))
         overlap_depth = (0,2*psf.shape[1],2*psf.shape[1])
     else:
-        dask_raw = da.from_array(image,chunks=(256,image.shape[1],image.shape[2]))
+        dask_raw = da.from_array(image,chunks=(scan_chunk_size,image.shape[1],image.shape[2]))
         overlap_depth = 2*psf.shape[0]
     del image
     gc.collect()
@@ -257,10 +258,7 @@ def mv_lr_decon(image,psf,num_iterations):
         raw image
     :param ch_idx: int
         wavelength index
-    :param dr: float
-        xy pixel size
-    :param dz: float
-        z pixel size
+    
 
     :return image: ndarray
         deconvolved image 
@@ -275,6 +273,10 @@ def mv_lr_decon(image,psf,num_iterations):
     params.psfNx = psf.shape[2]
     params.psfNy = psf.shape[1]
     params.psfNz = psf.shape[0]
+    params.dr = 115.0
+    params.dz = 400.0
+    params.psfDr = 115.0
+    params.psfDz = 400.0
     params.iterations = num_iterations
     params.background = 50
     params.regularizationType=mv.RegularizationType_TV
@@ -305,6 +307,7 @@ def mv_lr_decon(image,psf,num_iterations):
         print("Unexpected error:", err[0])
         print(err[1])
         print(err[2])
+        new_image = np.zeros(image.shape,dtype=np.uint16)
 
     return new_image.astype(np.uint16)
 
