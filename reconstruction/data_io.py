@@ -1,16 +1,26 @@
 #!/usr/bin/env python
+'''
+QI2lab OPM suite
+Reconstruction tools
+
+Read and write metadata; read raw data; read pre-generated OPM psfs
+'''
 
 import re
-from npy2bdv import BdvEditor
+from npy2bdv.npy2bdv import BdvEditor
 import pandas as pd
 import numpy as np
+from pathlib import Path
+from tifffile import tifffile
 
 def read_metadata(fname):
     """
     Read data from csv file consisting of one line giving titles, and the other giving values. Return as dictionary
 
-    :param fname:
-    :return metadata:
+    :param fname: str
+        filename
+    :return metadata: dict
+        metadata dictionary
     """
     scan_data_raw_lines = []
 
@@ -44,23 +54,36 @@ def read_metadata(fname):
 
 def write_metadata(data_dict, save_path):
     """
+    Write dictionary as CSV file
 
-    :param data_dict: dictionary of metadata entries
-    :param save_path:
-    :return:
+    :param data_dict: dict
+        metadata dictionary
+    :param save_path: Path
+        path for file
+    
+    :return: None
     """
+    
     pd.DataFrame([data_dict]).to_csv(save_path)
 
 
 def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_images, y_pixels,x_pixels):
     """
-    :param dataset: pycromanager dataset object
-    :param channel_axis: integer channel index
-    :param time_axis: integer time_axis
-    :param num_images: integer for number of images to return 
-    :param y_pixels: integer for y pixel size
-    :param x_pixels: integer for x pixel size
-    :return data_numpy: 3D numpy array of requested data
+    :param dataset: dataset
+        pycromanager dataset object
+    :param channel_axis: int
+        channel axis index
+    :param time_axis: int
+        time axis index
+    :param num_images: int
+        number of images in scan direction (TO DO: change to tuple to load range)
+    :param y_pixels: int
+        y pixels
+    :param x_pixels: int
+        x pixels
+
+    :return data_numpy: ndarray
+        3D numpy array of OPM data. First axis is scan sxis
     """
 
     data_numpy = np.empty([(num_images-excess_images),y_pixels,x_pixels]).astype(np.uint16)
@@ -83,13 +106,21 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
 
 def return_data_numpy_widefield(dataset, channel_axis, ch_BDV_idx, num_z, y_pixels,x_pixels):
     """
-    :param dataset: pycromanager dataset object
-    :param channel_axis: integer channel index
-    :param time_axis: integer time_axis
-    :param num_images: integer for number of images to return 
-    :param y_pixels: integer for y pixel size
-    :param x_pixels: integer for x pixel size
-    :return data_numpy: 3D numpy array of requested data
+    :param dataset: dataset 
+        pycromanager dataset object
+    :param channel_axis: int 
+        channel axis index
+    :param time_axis: int
+        time axis index
+    :param num_images: int 
+        number of images in z stack 
+    :param y_pixels: int
+        y pixels
+    :param x_pixels: int
+        x pixels
+
+    :return data_numpy: ndarray 
+        3D numpy array of requested data
     """
 
     data_numpy = np.empty([num_z,y_pixels,x_pixels]).astype(np.uint16)
@@ -103,23 +134,25 @@ def return_data_numpy_widefield(dataset, channel_axis, ch_BDV_idx, num_z, y_pixe
     return data_numpy
 
 def stitch_data(path_to_xml,iterative_flag):
-
     """
+    Call BigStitcher via Python to calculate rigid stitching transformations across tiles and rounds
+
     :param path_to_xml: Path
         path to BDV XML. BDV H5 must be present for loading
     :param iterative_flag: Bool
         flag if multiple rounds need to be aligned
     """
 
-
     # TO DO: 1. write either pyimagej bridge + macro OR call FIJI/BigStitcher in headless mode.
     #        2. fix flipped x-axis between Python and FIJI. Easier to flip data in Python than deal with
     #           annoying affine that flips data.
 
 
-def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
 
+def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
     """
+    Return affine transformation for a given tile from BDV XML
+
     :param path_to_xml: Path
         path to BDV XML. BDV H5 must be present for loading
     :param r_idx: integer
@@ -130,7 +163,9 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
         y tile index
     :param z_idx: integer 
         z tile index
-    :return data_numpy: NDarray
+    :param total_z_pos: integer
+        total number of z tiles in data
+    :return data_numpy: ndarray
         4D numpy array of all affine transforms
     """ 
 
@@ -151,3 +186,23 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
             read_affine_success = True
 
     return affine_xforms
+
+def return_opm_psf(wavelength_um):
+    """
+    Load pre-generated OPM psf
+
+    TO DO: write checks and generate PSF if it does not exist on disk
+
+    :param wavelength: float
+        wavelength in um
+        
+    :return psf: ndarray
+        pre-generated skewed PSF
+    """ 
+
+    wavelength_nm = int(np.round(wavelength_um*1000,0))
+
+    psf_path = Path('skewed_psf_'+str(wavelength_nm).zfill(0)+'_nm.tif')
+    opm_psf = tifffile.imread(psf_path)
+
+    return opm_psf

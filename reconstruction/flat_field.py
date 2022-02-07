@@ -1,6 +1,8 @@
 #!/usr/bin/env python
-
 '''
+QI2lab OPM suite
+Reconstruction tools
+
 Python and cupy implementation of BaSiC flat-field correction (doi: 10.1038/ncomms14836)
 Adapted from code found at: https://github.com/peng-lab/PyBasicCellprofilerPlugin
 
@@ -12,7 +14,6 @@ CellProfiler plugin framework
 Last updated: Shepherd 06/21
 '''
 
-from numba.np.ufunc import parallel
 import numpy as np
 from typing import List
 from skimage.transform import resize as skresize

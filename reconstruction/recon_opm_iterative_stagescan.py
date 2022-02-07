@@ -1,11 +1,13 @@
 #!/usr/bin/env python
-
 '''
-Stage scanning iterative labeling OPM post-processing using numpy, numba, skimage, pyimagej, and npy2bdv.
+QI2lab OPM suite
+Reconstruction tools
+
+Stage scanning iterative OPM post-processing using numpy, numba, skimage, cupy, dexp, and npy2bdv.
 Places all tiles in actual stage positions and places time points OR iterative rounds into the time axis of BDV H5 for alignment
 Orthgonal interpolation method adapted from Vincent Maioli (http://doi.org/10.25560/68022)
 
-Last updated: Shepherd 05/21 - changes for iterative labeling experiments and ongoing issues with loading Pycromanager data into Dask
+Last updated: Shepherd 01/22 - changes to include dexp deconvolution and recent other changes.
 '''
 
 # imports
@@ -16,7 +18,6 @@ import npy2bdv
 import sys
 import gc
 import argparse
-import time
 from skimage.measure import block_reduce
 from image_post_processing import deskew
 from itertools import compress, product
@@ -89,6 +90,7 @@ def main(argv):
         active_channels[ch_idx_to_use] = True
         channels_in_data = list(compress(channel_idxs, active_channels))
         n_active_channels = len(channels_in_data)
+        one_channel_flag = True
      
     # calculate pixel sizes of deskewed image in microns
     deskewed_x_pixel = pixel_size / 1000.
@@ -103,7 +105,7 @@ def main(argv):
         output_dir_path = input_dir_path / 'deskew_flatfield_output'
     elif decon_flag == 1 and flatfield_flag == 0:
         output_dir_path = input_dir_path / 'deskew_decon_output'
-    elif decon_flag == 1 and flatfield_flag > 1:
+    elif decon_flag == 1 and flatfield_flag == 1:
         output_dir_path = input_dir_path / 'deskew_flatfield_decon_output'
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -164,7 +166,7 @@ def main(argv):
     # if decon is requested, import microvolution wrapper
     # this file is private and does not follow the same license as the rest of our code.
     if decon_flag==1:
-        from image_post_processing import mv_decon
+        from image_post_processing import lr_deconvolution
 
     # initialize tile counter
     rounds_in_data = list(range(num_r))
@@ -172,20 +174,19 @@ def main(argv):
     y_tile_in_data = list(range(num_y))
     z_tile_in_data = list(range(num_z)) 
     ch_in_BDV = list(range(n_active_channels))
+    em_wavelengths=[.450,.520,.580,.670,.780]
     tile_idx=0
 
     first_flatfield = True
 
-    # loop over all directories. Each directory will be placed as a "tile" into the BigStitcher file
+    # loop over all rounds. 
     for r_idx in rounds_in_data:
         tile_idx = 0
+        # loop over all tiles. Each unique round/tile will be placed as a "tile" into the BigStitcher file 
         for (y_idx, z_idx) in product(y_tile_in_data,z_tile_in_data):
             # open stage positions file
             stage_position_filename = Path(root_name+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
             stage_position_path = input_dir_path / stage_position_filename
-            # check to see if stage poisition file exists yet
-            while(not(stage_position_path.exists())):
-                time.sleep(60)
 
             df_stage_positions = data_io.read_metadata(stage_position_path)
 
@@ -204,6 +205,11 @@ def main(argv):
 
                 ch_idx = channels_in_data[ch_BDV_idx]
 
+                # deal with last round channel idx change via brute force right now
+                # need to fix more elegantly! 
+                if r_idx == (rounds_in_data-1) and one_channel_flag:
+                    ch_idx = ch_idx + 1 
+                
                 print('round '+str(r_idx+1)+' of '+str(num_r)+'; y tile '+str(y_idx+1)+' of '+str(num_y)+'; z tile '+str(z_idx+1)+' of '+str(num_z)+'; channel '+str(ch_BDV_idx+1)+' of '+str(n_active_channels))
                 print('Stage location (um): x='+str(stage_x)+', y='+str(stage_y)+', z='+str(stage_z)+'.')
 
@@ -216,6 +222,17 @@ def main(argv):
                 elif not(t_idx == 0) and (interleaved):
                     raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=t_idx, channel_axis=ch_idx, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
         
+                # run deconvolution on skewed image
+                if decon_flag == 1:
+                    print('Deconvolve.')
+                    em_wvl = em_wavelengths[ch_idx]
+                    channel_opm_psf = data_io.return_opm_psf(em_wvl)
+                    decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
+                else:
+                    decon = raw_data
+                del raw_data
+                gc.collect()
+
                 # perform flat-fielding
                 if flatfield_flag == 1:
                     print('Flatfield.')
@@ -225,11 +242,11 @@ def main(argv):
                         dark_field = np.zeros([num_y,num_z,n_active_channels,y_pixels,x_pixels])
                         first_flatfield = False
                     
-                    corrected_stack, flat_field[y_idx,z_idx,ch_BDV_idx,:], dark_field[y_idx,z_idx,ch_BDV_idx,:] = manage_flat_field_py(raw_data)
+                    corrected_stack, flat_field[y_idx,z_idx,ch_BDV_idx,:], dark_field[y_idx,z_idx,ch_BDV_idx,:] = manage_flat_field_py(decon)
 
                 else:
-                    corrected_stack = raw_data
-                del raw_data
+                    corrected_stack = decon
+                del decon
                 gc.collect()
 
                 # deskew
@@ -247,21 +264,12 @@ def main(argv):
                 del deskewed
                 gc.collect()
 
-                # run deconvolution on deskewed image
-                if decon_flag == 1:
-                    print('Deconvolve.')
-                    deskewed_downsample_decon = mv_decon(deskewed_downsample,ch_idx,deskewed_y_pixel,z_down_sample*deskewed_z_pixel)
-                else:
-                    deskewed_downsample_decon = deskewed_downsample
-                del deskewed_downsample
-                gc.collect()
-
                 # save deskewed image into TIFF stack
                 if (save_type==0):
                     print('Write TIFF stack')
                     tiff_filename= root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.tiff'
                     tiff_output_path = tiff_output_dir_path / Path(tiff_filename)
-                    tifffile.imwrite(str(tiff_output_path), deskewed_downsample_decon, imagej=True, resolution=(1/deskewed_x_pixel, 1/deskewed_y_pixel),
+                    tifffile.imwrite(str(tiff_output_path), deskewed_downsample, imagej=True, resolution=(1/deskewed_x_pixel, 1/deskewed_y_pixel),
                                     metadata={'spacing': (z_down_sample*deskewed_z_pixel), 'unit': 'um', 'axes': 'ZYX'})
                     
                     metadata_filename = root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.csv'
@@ -284,7 +292,7 @@ def main(argv):
 
                     # save tile in BDV H5 with actual stage positions
                     print('Write into BDV H5.')
-                    bdv_writer.append_view(deskewed_downsample_decon, time=r_idx, channel=ch_BDV_idx, 
+                    bdv_writer.append_view(deskewed_downsample, time=r_idx, channel=ch_BDV_idx, 
                                             tile=tile_idx,
                                             voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel), 
                                             voxel_units='um',
@@ -294,7 +302,7 @@ def main(argv):
 
                 elif (save_type==2):
                     print('Write data into Zarr container')
-                    opm_data[t_idx, tile_idx, ch_BDV_idx, :, :, :] = deskewed_downsample_decon
+                    opm_data[t_idx, tile_idx, ch_BDV_idx, :, :, :] = deskewed_downsample
                     metadata_filename = root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.csv'
                     metadata_output_path = zarr_output_dir_path / Path(metadata_filename)
                     zarr_stage_metadata = [{'stage_x': float(stage_x),
@@ -303,7 +311,7 @@ def main(argv):
                     data_io.write_metadata(zarr_stage_metadata[0], metadata_output_path)
 
                 # free up memory
-                del deskewed_downsample_decon
+                del deskewed_downsample
                 gc.collect()
 
             tile_idx=tile_idx+1
