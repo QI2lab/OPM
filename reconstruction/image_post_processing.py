@@ -205,7 +205,7 @@ def lr_deconvolution(image,psf,iterations=50):
 
 
     # create dask plan for overlapped blocks
-    dask_decon = da.map_overlap(lr_dask,dask_raw,depth=overlap_depth,boundary=None,trim=True)
+    dask_decon = da.map_overlap(lr_dask,dask_raw,depth=overlap_depth,boundary=None,trim=True,meta=np.array((), dtype=np.uint16))
 
     # perform LR deconvolution in blocks
     if DECON_LIBRARY=='dexp':
@@ -248,7 +248,7 @@ def dexp_lr_decon(image,psf,num_iterations,padding,internal_dtype):
     cp.clear_memo()
     gc.collect()
     
-    return deconvolved
+    return deconvolved.astype(np.uint16)
 
 def mv_lr_decon(image,psf,num_iterations):
     '''
