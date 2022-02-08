@@ -14,7 +14,7 @@
 # ----------------------------------------------------------------------------------------
 import time
 
-from hardware.AbstractValve import AbstractValve
+from src.hardware.AbstractValve import AbstractValve
 
 # ----------------------------------------------------------------------------------------
 # HamiltonMVP Class Definition

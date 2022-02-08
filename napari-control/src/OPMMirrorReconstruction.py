@@ -4,26 +4,24 @@ Initial work on napari interface to reconstruct OPM timelapse data
 D. Shepherd - 12/2021
 '''
 
-from magicclass import magicclass, set_design
+from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
 from magicgui.tqdm import trange
 import napari
 from pathlib import Path
 import numpy as np
-from image_post_processing import deskew
+from src.utils.image_post_processing import deskew
 from napari.qt.threading import thread_worker
 import zarr
 import dask.array as da
-from data_io import read_metadata, return_data_from_zarr_to_numpy
+from src.utils.data_io import read_metadata, return_data_from_zarr_to_numpy
 from skimage.measure import block_reduce
-from image_post_processing import deskew
 from itertools import compress
 import gc
 
 # OPM control UI element            
 @magicclass(labels=False)
-@set_design(text="ASU Snouty-OPM timelapse reconstruction")
-class OpmReconstruction:
+class OPMMirrorReconstruction(MagicTemplate):
 
     def __init__(self):
         self.decon = False
@@ -120,8 +118,8 @@ class OpmReconstruction:
 
         # if decon is requested, try to import microvolution wrapper or dexp library
         if self.decon:
-            from opm_psf import generate_skewed_psf
-            from decon_dexp import lr_deconvolution_cupy
+            from src.utils.opm_psf import generate_skewed_psf
+            from src.utils.image_post_processing import lr_deconvolution_cupy
 
             ex_wavelengths = [.405,.488,.561,.635,.730]
             em_wavelengths = [.420,.520,.605,.680,.760]
@@ -146,7 +144,6 @@ class OpmReconstruction:
                         print('Deconvolve.')
                     decon = lr_deconvolution_cupy(raw_data,skewed_psf[ch_idx])
                 else:
-
                     decon = raw_data
                     pass
                 del raw_data
@@ -265,6 +262,7 @@ class OpmReconstruction:
             self.worker_processing.returned.connect(self._create_processing_worker)
             self.worker_processing.returned.connect(self._update_viewer)
 
+    '''
     # load already processed dataset
     @magicgui(
         auto_call=False,
@@ -275,23 +273,4 @@ class OpmReconstruction:
     def load_processed_data(self, zarr_path='d:/'):
         self.zarr_path = zarr_path
         #self._load_existing_zarr()
-
-def main():
-
-    # setup OPM GUI and Napari viewer
-    reconstruction_widget = OpmReconstruction()
-    viewer = napari.Viewer()
-
-    # these methods have to be private to not show using magic-class. Maybe a better solution is available?
-    reconstruction_widget._set_viewer(viewer)
-
-    # create processing worker
-    reconstruction_widget._create_processing_worker()
-
-    viewer.window.add_dock_widget(reconstruction_widget,name='ASU Snouty-OPM reconstruction')
-
-    # start Napari
-    napari.run()
-
-if __name__ == "__main__":
-    main()
+    '''
