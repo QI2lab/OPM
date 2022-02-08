@@ -11,4 +11,4 @@
 # misc
 __pycache__
 *.json
-
+*.lic
