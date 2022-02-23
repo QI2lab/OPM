@@ -29,17 +29,25 @@ def main(argv):
     # parse command line arguments
     parser = argparse.ArgumentParser(description="Process raw OPM data.")
     parser.add_argument("-i", "--ipath", type=str, nargs="+", help="supply the directories to be processed")
-    parser.add_argument("-d", "--decon", type=int, default=0,
-                        help="0: no deconvolution (DEFAULT), 1: deconvolution")
+    parser.add_argument("-d", "--decon", type=int, default=0, help="0: no deconvolution (DEFAULT), 1: deconvolution")
     parser.add_argument("-f", "--flatfield", type=int, default=0, help="0: No flat field (DEFAULT), 1: flat field")
+    parser.add_argument("-k", "--deskew", type=int, default=1, help="0: no deskewing, 1: deskewing (DEFAULT)")
     parser.add_argument("-s", "--save_type", type=int, default=0, help="0: TIFF stack output (DEFAULT), 1: BDV output, 2: Zarr output")
+    parser.add_argument("-t", "--tilt_orientation",type=str, default='new', help="new: new orientation (DEFAULT), prev: previous orientation")
+    parser.add_argument("--time_steps", nargs='+', type=int, default=-1, help="-1: all time steps (DEFAULT), else list of time steps")
+    parser.add_argument("--channels", nargs='+', type=int, default=-1, help="-1: all channels (DEFAULT), else list of all channels")
+    parser.add_argument("--overwrite", type=int, default=0, help="0: do not overwrite existing folder (DEFAULT), 1: overwrite")
     args = parser.parse_args()
 
     input_dir_strings = args.ipath
     decon_flag = args.decon
     flatfield_flag = args.flatfield
+    deskew_flag = args.deskew
     save_type= args.save_type
-    
+    tilt_orientation = args.tilt_orientation
+    overwrite_flag = args.overwrite == 1
+
+
     # Loop over all user supplied directories for batch reconstruction
     for ii, input_dir_string in enumerate(input_dir_strings):
         print("Processing directory %d/%d" % (ii + 1, len(input_dir_strings)))
@@ -85,29 +93,53 @@ def main(argv):
         z_down_sample = 1
 
         # load dataset
-        dataset = Dataset(str(input_dir_path))
+        if str(input_dir_path).endswith('zarr'):
+            dataset = zarr.open(input_dir_path, mode='r')
+            im_type = 'zarr'
+        else:
+            dataset = Dataset(str(input_dir_path))
+            im_type = 'pycro'
 
         # create output directory
-        if decon_flag == 0 and flatfield_flag == 0:
-            output_dir_path = input_dir_path.resolve().parents[0] / 'deskew_output'
-        elif decon_flag == 0 and flatfield_flag == 1:
-            output_dir_path = input_dir_path.resolve().parents[0] / 'deskew_flatfield_output'
-        elif decon_flag == 1 and flatfield_flag == 0:
-            output_dir_path = input_dir_path.resolve().parents[0] / 'deskew_decon_output'
-        elif decon_flag == 1 and flatfield_flag == 1:
-            output_dir_path = input_dir_path.resolve().parents[0] / 'deskew_flatfield_decon_output'
+        im_processes = []
+        if decon_flag == 1:
+            im_processes.append('decon')
+        if flatfield_flag == 1:
+            im_processes.append('flatfield')
+        if deskew_flag == 1:
+            im_processes.append('deskew')
+        if len(im_processes) == 0:
+            str_processes = 'original_output'
+        else:
+            str_processes = '_'.join(im_processes) + '_output'
+        input_dir_path=Path(input_dir_string)
+        output_dir_path = input_dir_path.resolve().parents[0] / str_processes
         output_dir_path.mkdir(parents=True, exist_ok=True)
+
+        # initialize counters
+        timepoints_in_data = list(range(num_t))
+        ch_in_BDV = list(range(n_active_channels))
+        em_wavelengths=[.450,.520,.580,.670,.780]
+
+        # if specific time steps or channels are provided, we use them only
+        # by default -1, list of int if provided by user
+        if not isinstance(args.time_steps, int):
+            timepoints_in_data = args.time_steps
+            num_t = len(timepoints_in_data)
+        if not isinstance(args.channels, int):
+            ch_in_BDV = args.channels
+            num_ch = len(ch_in_BDV)
 
         # Create TIFF if requested
         if (save_type==0):
             # create directory for data type
             tiff_output_dir_path = output_dir_path / Path('tiff')
-            tiff_output_dir_path.mkdir(parents=True, exist_ok=False)
+            tiff_output_dir_path.mkdir(parents=True, exist_ok=overwrite_flag)
         # Create BDV if requested
         elif (save_type == 1):
             # create directory for data type
             bdv_output_dir_path = output_dir_path / Path('bdv')
-            bdv_output_dir_path.mkdir(parents=True, exist_ok=False)
+            bdv_output_dir_path.mkdir(parents=True, exist_ok=overwrite_flag)
 
             # https://github.com/nvladimus/npy2bdv
             # create BDV H5 file with sub-sampling for BigStitcher
@@ -117,12 +149,12 @@ def main(argv):
             # create blank affine transformation to use for stage translation
             unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
                                     (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
-                                (   0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
+                                    (0.0, 0.0, 1.0, 0.0)))# change the 4. value for z_translation (px)
         # Create Zarr if requested
         elif (save_type == 2):
             # create directory for data type
             zarr_output_dir_path = output_dir_path / Path('zarr')
-            zarr_output_dir_path.mkdir(parents=True, exist_ok=False)
+            zarr_output_dir_path.mkdir(parents=True, exist_ok=overwrite_flag)
 
             # create name for zarr directory
             zarr_output_path = zarr_output_dir_path / Path(root_name + '_zarr.zarr')
@@ -162,11 +194,7 @@ def main(argv):
 
         # if decon is requested, import microvolution wrapper
         if decon_flag == 1:
-            from image_post_processing import mv_decon
-
-        # initialize counters
-        timepoints_in_data = list(range(num_t))
-        ch_in_BDV = list(range(n_active_channels))
+            from image_post_processing import lr_deconvolution
 
         # loop over all timepoints and channels
         for (t_idx, ch_BDV_idx) in product(timepoints_in_data,ch_in_BDV):
@@ -175,48 +203,69 @@ def main(argv):
 
             # pull data stack into memory
             print('Process timepoint '+str(t_idx)+'; channel '+str(ch_BDV_idx) +'.')
-            sub_stack = data_io.return_data_numpy(dataset, t_idx, ch_BDV_idx, num_images, y_pixels,x_pixels)
+            if im_type == 'pycro':
+                # there is a discrepency between function call and signature
+                raw_data = data_io.return_data_numpy(dataset, t_idx, ch_BDV_idx, num_images, y_pixels,x_pixels)
+            elif im_type == 'zarr':
+                raw_data = dataset[t_idx, ch_BDV_idx, :, :, :]
+            
+            # run deconvolution on skewed image
+            if decon_flag == 1:
+                print('Deconvolve.')
+                em_wvl = em_wavelengths[ch_idx]
+                channel_opm_psf = data_io.return_opm_psf(em_wvl)
+                if tilt_orientation == 'new':
+                    channel_opm_psf = np.flip(channel_opm_psf, axis=1)
+                decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
+            else:
+                decon = raw_data
+            del raw_data
+            gc.collect()
 
             # perform flat-fielding
             if flatfield_flag == 0:
-                corrected_stack=sub_stack
+                corrected_stack = decon
             else:
                 print('Flatfield.')
-                corrected_stack = manage_flat_field(sub_stack,ij)
-            del sub_stack
+                corrected_stack, flat_field, dark_field = manage_flat_field(decon, ij)
+            del decon
+            gc.collect()
 
-            # deskew
-            print('Deskew.')
-            deskewed = deskew(np.flipud(corrected_stack),theta,scan_step,pixel_size)
-            del corrected_stack
-
-            # run deconvolution on deskewed image
-            if decon_flag == 0:
-                deskewed_decon = deskewed
+            # deskew raw_data
+            if deskew_flag == 1:
+                print('Deskew.')
+                if tilt_orientation == 'new':
+                    deskewed = deskew(data=np.flip(corrected_stack, axis=1),theta=theta,distance=scan_step,pixel_size=pixel_size)
+                else:
+                    deskewed = deskew(data=np.flip(corrected_stack, axis=0),theta=theta,distance=scan_step,pixel_size=pixel_size)
             else:
-                print('Deconvolve.')
-                deskewed_decon = mv_decon(deskewed,ch_idx,deskewed_y_pixel,deskewed_z_pixel)
-            del deskewed
+                if tilt_orientation == 'new':
+                    deskewed = np.flip(corrected_stack, axis=1)
+                else:
+                    deskewed = np.flip(corrected_stack, axis=0)
+            del corrected_stack
+            gc.collect()
 
             # downsample in z due to oversampling when going from OPM to coverslip geometry
             if z_down_sample==1:
-                deskewed_downsample = deskewed_decon
+                downsampled = deskewed
             else:
                 print('Downsample.')
-                deskewed_downsample = block_reduce(deskewed_decon, block_size=(z_down_sample,1,1), func=np.mean)
-            del deskewed_decon
+                downsampled = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
+            del deskewed
+            gc.collect()
 
             # save deskewed image into TIFF stack
             if (save_type==0):
                 print('Write TIFF stack')
                 tiff_filename= 'f_'+root_name+'_c'+str(ch_idx).zfill(3)+'_t'+str(t_idx).zfill(5)+'.tiff'
                 tiff_output_path = tiff_output_dir_path / Path(tiff_filename)
-                tifffile.imwrite(str(tiff_output_path), deskewed_downsample, imagej=True, resolution=(1/deskewed_x_pixel, 1/deskewed_y_pixel),
+                tifffile.imwrite(str(tiff_output_path), downsampled.astype(np.int16), imagej=True, resolution=(1/deskewed_x_pixel, 1/deskewed_y_pixel),
                                 metadata={'unit': 'um', 'axes': 'ZYX'})
             # save tile in BDV H5 with actual stage positions
             elif (save_type==1):
                 print('Write data into BDV H5.')
-                bdv_writer.append_view(deskewed_downsample, time=t_idx, channel=ch_BDV_idx,
+                bdv_writer.append_view(downsampled, time=t_idx, channel=ch_BDV_idx,
                                         tile=0,
                                         voxel_size_xyz=(deskewed_y_pixel, deskewed_y_pixel, z_down_sample*deskewed_z_pixel),
                                         voxel_units='um')
@@ -224,10 +273,10 @@ def main(argv):
                 # save deskewed image into Zarr container
             elif (save_type==2):
                 print('Write data into Zarr container')
-                opm_data[t_idx, ch_BDV_idx, :, :, :] = deskewed_downsample
+                opm_data[t_idx, ch_BDV_idx, :, :, :] = downsampled
 
             # free up memory
-            del deskewed_downsample
+            del downsampled
             gc.collect()
 
         if (save_type==1):
