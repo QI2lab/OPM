@@ -13,21 +13,21 @@ import numpy as np
 from pathlib import Path
 from tifffile import tifffile
 from numba import njit, prange
-from flat_field import calc_flatfield
+#from flat_field import calc_flatfield
 from functools import partial
 import dask.array as da
 from dask.diagnostics import ProgressBar
 import gc
 import cupy as cp
 
-try:
-    import microvolution_py as mv
-    DECON_LIBRARY = 'mv'
-except:
-    from dexp.utils.backends import Backend, CupyBackend, NumpyBackend
-    from dexp.processing.deconvolution.lr_deconvolution import lucy_richardson_deconvolution
-    from dexp.processing.restoration.dehazing import dehaze
-    DECON_LIBRARY = 'dexp'
+#try:
+#    import microvolution_py as mv
+#    DECON_LIBRARY = 'mv'
+#except:
+#    from dexp.utils.backends import Backend, CupyBackend, NumpyBackend
+#    from dexp.processing.deconvolution.lr_deconvolution import lucy_richardson_deconvolution
+#    from dexp.processing.restoration.dehazing import dehaze
+#    DECON_LIBRARY = 'dexp'
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
