@@ -25,6 +25,14 @@ from pycromanager import Bridge, Acquisition
 import PyDAQmx as daq
 import ctypes as ct
 
+<<<<<<< Updated upstream
+=======
+# Need to build from source: https://github.com/Galvant/InstrumentKit
+# used for serial control of Thorlabs APT devices
+#import instruments as ik
+#import instruments.units as u
+
+>>>>>>> Stashed changes
 # python system imports
 import shutil
 import subprocess
@@ -574,7 +582,7 @@ def main():
                     print('R: '+str(r_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx))
                     # run acquisition for this ryz combination
                     with Acquisition(directory=str(df_MM_setup['save_directory']), name=str(save_name_ryz),
-                                    post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                                    post_camera_hook_fn=camera_hook_fn, show_display=False) as acq:
                         acq.acquire(events)
                     
                     # stop DAQ and make sure it is at zero
