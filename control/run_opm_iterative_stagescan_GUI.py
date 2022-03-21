@@ -238,7 +238,7 @@ def main():
         time.sleep(1)
 
         # galvo voltage at neutral
-        galvo_neutral_volt = -0.10 # unit: volts
+        galvo_neutral_volt = -0.27 # unit: volts
 
         # pull galvo line from config file
         galvo_ao_line = str(df_config['galvo_ao_pin'])
@@ -579,7 +579,7 @@ def main():
                     print('R: '+str(r_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx))
                     # run acquisition for this ryz combination
                     with Acquisition(directory=str(df_MM_setup['save_directory']), name=str(save_name_ryz),
-                                    post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                                    post_camera_hook_fn=camera_hook_fn, show_display=False) as acq:
                         acq.acquire(events)
                     
                     # stop DAQ and make sure it is at zero
