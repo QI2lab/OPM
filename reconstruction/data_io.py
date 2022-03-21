@@ -77,6 +77,8 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
         time axis index
     :param num_images: int
         number of images in scan direction (TO DO: change to tuple to load range)
+    :param excess_images: int
+        number of excess images acquired during stage warmup
     :param y_pixels: int
         y pixels
     :param x_pixels: int

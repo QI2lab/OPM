@@ -68,6 +68,7 @@ def main(argv):
         num_z  = df_metadata['num_z']
         num_ch = df_metadata['num_ch']
         num_images = df_metadata['scan_axis_positions']
+        excess_images = 0
         y_pixels = df_metadata['y_pixels']
         x_pixels = df_metadata['x_pixels']
         chan_405_active = df_metadata['405_active']
@@ -178,23 +179,13 @@ def main(argv):
             opm_data = root["opm_data"]
         
         # if retrospective flatfield is requested, import and open pyimagej in interactive mode
-        # because BaSiC flat-fielding plugin cannot run in headless mode
+        # TO DO: need to fix for new call
         if flatfield_flag == 1:
             from image_post_processing import manage_flat_field
-            import imagej
-            import scyjava
-            from scyjava import jimport
-
-            scyjava.config.add_option('-Xmx12g')
-            plugins_dir = Path('/home/dps/Fiji.app/plugins')
-            scyjava.config.add_option(f'-Dplugins.dir={str(plugins_dir)}')
-            ij_path = Path('/home/dps/Fiji.app')
-            ij = imagej.init(str(ij_path), headless=False)
-            ij.ui().showUI()
 
         # if decon is requested, import microvolution wrapper
         if decon_flag == 1:
-            from image_post_processing import lr_deconvolution
+            from image_post_processing import lr_deconvolution, mv_lr_decon
 
         # loop over all timepoints and channels
         for (t_idx, ch_BDV_idx) in product(timepoints_in_data,ch_in_BDV):
@@ -204,8 +195,7 @@ def main(argv):
             # pull data stack into memory
             print('Process timepoint '+str(t_idx)+'; channel '+str(ch_BDV_idx) +'.')
             if im_type == 'pycro':
-                # there is a discrepency between function call and signature
-                raw_data = data_io.return_data_numpy(dataset, t_idx, ch_BDV_idx, num_images, y_pixels,x_pixels)
+                raw_data = data_io.return_data_numpy(dataset, t_idx, ch_BDV_idx, num_images, excess_images, y_pixels, x_pixels)
             elif im_type == 'zarr':
                 raw_data = dataset[t_idx, ch_BDV_idx, :, :, :]
             
@@ -216,7 +206,8 @@ def main(argv):
                 channel_opm_psf = data_io.return_opm_psf(em_wvl)
                 if tilt_orientation == 'new':
                     channel_opm_psf = np.flip(channel_opm_psf, axis=1)
-                decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
+                decon = mv_lr_decon(image=raw_data,psf=channel_opm_psf,iterations=50)
+                #decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
             else:
                 decon = raw_data
             del raw_data
