@@ -281,28 +281,23 @@ def main(argv):
             stage_position_path = input_dir_path / stage_position_filename
             try:
                 df_stage_positions = data_io.read_metadata(stage_position_path)
+                infix = ''
             except FileNotFoundError:
                 stage_position_filename = Path(root_name+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a_stage_positions.csv')
                 stage_position_path = input_dir_path / stage_position_filename
                 df_stage_positions = data_io.read_metadata(stage_position_path)
+                infix = '_a'
 
             stage_x = np.round(float(df_stage_positions['stage_x']),2)
             stage_y = np.round(float(df_stage_positions['stage_y']),2)
             stage_z = np.round(float(df_stage_positions['stage_z']),2)
 
             # construct directory name
-            try:
-                current_tile_dir_path = Path(root_name+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
-                tile_dir_path_to_load = input_dir_path / current_tile_dir_path
+            current_tile_dir_path = Path(root_name+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+infix+'_1')
+            tile_dir_path_to_load = input_dir_path / current_tile_dir_path
 
-                # https://pycro-manager.readthedocs.io/en/latest/read_data.html
-                dataset = Dataset(str(tile_dir_path_to_load))
-            except FileNotFoundError:
-                current_tile_dir_path = Path(root_name+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a_1')
-                tile_dir_path_to_load = input_dir_path / current_tile_dir_path
-
-                # https://pycro-manager.readthedocs.io/en/latest/read_data.html
-                dataset = Dataset(str(tile_dir_path_to_load))
+            # https://pycro-manager.readthedocs.io/en/latest/read_data.html
+            dataset = Dataset(str(tile_dir_path_to_load))
 
 
             for (t_BDV_idx, ch_BDV_idx) in product(t_in_BDV, ch_in_BDV):
