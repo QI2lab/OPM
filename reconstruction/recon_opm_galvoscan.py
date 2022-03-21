@@ -185,7 +185,7 @@ def main(argv):
 
         # if decon is requested, import microvolution wrapper
         if decon_flag == 1:
-            from image_post_processing import lr_deconvolution, mv_lr_decon
+            from image_post_processing import lr_deconvolution
 
         # loop over all timepoints and channels
         for (t_idx, ch_BDV_idx) in product(timepoints_in_data,ch_in_BDV):
@@ -206,8 +206,8 @@ def main(argv):
                 channel_opm_psf = data_io.return_opm_psf(em_wvl)
                 if tilt_orientation == 'new':
                     channel_opm_psf = np.flip(channel_opm_psf, axis=1)
-                decon = mv_lr_decon(image=raw_data,psf=channel_opm_psf,iterations=50)
-                #decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
+                #decon = mv_lr_decon(image=raw_data,psf=channel_opm_psf,iterations=50)
+                decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=50)
             else:
                 decon = raw_data
             del raw_data
