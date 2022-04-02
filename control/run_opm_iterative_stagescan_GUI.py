@@ -63,7 +63,7 @@ def main():
     #maintain_03_focus = False
     correct_stage_drift = False
 
-    resume_r_idx = 0
+    resume_r_idx = 2
     resume_y_tile_idx = 0
     resume_z_tile_idx = 0
 

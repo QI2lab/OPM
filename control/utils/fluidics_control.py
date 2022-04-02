@@ -3,13 +3,14 @@
 '''
 Functions to execute fluidics programs
 
+Shepherd 03/22 - change to include pump rate in fluidics file instead of calculating in code
 Shepherd 05/21 - initial commit
 '''
 
-from os.path import supports_unicode_filenames
 import numpy as np
 import pandas as pd
 import time
+import sys
 
 def lookup_valve(source_name):
     """
@@ -48,7 +49,6 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
     # select current round
     df_current_program = df_program[(df_program['round']==r_idx+1)]
 
-
     print ('Executing iterative round '+str(r_idx+1)+'.')
     for index, row in df_current_program.iterrows():
         # extract source name
@@ -57,6 +57,10 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
         # extract pump rate
         pump_amount_ml = float(row['volume'])
         pump_time_min  = float(row['time'])
+        try:
+            pump_rate = float(row['pump'])
+        except:
+            pump_rate = -1.0
 
         if source_name == 'RUN':
             pump_controller.stopFlow()
@@ -94,25 +98,22 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
 
             print('MVP unit: '+str(mvp_unit)+'; Valve #: '+str(valve_number))
 
-            # convert ml/min rate to pump rate
-            # this is hardcoded to the ASU fluidic setup
-            # please check for your own setup
-            pump_rate = -1.0
-
-            if np.round((pump_amount_ml/pump_time_min),2) == 1:
-                pump_rate = 48.0
-            elif np.round((pump_amount_ml/pump_time_min),2) == 0.50:
-                pump_rate = 11.0
-            elif np.round((pump_amount_ml/pump_time_min),2) == 0.40:
-                pump_rate = 10.0
-            elif np.round((pump_amount_ml/pump_time_min),2) == 0.36:
-                pump_rate = 9.5
-            elif np.round((pump_amount_ml/pump_time_min),2) == 0.33:
-                pump_rate = 9.0
-            elif np.round((pump_amount_ml/pump_time_min),2) == 0.22:
-                pump_rate = 5.0
-            elif np.round((pump_amount_ml/pump_time_min),2) == 0.2:
-                pump_rate = 4.0
+            # if np.round((pump_amount_ml/pump_time_min),2) == 1:
+            #     pump_rate = 48.0
+            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.66:
+            #     pump_rate = 18.0
+            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.50:
+            #     pump_rate = 11.0
+            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.40:
+            #     pump_rate = 10.0
+            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.36:
+            #     pump_rate = 9.5
+            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.33:
+            #     pump_rate = 9.0
+            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.22:
+            #     pump_rate = 5.0
+            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.2:
+            #     pump_rate = 4.0
 
             print('Pump setting: '+str(pump_rate))
 
