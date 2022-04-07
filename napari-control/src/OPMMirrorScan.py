@@ -551,7 +551,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal',
         call_button='Update exposure'
     )
-    def set_exposure(self, exposure_ms=2.0):
+    def set_exposure(self, exposure_ms=10.0):
         """
         Magicgui element to get camera exposure time
 
@@ -575,7 +575,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='vertical', 
         call_button="Update crop"
     )
-    def set_ROI(self, uleft_corner_x=200,uleft_corner_y=1300,width_x=1800,width_y=256):
+    def set_ROI(self, uleft_corner_x=200,uleft_corner_y=896,width_x=1800,width_y=512):
         """
         Magicgui element to get camera ROI
 
@@ -609,7 +609,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='vertical',
         call_button='Update powers'
     )
-    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=100.0, power_730=0.0):
+    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=0.0, power_730=0.0):
         """
         Magicgui element to get laser powers (0-100%)
 
@@ -675,7 +675,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal',
         call_button='Update scan range'
     )
-    def set_galvo_sweep(self, scan_mirror_footprint_um=25.0):
+    def set_galvo_sweep(self, scan_mirror_footprint_um=50.0):
         """
         Magicgui element to set scan footprint
 
@@ -768,7 +768,7 @@ class OPMMirrorScan(MagicTemplate):
         wait_time={"widget_type": "FloatSpinBox", "min": 0, "max": 240, "label": 'Delay between timepoints (s)'},
         layout='horizontal'
     )
-    def set_timepoints(self, n_timepoints=400,wait_time=0):
+    def set_timepoints(self, n_timepoints=1,wait_time=0):
         self.n_timepoints = n_timepoints
         self.wait_time = wait_time
         self.timelapse_setup = True
@@ -780,7 +780,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal', 
         call_button="Set"
     )
-    def set_save_path(self, save_path='d:/20220305_franky_MT_20nM_suc90_25um_2ms'):
+    def set_save_path(self, save_path='d:/'):
         self.save_path = Path(save_path)
         self.save_path_setup = True
 
