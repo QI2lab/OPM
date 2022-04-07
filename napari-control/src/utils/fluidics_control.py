@@ -10,9 +10,7 @@ douglas.shepherd@asu.edu
 ----------------------------------------------------------------------------------------
 '''
 
-from os.path import supports_unicode_filenames
 import numpy as np
-import pandas as pd
 import time
 import sys
 

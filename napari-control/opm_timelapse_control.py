@@ -38,7 +38,7 @@ def main(path_to_mm_config=Path('C:/Program Files/Micro-Manager-2.0gamma/temp_Ha
 
         # these methods have to be private to not show using magic-class. Maybe a better solution is available?
         instrument_control_widget._set_viewer(viewer)
-
+        
         # setup 2D imaging thread worker
         # these methods have to be private to not show using magic-class. Maybe a better solution is available?
         worker_2d = instrument_control_widget._acquire_2d_data()
