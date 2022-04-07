@@ -187,6 +187,7 @@ class OPMNIDAQ:
             self.taskDO.ClearTask()
             if self.scan_type == 'mirror':
                 self.taskAO.ClearTask()
+            # TODO: send 0 power comand to lasers as one laser can be locked on otherwise
 
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)

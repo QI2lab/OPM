@@ -525,7 +525,7 @@ class OPMMirrorScan(MagicTemplate):
         self._enforce_DCAM_internal_trigger()
 
         # connect to DAQ
-        self.opmdaq = OPMNIDAQ()
+        self.opmdaq = OPMNIDAQ(scan_mirror_neutral=self.galvo_neutral_volt)
         # reset scan mirror position to neutral
         self.opmdaq.reset_scan_mirror()
 
