@@ -185,7 +185,7 @@ def lr_deconvolution(image,psf,iterations=50):
     :return deconvolved: ndarray
         deconvolved image
     """
-    
+
     # create dask array
     scan_chunk_size = 512
     if image.shape[0]<scan_chunk_size:
@@ -220,7 +220,7 @@ def lr_deconvolution(image,psf,iterations=50):
     cp.clear_memo()
     del dask_decon
     gc.collect()
-    
+
     return decon_data.astype(np.uint16)
 
 def dexp_lr_decon(image,psf,num_iterations,padding,internal_dtype):
@@ -247,10 +247,10 @@ def dexp_lr_decon(image,psf,num_iterations,padding,internal_dtype):
     del image, psf
     cp.clear_memo()
     gc.collect()
-    
+
     return deconvolved.astype(np.uint16)
 
-def mv_lr_decon(image,psf,num_iterations):
+def mv_lr_decon(image,psf,iterations):
     '''
     Lucy-Richardson deconvolution using commerical Microvolution library. 
 
@@ -258,10 +258,11 @@ def mv_lr_decon(image,psf,num_iterations):
         raw image
     :param ch_idx: int
         wavelength index
-    
+    :param iterations: int
+        number of iterations
 
     :return image: ndarray
-        deconvolved image 
+        deconvolved image
     '''
 
     params = mv.DeconParameters()
@@ -277,7 +278,7 @@ def mv_lr_decon(image,psf,num_iterations):
     params.dz = 400.0
     params.psfDr = 115.0
     params.psfDz = 400.0
-    params.iterations = num_iterations
+    params.iterations = iterations
     params.background = 50
     params.regularizationType=mv.RegularizationType_TV
     params.scaling = mv.Scaling_U16
