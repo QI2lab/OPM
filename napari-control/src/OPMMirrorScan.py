@@ -19,7 +19,9 @@ from datetime import datetime
 class OPMMirrorScan(MagicTemplate):
 
     # initialize
-    def __init__(self):
+    def __init__(self, mmc):
+        # MicroManagerCore
+        self.mmc = mmc
         # OPM parameters
         self.active_channel = "Off"
         self.channel_powers = np.zeros(5,dtype=np.int8)
@@ -164,133 +166,42 @@ class OPMMirrorScan(MagicTemplate):
                 self.opmdaq.start_waveform_playback()
                 self.DAQ_running=True
 
-            with CMMCorePlus() as mmc_2d:
+            
+            if self.ROI_changed:
 
-                if self.ROI_changed:
+                self._crop_camera()
+                self.ROI_changed = False
 
-                    self._crop_camera()
-                    self.ROI_changed = False
+            # set exposure time
+            if self.exposure_changed:
+                self.mmc.setExposure(self.exposure_ms)
+                self.exposure_changed = False
 
-                # set exposure time
-                if self.exposure_changed:
-                    mmc_2d.setExposure(self.exposure_ms)
-                    self.exposure_changed = False
-
-                for c in active_channel_indices:
-                    mmc_2d.snapImage()
-                    raw_image_2d = mmc_2d.getImage()
-                    time.sleep(.05)
-                    yield c, raw_image_2d
+            for c in active_channel_indices:
+                self.mmc.snapImage()
+                raw_image_2d = self.mmc.getImage()
+                time.sleep(.05)
+                yield c, raw_image_2d
 
     @thread_worker
     def _acquire_3d_data(self):
 
         while True:
-            with CMMCorePlus() as mmc_3d:
-
-                #------------------------------------------------------------------------------------------------------------------------------------
-                #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
-                #------------------------------------------------------------------------------------------------------------------------------------
-                # parse which channels are active
-                active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
-                n_active_channels = len(active_channel_indices)
-                    
-                if self.debug:
-                    print("%d active channels: " % n_active_channels, end="")
-                    for ind in active_channel_indices:
-                        print("%s " % self.channel_labels[ind], end="")
-                    print("")
-
-                n_timepoints = 1
-
-                if self.ROI_changed:
-                    self._crop_camera()
-                    self.ROI_changed = False
-
-                # set exposure time
-                if self.exposure_changed:
-                    mmc_3d.setExposure(self.exposure_ms)
-                    self.exposure_changed = False
-
-                if self.powers_changed:
-                    self._set_mmc_laser_power()
-                    self.powers_changed = False
-                
-                if self.channels_changed or self.footprint_changed or not(self.DAQ_running):
-                    if self.DAQ_running:
-                        self.opmdaq.stop_waveform_playback()
-                        self.DAQ_running = False
-                    self.opmdaq.set_scan_type('mirror')
-                    self.opmdaq.set_channels_to_use(self.channel_states)
-                    self.opmdaq.set_interleave_mode(True)
-                    scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
-                    self.opmdaq.generate_waveforms()
-                    self.channels_changed = False
-                    self.footprint_changed = False
-
-                raw_image_stack = np.zeros([self.do_ind[-1],scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
-                
-                if self.debug:
-                    # output experiment info
-                    print("Scan axis range: %.1f um, Scan axis step: %.1f nm, Number of galvo positions: %d" % 
-                        (self.scan_mirror_footprint_um,  self.scan_axis_step_um * 1000, scan_steps))
-                    print('Time points:  ' + str(n_timepoints))
-
-                #------------------------------------------------------------------------------------------------------------------------------------
-                #----------------------------------------------End setup of scan parameters----------------------------------------------------------
-                #------------------------------------------------------------------------------------------------------------------------------------
-
-
-                #------------------------------------------------------------------------------------------------------------------------------------
-                #----------------------------------------------Start acquisition and deskew----------------------------------------------------------
-                #------------------------------------------------------------------------------------------------------------------------------------
-
-                self.opmdaq.start_waveform_playback()
-                self.DAQ_running = True
-                # run hardware triggered acquisition
-                mmc_3d.startSequenceAcquisition(int(n_active_channels*scan_steps),0,True)
-                for z in range(scan_steps):
-                    for c in active_channel_indices:
-                        while mmc_3d.getRemainingImageCount()==0:
-                            pass
-                        raw_image_stack[c,z,:] = mmc_3d.popNextImage()
-                mmc_3d.stopSequenceAcquisition()
-                self.opmdaq.stop_waveform_playback()
-                self.DAQ_running = False
-
-                # deskew parameters
-                deskew_parameters = np.empty([3])
-                deskew_parameters[0] = self.opm_tilt                 # (degrees)
-                deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
-                deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
-
-                for c in active_channel_indices:
-                    deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)  
-                    yield c, deskewed_image
-
-                del raw_image_stack
-
-                #------------------------------------------------------------------------------------------------------------------------------------
-                #-----------------------------------------------End acquisition and deskew-----------------------------------------------------------
-                #------------------------------------------------------------------------------------------------------------------------------------
-
-    @thread_worker
-    def _acquire_3d_t_data(self):
-
-        with CMMCorePlus() as mmc_3d_time:
 
             #------------------------------------------------------------------------------------------------------------------------------------
             #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
             #------------------------------------------------------------------------------------------------------------------------------------
             # parse which channels are active
             active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
-            self.n_active_channels = len(active_channel_indices)
+            n_active_channels = len(active_channel_indices)
                 
             if self.debug:
-                print("%d active channels: " % self.n_active_channels, end="")
+                print("%d active channels: " % n_active_channels, end="")
                 for ind in active_channel_indices:
                     print("%s " % self.channel_labels[ind], end="")
                 print("")
+
+            n_timepoints = 1
 
             if self.ROI_changed:
                 self._crop_camera()
@@ -298,7 +209,7 @@ class OPMMirrorScan(MagicTemplate):
 
             # set exposure time
             if self.exposure_changed:
-                mmc_3d_time.setExposure(self.exposure_ms)
+                self.mmc.setExposure(self.exposure_ms)
                 self.exposure_changed = False
 
             if self.powers_changed:
@@ -312,22 +223,18 @@ class OPMMirrorScan(MagicTemplate):
                 self.opmdaq.set_scan_type('mirror')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
-                self.scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
+                scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
                 self.opmdaq.generate_waveforms()
                 self.channels_changed = False
                 self.footprint_changed = False
 
-            # create directory for timelapse
-            time_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S")
-            self.output_dir_path = self.save_path / Path('timelapse_'+time_string)
-            self.output_dir_path.mkdir(parents=True, exist_ok=True)
-
-
-            # create name for zarr directory
-            zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
-
-            # create and open zarr file
-            opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x),compressor=None, dtype=np.uint16)
+            raw_image_stack = np.zeros([self.do_ind[-1],scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
+            
+            if self.debug:
+                # output experiment info
+                print("Scan axis range: %.1f um, Scan axis step: %.1f nm, Number of galvo positions: %d" % 
+                    (self.scan_mirror_footprint_um,  self.scan_axis_step_um * 1000, scan_steps))
+                print('Time points:  ' + str(n_timepoints))
 
             #------------------------------------------------------------------------------------------------------------------------------------
             #----------------------------------------------End setup of scan parameters----------------------------------------------------------
@@ -335,54 +242,145 @@ class OPMMirrorScan(MagicTemplate):
 
 
             #------------------------------------------------------------------------------------------------------------------------------------
-            #----------------------------------------------------Start acquisition---------------------------------------------------------------
+            #----------------------------------------------Start acquisition and deskew----------------------------------------------------------
             #------------------------------------------------------------------------------------------------------------------------------------
 
-            # set circular buffer to be large
-            mmc_3d_time.clearCircularBuffer()
-            circ_buffer_mb = 96000
-            mmc_3d_time.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
-
+            self.opmdaq.start_waveform_playback()
+            self.DAQ_running = True
             # run hardware triggered acquisition
-            if self.wait_time == 0:
-                self.opmdaq.start_waveform_playback()
-                self.DAQ_running = True
-                mmc_3d_time.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
-                for t in trange(self.n_timepoints,desc="t", position=0):
-                    for z in trange(self.scan_steps,desc="z", position=1, leave=False):
-                        for c in range(self.n_active_channels):
-                            while mmc_3d_time.getRemainingImageCount()==0:
-                                pass
-                            opm_data[t, c, z, :, :]  = mmc_3d_time.popNextImage()
-                mmc_3d_time.stopSequenceAcquisition()
+            self.mmc.startSequenceAcquisition(int(n_active_channels*scan_steps),0,True)
+            for z in range(scan_steps):
+                for c in active_channel_indices:
+                    while self.mmc.getRemainingImageCount()==0:
+                        pass
+                    raw_image_stack[c,z,:] = self.mmc.popNextImage()
+            self.mmc.stopSequenceAcquisition()
+            self.opmdaq.stop_waveform_playback()
+            self.DAQ_running = False
+
+            # deskew parameters
+            deskew_parameters = np.empty([3])
+            deskew_parameters[0] = self.opm_tilt                 # (degrees)
+            deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
+            deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
+
+            for c in active_channel_indices:
+                deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)  
+                yield c, deskewed_image
+
+            del raw_image_stack
+
+            #------------------------------------------------------------------------------------------------------------------------------------
+            #-----------------------------------------------End acquisition and deskew-----------------------------------------------------------
+            #------------------------------------------------------------------------------------------------------------------------------------
+
+    @thread_worker
+    def _acquire_3d_t_data(self):
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+        # parse which channels are active
+        active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
+        self.n_active_channels = len(active_channel_indices)
+            
+        if self.debug:
+            print("%d active channels: " % self.n_active_channels, end="")
+            for ind in active_channel_indices:
+                print("%s " % self.channel_labels[ind], end="")
+            print("")
+
+        if self.ROI_changed:
+            self._crop_camera()
+            self.ROI_changed = False
+
+        # set exposure time
+        if self.exposure_changed:
+            self.mmc.setExposure(self.exposure_ms)
+            self.exposure_changed = False
+
+        if self.powers_changed:
+            self._set_mmc_laser_power()
+            self.powers_changed = False
+        
+        if self.channels_changed or self.footprint_changed or not(self.DAQ_running):
+            if self.DAQ_running:
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
-            else:
-                for t in trange(self.n_timepoints,desc="t", position=0):
-                    self.opmdaq.start_waveform_playback()
-                    self.DAQ_running = True
-                    mmc_3d_time.startSequenceAcquisition(int(self.n_active_channels*self.scan_steps),0,True)
-                    for z in trange(self.scan_steps,desc="z", position=1, leave=False):
-                        for c in range(self.n_active_channels):
-                            while mmc_3d_time.getRemainingImageCount()==0:
-                                pass
-                            opm_data[t, c, z, :, :]  = mmc_3d_time.popNextImage()
-                    mmc_3d_time.stopSequenceAcquisition()
-                    self.opmdaq.stop_waveform_playback()
-                    self.DAQ_running = False
-                    time.sleep(self.wait_time)
-                    
-            # construct metadata and save
-            self._save_metadata()
+            self.opmdaq.set_scan_type('mirror')
+            self.opmdaq.set_channels_to_use(self.channel_states)
+            self.opmdaq.set_interleave_mode(True)
+            self.scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
+            self.opmdaq.generate_waveforms()
+            self.channels_changed = False
+            self.footprint_changed = False
 
-            #------------------------------------------------------------------------------------------------------------------------------------
-            #--------------------------------------------------------End acquisition-------------------------------------------------------------
-            #------------------------------------------------------------------------------------------------------------------------------------
+        # create directory for timelapse
+        time_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S")
+        self.output_dir_path = self.save_path / Path('timelapse_'+time_string)
+        self.output_dir_path.mkdir(parents=True, exist_ok=True)
 
-            # set circular buffer to be small 
-            mmc_3d_time.clearCircularBuffer()
-            circ_buffer_mb = 4000
-            mmc_3d_time.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+
+        # create name for zarr directory
+        zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
+
+        # create and open zarr file
+        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x),compressor=None, dtype=np.uint16)
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------End setup of scan parameters----------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------------Start acquisition---------------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+        # set circular buffer to be large
+        self.mmc.clearCircularBuffer()
+        circ_buffer_mb = 96000
+        self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+
+        # run hardware triggered acquisition
+        if self.wait_time == 0:
+            self.opmdaq.start_waveform_playback()
+            self.DAQ_running = True
+            self.mmc.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
+            for t in trange(self.n_timepoints,desc="t", position=0):
+                for z in trange(self.scan_steps,desc="z", position=1, leave=False):
+                    for c in range(self.n_active_channels):
+                        while self.mmc.getRemainingImageCount()==0:
+                            pass
+                        opm_data[t, c, z, :, :]  = self.mmc.popNextImage()
+            self.mmc.stopSequenceAcquisition()
+            self.opmdaq.stop_waveform_playback()
+            self.DAQ_running = False
+        else:
+            for t in trange(self.n_timepoints,desc="t", position=0):
+                self.opmdaq.start_waveform_playback()
+                self.DAQ_running = True
+                self.mmc.startSequenceAcquisition(int(self.n_active_channels*self.scan_steps),0,True)
+                for z in trange(self.scan_steps,desc="z", position=1, leave=False):
+                    for c in range(self.n_active_channels):
+                        while self.mmc.getRemainingImageCount()==0:
+                            pass
+                        opm_data[t, c, z, :, :]  = self.mmc.popNextImage()
+                self.mmc.stopSequenceAcquisition()
+                self.opmdaq.stop_waveform_playback()
+                self.DAQ_running = False
+                time.sleep(self.wait_time)
+                
+        # construct metadata and save
+        self._save_metadata()
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #--------------------------------------------------------End acquisition-------------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+        # set circular buffer to be small 
+        self.mmc.clearCircularBuffer()
+        circ_buffer_mb = 4000
+        self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
     def _crop_camera(self):
         """
@@ -391,13 +389,12 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with CMMCorePlus() as mmc_crop_camera:
-            current_ROI = mmc_crop_camera.getROI()
-            if not(current_ROI[2]==2304) or not(current_ROI[3]==2304):
-                mmc_crop_camera.clearROI()
-                mmc_crop_camera.waitForDevice(self.camera_name)
-            mmc_crop_camera.setROI(int(self.ROI_uleft_corner_x),int(self.ROI_uleft_corner_y),int(self.ROI_width_x),int(self.ROI_width_y))
-            mmc_crop_camera.waitForDevice(self.camera_name)
+        current_ROI = self.mmc.getROI()
+        if not(current_ROI[2]==2304) or not(current_ROI[3]==2304):
+            self.mmc.clearROI()
+            self.mmc.waitForDevice(self.camera_name)
+        self.mmc.setROI(int(self.ROI_uleft_corner_x),int(self.ROI_uleft_corner_y),int(self.ROI_width_x),int(self.ROI_width_y))
+        self.mmc.waitForDevice(self.camera_name)
 
     def _lasers_to_hardware(self):
         """
@@ -406,26 +403,25 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with CMMCorePlus() as mmc_lasers_hardware:
-            # turn all lasers off
-            mmc_lasers_hardware.setConfig('Laser','Off')
-            mmc_lasers_hardware.waitForConfig('Laser','Off')
+        # turn all lasers off
+        self.mmc.setConfig('Laser','Off')
+        self.mmc.waitForConfig('Laser','Off')
 
-            # set all laser to external triggering
-            mmc_lasers_hardware.setConfig('Modulation-405','External-Digital')
-            mmc_lasers_hardware.waitForConfig('Modulation-405','External-Digital')
-            mmc_lasers_hardware.setConfig('Modulation-488','External-Digital')
-            mmc_lasers_hardware.waitForConfig('Modulation-488','External-Digital')
-            mmc_lasers_hardware.setConfig('Modulation-561','External-Digital')
-            mmc_lasers_hardware.waitForConfig('Modulation-561','External-Digital')
-            mmc_lasers_hardware.setConfig('Modulation-637','External-Digital')
-            mmc_lasers_hardware.waitForConfig('Modulation-637','External-Digital')
-            mmc_lasers_hardware.setConfig('Modulation-730','External-Digital')
-            mmc_lasers_hardware.waitForConfig('Modulation-730','External-Digital')
+        # set all laser to external triggering
+        self.mmc.setConfig('Modulation-405','External-Digital')
+        self.mmc.waitForConfig('Modulation-405','External-Digital')
+        self.mmc.setConfig('Modulation-488','External-Digital')
+        self.mmc.waitForConfig('Modulation-488','External-Digital')
+        self.mmc.setConfig('Modulation-561','External-Digital')
+        self.mmc.waitForConfig('Modulation-561','External-Digital')
+        self.mmc.setConfig('Modulation-637','External-Digital')
+        self.mmc.waitForConfig('Modulation-637','External-Digital')
+        self.mmc.setConfig('Modulation-730','External-Digital')
+        self.mmc.waitForConfig('Modulation-730','External-Digital')
 
-            # turn all lasers on
-            mmc_lasers_hardware.setConfig('Laser','AllOn')
-            mmc_lasers_hardware.waitForConfig('Laser','AllOn')
+        # turn all lasers on
+        self.mmc.setConfig('Laser','AllOn')
+        self.mmc.waitForConfig('Laser','AllOn')
 
     def _lasers_to_software(self):
         """
@@ -434,22 +430,21 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with CMMCorePlus() as mmc_lasers_software:
-            # turn all lasers off
-            mmc_lasers_software.setConfig('Laser','Off')
-            mmc_lasers_software.waitForConfig('Laser','Off')
+        # turn all lasers off
+        self.mmc.setConfig('Laser','Off')
+        self.mmc.waitForConfig('Laser','Off')
 
-            # set all lasers back to software control
-            mmc_lasers_software.setConfig('Modulation-405','CW (constant power)')
-            mmc_lasers_software.waitForConfig('Modulation-405','CW (constant power)')
-            mmc_lasers_software.setConfig('Modulation-488','CW (constant power)')
-            mmc_lasers_software.waitForConfig('Modulation-488','CW (constant power)')
-            mmc_lasers_software.setConfig('Modulation-561','CW (constant power)')
-            mmc_lasers_software.waitForConfig('Modulation-561','CW (constant power)')
-            mmc_lasers_software.setConfig('Modulation-637','CW (constant power)')
-            mmc_lasers_software.waitForConfig('Modulation-637','CW (constant power)')
-            mmc_lasers_software.setConfig('Modulation-730','CW (constant power)')
-            mmc_lasers_software.waitForConfig('Modulation-730','CW (constant power)')
+        # set all lasers back to software control
+        self.mmc.setConfig('Modulation-405','CW (constant power)')
+        self.mmc.waitForConfig('Modulation-405','CW (constant power)')
+        self.mmc.setConfig('Modulation-488','CW (constant power)')
+        self.mmc.waitForConfig('Modulation-488','CW (constant power)')
+        self.mmc.setConfig('Modulation-561','CW (constant power)')
+        self.mmc.waitForConfig('Modulation-561','CW (constant power)')
+        self.mmc.setConfig('Modulation-637','CW (constant power)')
+        self.mmc.waitForConfig('Modulation-637','CW (constant power)')
+        self.mmc.setConfig('Modulation-730','CW (constant power)')
+        self.mmc.waitForConfig('Modulation-730','CW (constant power)')
 
     def _set_mmc_laser_power(self):
         """
@@ -457,12 +452,12 @@ class OPMMirrorScan(MagicTemplate):
 
         :return None:
         """
-        with CMMCorePlus() as mmc_laser_power:
-            mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 405-100C - PowerSetpoint (%)',float(self.channel_powers[0]))
-            mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 488-150C - PowerSetpoint (%)',float(self.channel_powers[1]))
-            mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser OBIS LS 561-150 - PowerSetpoint (%)',float(self.channel_powers[2]))
-            mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 637-140C - PowerSetpoint (%)',float(self.channel_powers[3]))
-            mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 730-30C - PowerSetpoint (%)',float(self.channel_powers[4]))
+        
+        self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 405-100C - PowerSetpoint (%)',float(self.channel_powers[0]))
+        self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 488-150C - PowerSetpoint (%)',float(self.channel_powers[1]))
+        self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser OBIS LS 561-150 - PowerSetpoint (%)',float(self.channel_powers[2]))
+        self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 637-140C - PowerSetpoint (%)',float(self.channel_powers[3]))
+        self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 730-30C - PowerSetpoint (%)',float(self.channel_powers[4]))
 
     def _setup_camera(self):
         """
@@ -471,29 +466,27 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with CMMCorePlus() as mmc_camera_setup:
+        # give camera time to change modes if necessary
+        self.mmc.setConfig('Camera-Setup','ScanMode3')
+        self.mmc.waitForConfig('Camera-Setup','ScanMode3')
 
-            # give camera time to change modes if necessary
-            mmc_camera_setup.setConfig('Camera-Setup','ScanMode3')
-            mmc_camera_setup.waitForConfig('Camera-Setup','ScanMode3')
-
-            # set camera to internal trigger
-            mmc_camera_setup.setConfig('Camera-TriggerType','NORMAL')
-            mmc_camera_setup.waitForConfig('Camera-TriggerType','NORMAL')
-            trigger_value = mmc_camera_setup.getProperty(self.camera_name,'Trigger')
-            while not(trigger_value == 'NORMAL'):
-                mmc_camera_setup.setConfig('Camera-TriggerType','NORMAL')
-                mmc_camera_setup.waitForConfig('Camera-TriggerType','NORMAL')
-                time.sleep(2)
-                trigger_value = mmc_camera_setup.getProperty(self.camera_name,'Trigger')
-                
-            # give camera time to change modes if necessary
-            mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[0]','EXPOSURE')
-            mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[1]','EXPOSURE')
-            mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[2]','EXPOSURE')
-            mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-            mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-            mmc_camera_setup.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+        # set camera to internal trigger
+        self.mmc.setConfig('Camera-TriggerType','NORMAL')
+        self.mmc.waitForConfig('Camera-TriggerType','NORMAL')
+        trigger_value = self.mmc.getProperty(self.camera_name,'Trigger')
+        while not(trigger_value == 'NORMAL'):
+            self.mmc.setConfig('Camera-TriggerType','NORMAL')
+            self.mmc.waitForConfig('Camera-TriggerType','NORMAL')
+            time.sleep(2)
+            trigger_value = self.mmc.getProperty(self.camera_name,'Trigger')
+            
+        # give camera time to change modes if necessary
+        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[0]','EXPOSURE')
+        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[1]','EXPOSURE')
+        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[2]','EXPOSURE')
+        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
     def _enforce_DCAM_internal_trigger(self):
         """
@@ -502,19 +495,17 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with CMMCorePlus() as mmc_camera_trigger:
+        # set camera to START mode upon input trigger
+        self.mmc.setConfig('Camera-TriggerSource','INTERNAL')
+        self.mmc.waitForConfig('Camera-TriggerSource','INTERNAL')
 
-            # set camera to START mode upon input trigger
-            mmc_camera_trigger.setConfig('Camera-TriggerSource','INTERNAL')
-            mmc_camera_trigger.waitForConfig('Camera-TriggerSource','INTERNAL')
-
-            # check if camera actually changed
-            # we find that camera doesn't always go back to START mode and need to check it
-            trigger_value = mmc_camera_trigger.getProperty(self.camera_name,'TRIGGER SOURCE')
-            while not(trigger_value == 'INTERNAL'):
-                mmc_camera_trigger.setConfig('Camera-TriggerSource','INTERNAL')
-                mmc_camera_trigger.waitForConfig('Camera-TriggerSource','INTERNAL')
-                trigger_value = mmc_camera_trigger.getProperty(self.camera_name,'TRIGGER SOURCE')
+        # check if camera actually changed
+        # we find that camera doesn't always go back to START mode and need to check it
+        trigger_value = self.mmc.getProperty(self.camera_name,'TRIGGER SOURCE')
+        while not(trigger_value == 'INTERNAL'):
+            self.mmc.setConfig('Camera-TriggerSource','INTERNAL')
+            self.mmc.waitForConfig('Camera-TriggerSource','INTERNAL')
+            trigger_value = self.mmc.getProperty(self.camera_name,'TRIGGER SOURCE')
 
             
     def _startup(self):
