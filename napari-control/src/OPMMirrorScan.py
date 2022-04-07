@@ -1,4 +1,4 @@
-from pymmcore_plus import RemoteMMCore
+from pymmcore_plus import CMMCorePlus
 from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
 from magicgui.tqdm import trange
@@ -164,7 +164,7 @@ class OPMMirrorScan(MagicTemplate):
                 self.opmdaq.start_waveform_playback()
                 self.DAQ_running=True
 
-            with RemoteMMCore() as mmc_2d:
+            with CMMCorePlus() as mmc_2d:
 
                 if self.ROI_changed:
 
@@ -186,7 +186,7 @@ class OPMMirrorScan(MagicTemplate):
     def _acquire_3d_data(self):
 
         while True:
-            with RemoteMMCore() as mmc_3d:
+            with CMMCorePlus() as mmc_3d:
 
                 #------------------------------------------------------------------------------------------------------------------------------------
                 #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -277,7 +277,7 @@ class OPMMirrorScan(MagicTemplate):
     @thread_worker
     def _acquire_3d_t_data(self):
 
-        with RemoteMMCore() as mmc_3d_time:
+        with CMMCorePlus() as mmc_3d_time:
 
             #------------------------------------------------------------------------------------------------------------------------------------
             #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -391,7 +391,7 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with RemoteMMCore() as mmc_crop_camera:
+        with CMMCorePlus() as mmc_crop_camera:
             current_ROI = mmc_crop_camera.getROI()
             if not(current_ROI[2]==2304) or not(current_ROI[3]==2304):
                 mmc_crop_camera.clearROI()
@@ -406,7 +406,7 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with RemoteMMCore() as mmc_lasers_hardware:
+        with CMMCorePlus() as mmc_lasers_hardware:
             # turn all lasers off
             mmc_lasers_hardware.setConfig('Laser','Off')
             mmc_lasers_hardware.waitForConfig('Laser','Off')
@@ -434,7 +434,7 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with RemoteMMCore() as mmc_lasers_software:
+        with CMMCorePlus() as mmc_lasers_software:
             # turn all lasers off
             mmc_lasers_software.setConfig('Laser','Off')
             mmc_lasers_software.waitForConfig('Laser','Off')
@@ -457,7 +457,7 @@ class OPMMirrorScan(MagicTemplate):
 
         :return None:
         """
-        with RemoteMMCore() as mmc_laser_power:
+        with CMMCorePlus() as mmc_laser_power:
             mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 405-100C - PowerSetpoint (%)',float(self.channel_powers[0]))
             mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser 488-150C - PowerSetpoint (%)',float(self.channel_powers[1]))
             mmc_laser_power.setProperty(r'Coherent-Scientific Remote',r'Laser OBIS LS 561-150 - PowerSetpoint (%)',float(self.channel_powers[2]))
@@ -471,7 +471,7 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with RemoteMMCore() as mmc_camera_setup:
+        with CMMCorePlus() as mmc_camera_setup:
 
             # give camera time to change modes if necessary
             mmc_camera_setup.setConfig('Camera-Setup','ScanMode3')
@@ -502,7 +502,7 @@ class OPMMirrorScan(MagicTemplate):
         :return None:
         """
 
-        with RemoteMMCore() as mmc_camera_trigger:
+        with CMMCorePlus() as mmc_camera_trigger:
 
             # set camera to START mode upon input trigger
             mmc_camera_trigger.setConfig('Camera-TriggerSource','INTERNAL')

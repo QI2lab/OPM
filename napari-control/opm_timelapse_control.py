@@ -14,12 +14,20 @@ douglas.shepherd@asu.edu
 from src.OPMMirrorScan import OPMMirrorScan
 import napari
 from pathlib import Path
-from pymmcore_plus import RemoteMMCore
+from pymmcore_plus import CMMCorePlus
+
+# I just replaced RemoteMMCore by CMMCorePlus here and in OPMMirrorScan.py
+# maybe we need / can delete the several with clauses
+# we could also use the same mmc variable to control the lasers and camera 
+# instead of creating another MMCore-like object
+# that may require to pass mmc as an atribute to instrument_control_widget
+# but let's first test the initial creation of multiple instances of  CMMCorePlus
+# to see if it bugs
 
 def main(path_to_mm_config=Path('C:/Program Files/Micro-Manager-2.0gamma/temp_HamDCAM.cfg')):
 
      # launch pymmcore server
-    with RemoteMMCore() as mmc:
+    with CMMCorePlus() as mmc:
         mmc.loadSystemConfiguration(str(path_to_mm_config))# setup OPM GUI and Napari viewer
 
         instrument_control_widget = OPMMirrorScan()
