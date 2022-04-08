@@ -3,6 +3,7 @@ from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
 from magicgui.tqdm import trange
 from napari.qt.threading import thread_worker
+import easygui
 
 from pathlib import Path
 import numpy as np
@@ -800,3 +801,48 @@ class OPMMirrorScan(MagicTemplate):
                 raise Exception('Setup save path and timelapse first.')
         else:
             raise Exception('Stop active live mode first.')
+
+    
+    @magicgui(call_button='Save images')
+    def save_displayed_images(self):
+        """
+        Save all the displayed images in a single zarr image on disk.
+        """
+        nb_ch = len(self.viewer.layers)
+        if nb_ch == 0:
+            print("There is no displayed image to save")
+        else:
+            print("Saving images")
+            if not self.save_path_setup:
+                save_path = easygui.diropenbox('Path to save images')
+                if save_path is None:
+                    print("No folder selected, abort saving images")
+                    return
+                self.save_path = Path(save_path)
+                self.save_path_setup = True
+                print("Save images in folder", self.save_path.as_posix())
+
+            # make the multichannel image stack
+            im_shape = list(self.viewer.layers[0].data.shape)
+            if len(im_shape) <= 3:
+                full_shape = [nb_ch] + im_shape
+                chunk_shape = [1] + im_shape
+            else:
+                # there is time too
+                full_shape = im_shape.copy()
+                full_shape.insert(nb_ch, 1)
+                chunk_shape = [1, 1] + im_shape
+            # create directory for saved images
+            time_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S")
+            self.output_dir_path = self.save_path / Path('export_'+time_string)
+            self.output_dir_path.mkdir(parents=True, exist_ok=True)
+            zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
+            opm_data = zarr.open(str(zarr_output_path), mode="w", shape=full_shape, chunks=chunk_shape, compressor=None, dtype=np.uint16)
+            if len(im_shape) <= 3:
+                for c in range(nb_ch):
+                    opm_data[c] = self.viewer.layers[0].data
+            else:
+                for t in range(im_shape[0]):
+                    for c in nb_ch:
+                        opm_data[t, c, :, :, :] = self.viewer.layers[0].data
+            print('Image saved')
