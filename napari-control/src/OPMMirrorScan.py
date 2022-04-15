@@ -846,3 +846,22 @@ class OPMMirrorScan(MagicTemplate):
                     for c in nb_ch:
                         opm_data[t, c, :, :, :] = self.viewer.layers[0].data
             print('Image saved')
+
+
+    @magicgui(call_button='Process image')
+    def process_loaded_image(self):
+        """
+        Split channels and deskew the first available image.
+        """
+        if len(self.viewer.layers) == 0:
+            print("There is no displayed image to process")
+        else:
+            print("Processing image")
+            # # deskew parameters
+            # deskew_parameters = np.empty([3])
+            # deskew_parameters[0] = self.opm_tilt                 # (degrees)
+            # deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
+            # deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
+
+            # for c in active_channel_indices:
+            #     deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)  
