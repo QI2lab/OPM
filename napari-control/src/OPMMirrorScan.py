@@ -26,17 +26,17 @@ class OPMMirrorScan(MagicTemplate):
         self.channel_states=[False,False,False,False,False]
         self.exposure_ms = 10.0                 # unit: ms
         self.scan_axis_step_um = 0.4            # unit: um
-        self.scan_axis_calibration = 0.043      # unit: V / um
-        self.galvo_neutral_volt = -.27          # unit: V
+        self.scan_axis_calibration = 0.03925      # unit: V / um
+        self.galvo_neutral_volt = 0          # unit: V
         self.scan_mirror_footprint_um = 50.0      # unit: um
         self.camera_pixel_size_um = .115        # unit: um
         self.opm_tilt = 30                      # unit: degrees
 
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
-        self.ROI_uleft_corner_x = int(200)  # unit: camera pixels
+        self.ROI_uleft_corner_x = int(0)  # unit: camera pixels
         self.ROI_uleft_corner_y = int(896)  # unit: camera pixels
-        self.ROI_width_x = int(1900)        # unit: camera pixels
+        self.ROI_width_x = int(2304)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
 
         self.save_path = Path('D:/')
