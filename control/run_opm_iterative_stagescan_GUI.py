@@ -3,6 +3,7 @@
 '''
 OPM stage control with iterative fluidics.
 
+Shepherd 11/22 - integrating Alexis changes
 Shepherd 08/21 - refactor for easier reading, O2-O3 autofocus, and managing file transfer in seperate Python process
 Shepherd 07/21 - switch to interleaved excitation during stage scan and initial work on O2-O3 autofocusing
 Shepherd 06/21 - clean up code and bring inline with widefield bypass GUI code
