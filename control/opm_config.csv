@@ -1,7 +1,7 @@
 pump_com_port,COM4
 valve_com_port,COM6
-shutter_com_port,COM7
-piezo_com_port,COM8
+shutter_id,712
+O3_stage_name,MCL NanoDrive Z Stage
 galvo_ao_pin,/Dev1/ao0
 laser0_do_pin,0
 laser1_do_pin,1

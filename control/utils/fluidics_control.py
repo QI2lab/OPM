@@ -97,24 +97,6 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
             time.sleep(3)
 
             print(time_stamp(), ': MVP unit: '+str(mvp_unit)+'; Valve #: '+str(valve_number))
-
-            # if np.round((pump_amount_ml/pump_time_min),2) == 1:
-            #     pump_rate = 48.0
-            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.66:
-            #     pump_rate = 18.0
-            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.50:
-            #     pump_rate = 11.0
-            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.40:
-            #     pump_rate = 10.0
-            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.36:
-            #     pump_rate = 9.5
-            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.33:
-            #     pump_rate = 9.0
-            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.22:
-            #     pump_rate = 5.0
-            # elif np.round((pump_amount_ml/pump_time_min),2) == 0.2:
-            #     pump_rate = 4.0
-
             print(time_stamp(), f': Pump setting: {pump_rate} for {source_name}')
 
             if pump_rate == -1.0:
