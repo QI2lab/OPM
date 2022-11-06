@@ -1,6 +1,6 @@
-pump_com_port,COM5
+pump_com_port,COM4
 valve_com_port,COM6
-shutter_com_port,COM9
+shutter_com_port,COM7
 piezo_com_port,COM8
 galvo_ao_pin,/Dev1/ao0
 laser0_do_pin,0

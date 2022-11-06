@@ -3,7 +3,8 @@ import gc
 from pathlib import Path
 import numpy as np
 import easygui
-from pycromanager import Bridge
+#from pycromanager import Bridge
+from pycromanager import Core
 
 def setup_asi_tiger(core,scan_axis_speed,scan_axis_start_mm,scan_axis_end_mm):
 
@@ -154,6 +155,17 @@ def camera_hook_fn(event,bridge,event_queue):
     :return None:
     """
 
+    # DPS 2022.05.19
+    # trying to address depecration warning and API changes...unclear how to do deal with this in acq hook.
+    with Core() as core_trigger:
+        command='1SCAN'
+        core_trigger.set_property('TigerCommHub','SerialCommand',command)
+    
+    gc.collect()
+
+    return event
+
+    '''
     with Bridge() as bridge_trigger:
         core_trigger = bridge_trigger.get_core()
         command='1SCAN'
@@ -165,6 +177,9 @@ def camera_hook_fn(event,bridge,event_queue):
     gc.collect()
 
     return event
+    '''
+
+
 
 def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     """
@@ -338,12 +353,14 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     # check if there are multiple heights
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     # if multiple heights, check if heights are due to uneven tissue position or for z tiling
-    if height_axis_end_um > 0:
+    if height_axis_range_um > 0:
         height_selection = easygui.choicebox('Z axis strategy.', 'Z axis positions', ['Tile in Z', 'Track in Z'])
         if height_selection == str('Tile in Z'):
             height_strategy = 'tile'
         elif height_selection == str('Track in Z'):
             height_strategy = 'track'
+    # the bug is back, here is a dirty patch
+    height_strategy = 'tile'
     
     if height_strategy == str('tile'):
         height_axis_overlap=0.2 #unit: percentage
