@@ -63,12 +63,23 @@ def read_fluidics_program(program_path):
     :param program_path: Path
         location of fluidics program
 
-    :return df_program: Dataframe
+    :return df_fluidics: Dataframe
         dataframe containing fluidics program 
     """
 
-    df_program = pd.read_csv(program_path)
-    return df_program
+    try:                
+        df_fluidics = pd.read_csv(program_path)            
+        df_fluidics = df_fluidics[["round", "source", "time", "pump"]]
+        df_fluidics.dropna(axis=0, how='any', inplace=True)
+        df_fluidics["round"] = df_fluidics["round"].astype(int)
+        df_fluidics["pump"] = df_fluidics["pump"].astype(int)
+
+        n_iterative_rounds = df_fluidics["round"].max()
+        print("Fluidics program loaded")
+    except Exception as e:
+        raise Exception("Error in loading fluidics file:\n", e)
+
+    return df_fluidics, n_iterative_rounds
 
 def write_metadata(data_dict, save_path):
     """
@@ -107,43 +118,6 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
 
     return data_numpy
 
-
-def return_data_numpy_widefield(dataset, channel_axis, ch_BDV_idx, num_z, y_pixels,x_pixels):
-    """
-    :param dataset: pycromanager dataset object
-    :param channel_axis: integer channel index
-    :param time_axis: integer time_axis
-    :param num_images: integer for number of images to return 
-    :param y_pixels: integer for y pixel size
-    :param x_pixels: integer for x pixel size
-    :return data_numpy: 3D numpy array of requested data
-    """
-
-    data_numpy = np.empty([num_z,y_pixels,x_pixels]).astype(np.uint16)
-
-    for i in range(num_z):
-        if (channel_axis is None):
-            data_numpy[i,:,:] = dataset.read_image(z=i)
-        else:
-            data_numpy[i,:,:] = dataset.read_image(z=i, c=channel_axis, channel=ch_BDV_idx)
-
-    return data_numpy
-
-def stitch_data(path_to_xml,iterative_flag):
-
-    """
-    :param path_to_xml: Path
-        path to BDV XML. BDV H5 must be present for loading
-    :param iterative_flag: Bool
-        flag if multiple rounds need to be aligned
-    """
-
-
-    # TO DO: 1. write either pyimagej bridge + macro OR call FIJI/BigStitcher in headless mode.
-    #        2. fix flipped x-axis between Python and FIJI. Easier to flip data in Python than deal with
-    #           annoying affine that flips data.
-
-
 def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
 
     """
@@ -178,5 +152,3 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
             read_affine_success = True
 
     return affine_xforms
-
-

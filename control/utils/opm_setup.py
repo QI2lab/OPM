@@ -3,7 +3,7 @@ import gc
 from pathlib import Path
 import numpy as np
 import easygui
-from pycromanager import Bridge
+from pycromanager import Core
 
 def setup_asi_tiger(core,scan_axis_speed,scan_axis_start_mm,scan_axis_end_mm):
 
@@ -154,14 +154,12 @@ def camera_hook_fn(event,bridge,event_queue):
     :return None:
     """
 
-    with Bridge() as bridge_trigger:
-        core_trigger = bridge_trigger.get_core()
-        command='1SCAN'
-        core_trigger.set_property('TigerCommHub','SerialCommand',command)
+    core_trigger = Core()
+    command='1SCAN'
+    core_trigger.set_property('TigerCommHub','SerialCommand',command)
 
-        core_trigger = None
-        del core_trigger
-
+    core_trigger = None
+    del core_trigger
     gc.collect()
 
     return event
@@ -209,10 +207,10 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
         elif channel.config() == channel_labels[4]: 
             channel_states[4]=True
     do_ch_pins = [df_config['laser0_do_pin'], 
-                df_config['laser1_do_pin'], 
-                df_config['laser2_do_pin'], 
-                df_config['laser3_do_pin'], 
-                df_config['laser4_do_pin']] # digital output line corresponding to each channel
+                  df_config['laser1_do_pin'], 
+                  df_config['laser2_do_pin'], 
+                  df_config['laser3_do_pin'], 
+                  df_config['laser4_do_pin']] # digital output line corresponding to each channel
     
     # pull laser powers from main window
     channel_powers = [0.,0.,0.,0.,0.]
@@ -266,34 +264,6 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     core.snap_image()
     y_pixels = core.get_image_height()
     x_pixels = core.get_image_width()
-
-    # set readout mode based on ROI and readout time
-    # exposure times pulled from FusionBT documentation and tested using oscilliscope
-    # TO DO: move into config file
-    '''
-    Vn = y_pixels
-    H_ultra_quiet = 80.0 # us
-    H_standard = 18.64706 # us
-    H_fast = 4.867647 # us
-
-    min_exp_time_ultra_quiet_ms = ((Vn+1)*H_ultra_quiet) / 1000 # ms
-    min_exp_time_standard_ms = ((Vn+1)*H_standard) / 1000 # ms
-    min_exp_time_fast_ms = ((Vn+1)*H_fast) / 1000 # ms
-
-    if exposure_ms > min_exp_time_ultra_quiet_ms:
-        core.set_config('Camera-Setup','ScanMode1')
-        core.wait_for_config('Camera-Setup','ScanMode1')
-    elif exposure_ms <= min_exp_time_ultra_quiet_ms and exposure_ms > min_exp_time_standard_ms:
-        core.set_config('Camera-Setup','ScanMode2')
-        core.wait_for_config('Camera-Setup','ScanMode2')
-    elif exposure_ms <= min_exp_time_standard_ms and exposure_ms > min_exp_time_fast_ms:
-        core.set_config('Camera-Setup','ScanMode3')
-        core.wait_for_config('Camera-Setup','ScanMode3')
-    else:
-        exposure_ms = min_exp_time_fast_ms
-        core.set_config('Camera-Setup','ScanMode3')
-        core.wait_for_config('Camera-Setup','ScanMode3')
-    '''
 
     core.set_config('Camera-Setup','ScanMode3')
     core.wait_for_config('Camera-Setup','ScanMode3')

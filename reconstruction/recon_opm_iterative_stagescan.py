@@ -7,7 +7,7 @@ Stage scanning iterative OPM post-processing using numpy, numba, skimage, cupy, 
 Places all tiles in actual stage positions and places time points OR iterative rounds into the time axis of BDV H5 for alignment
 Orthgonal interpolation method adapted from Vincent Maioli (http://doi.org/10.25560/68022)
 
-Last updated: Shepherd 01/22 - changes to include dexp deconvolution and recent other changes.
+Last updated: Shepherd 11/22 - many changes to support new instrument build after moving lab space.
 '''
 
 # imports
@@ -163,8 +163,7 @@ def main(argv):
     # if retrospective flatfield is requested, import GPU flatfield code
     if flatfield_flag==1:
         from image_post_processing import manage_flat_field_py
-    # if decon is requested, import microvolution wrapper
-    # this file is private and does not follow the same license as the rest of our code.
+    # if decon is requested, import GPU deconvolution code
     if decon_flag==1:
         from image_post_processing import lr_deconvolution
 
