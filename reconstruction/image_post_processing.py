@@ -24,10 +24,13 @@ try:
     import microvolution_py as mv
     DECON_LIBRARY = 'mv'
 except:
-    from dexp.utils.backends import Backend, CupyBackend, NumpyBackend
-    from dexp.processing.deconvolution.lr_deconvolution import lucy_richardson_deconvolution
-    from dexp.processing.restoration.dehazing import dehaze
-    DECON_LIBRARY = 'dexp'
+    try:
+        from dexp.utils.backends import Backend, CupyBackend, NumpyBackend
+        from dexp.processing.deconvolution.lr_deconvolution import lucy_richardson_deconvolution
+        from dexp.processing.restoration.dehazing import dehaze
+        DECON_LIBRARY = 'dexp'
+    except:
+        DECON_LIBRARY = None
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)

@@ -4,6 +4,7 @@ import re
 from npy2bdv import BdvEditor
 import pandas as pd
 import numpy as np
+from datetime import datetime
 
 def read_metadata(fname):
     """
@@ -152,3 +153,6 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
             read_affine_success = True
 
     return affine_xforms
+
+def time_stamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")

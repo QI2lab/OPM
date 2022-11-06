@@ -8,10 +8,11 @@ Shepherd 11/22 - Updates from Alexis Colloumb changes on his widefield setup.
 Shepherd 05/21 - initial commit
 '''
 
-from os.path import supports_unicode_filenames
 import numpy as np
 import pandas as pd
 import time
+import sys
+from .data_io import time_stamp
 import sys
 
 def lookup_valve(source_name):
@@ -50,23 +51,26 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
     """
 
     # select current round
-    df_current_program = df_program[(df_program['round']==r_idx)]
-
-
-    print (f'Executing iterative round {r_idx}.')
+    df_current_program = df_program[(df_program['round']==r_idx+1)]
+    print(time_stamp(), ': Executing iterative round '+str(r_idx+1)+'.')
     for index, row in df_current_program.iterrows():
         # extract source name
         source_name = str(row['source']).strip()
 
         # extract pump rate
+        # pump_amount_ml = float(row['volume'])  # not used
         pump_time_min  = float(row['time'])
+        try:
+            pump_rate = float(row['pump'])
+        except:
+            pump_rate = -1.0
 
         if source_name == 'RUN':
             pump_controller.stopFlow()
-            print('Fluidics round done, running imaging.')
+            print(time_stamp(), ': Fluidics round done, running imaging.')
         elif source_name == 'PAUSE':
             pump_controller.stopFlow()
-            print('Pausing for:' +str(pump_time_min*60)+' seconds.')
+            print(time_stamp(), ': Pausing for:' +str(pump_time_min*60)+' seconds.')
             time.sleep(pump_time_min*60)
         else:
             # extract and set valve
@@ -95,40 +99,12 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
                 mvp_controller.changePort(valve_ID=3,port_ID=valve_number)
             time.sleep(3)
 
-            print('MVP unit: '+str(mvp_unit)+'; Valve #: '+str(valve_number))
+            print(time_stamp(), ': MVP unit: '+str(mvp_unit)+'; Valve #: '+str(valve_number))
+            print(time_stamp(), f': Pump setting: {pump_rate} for {source_name}')
 
-            try:
-                pump_rate = float(row['pump'])
-            except KeyError:
-                # convert ml/min rate to pump rate
-                # this is hardcoded to the ASU fluidic setup
-                # please check for your own setup
-                try:
-                    pump_amount_ml = float(row['volume'])
-                except KeyError:
-                    print('Provide pump rate or volume to run fluidic step. Exiting.')
-                    sys.exit()
-
-                pump_rate = -1.0
-                if np.round((pump_amount_ml/pump_time_min),2) == 1:
-                    pump_rate = 48.0
-                elif np.round((pump_amount_ml/pump_time_min),2) == 0.50:
-                    pump_rate = 11.0
-                elif np.round((pump_amount_ml/pump_time_min),2) == 0.40:
-                    pump_rate = 10.0
-                elif np.round((pump_amount_ml/pump_time_min),2) == 0.36:
-                    pump_rate = 9.5
-                elif np.round((pump_amount_ml/pump_time_min),2) == 0.33:
-                    pump_rate = 9.0
-                elif np.round((pump_amount_ml/pump_time_min),2) == 0.22:
-                    pump_rate = 5.0
-                elif np.round((pump_amount_ml/pump_time_min),2) == 0.2:
-                    pump_rate = 4.0
-
-                print('Pump setting: '+str(pump_rate))
-                if pump_rate == -1.0:
-                    print('Error in determining pump rate. Exiting.')
-                    sys.exit()
+            if pump_rate == -1.0:
+                print(time_stamp(), ': Error in determining pump rate. Exiting.')
+                sys.exit()
 
             # run pump
             pump_controller.startFlow(pump_rate,direction='Forward')

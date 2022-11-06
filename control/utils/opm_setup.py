@@ -163,6 +163,9 @@ def camera_hook_fn(event,bridge,event_queue):
     gc.collect()
 
     return event
+    '''
+
+
 
 def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     """
@@ -308,12 +311,14 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     # check if there are multiple heights
     height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
     # if multiple heights, check if heights are due to uneven tissue position or for z tiling
-    if height_axis_end_um > 0:
+    if height_axis_range_um > 0:
         height_selection = easygui.choicebox('Z axis strategy.', 'Z axis positions', ['Tile in Z', 'Track in Z'])
         if height_selection == str('Tile in Z'):
             height_strategy = 'tile'
         elif height_selection == str('Track in Z'):
             height_strategy = 'track'
+    # the bug is back, here is a dirty patch
+    height_strategy = 'tile'
     
     if height_strategy == str('tile'):
         height_axis_overlap=0.2 #unit: percentage

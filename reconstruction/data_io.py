@@ -205,4 +205,4 @@ def return_opm_psf(wavelength_um):
     psf_path = Path('opm_psf_'+str(wavelength_nm).zfill(0)+'_nm.tif')
     opm_psf = tifffile.imread(psf_path)
 
-    return opm_psf
+    return np.flipud(opm_psf)
