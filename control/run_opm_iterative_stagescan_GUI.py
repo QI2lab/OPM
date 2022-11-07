@@ -1,13 +1,22 @@
 #!/usr/bin/env python
 
 '''
-OPM stage control with iterative fluidics.
+ASU high-NA OPM multi-channel stage scanning with iterative fluidics using pycromanager.
 
-TO DO:
-- Fix 405 nm laser or comment out "last round" code
-- Test autofocus code. Make SURE it cannot move beyond safe range. Better to fail than damage O3.
-- Fix harcoded crop areas in this code for new instrument build.
-- ETL control?
+Instrument rebuild (11/2022) TO DO (in order of priority):
+1. Alexis needs to check that fluidics code matches his napari-mm widefield code
+2. Fix 405 nm laser coupling into fiber or comment out "last round" code
+  - find cleaner way to note in the instrument setup and metadata so that this is easier to process
+3. ETL control. Device works in MM - can MM MDA stage widget record and then we grab during setup?
+4. Write out instrument configuration (.json instead of .csv?)
+  - stage and ETL positions
+  - laser powers
+  - camera exposure
+  - fluidics program path
+  - what else?
+5. Create "metadata" and "instrument" directories to keep file structure cleaner 
+6. Find a better way to resume a broken acquisition
+  - in addition to instrument setup on disk, update file with last succesful tile?
 
 Shepherd 11/22 - many changes to support instrument being rebuilt in new lab space.
 Shepherd 08/21 - refactor for easier reading, O2-O3 autofocus, and managing file transfer in seperate Python process
@@ -57,8 +66,8 @@ def main():
     # check if user wants to flush system?
     run_fluidics = False
     flush_system = False
-    run_type = easygui.choicebox('Type of run?', 'Iterative multiplexing setup', ['Flush fluidics (no imaging)', 'Iterative imaging', 'Single round (test)'])
-    if run_type == str('Flush fluidics (no imaging)'):
+    run_type = easygui.choicebox('Type of run?', 'OPM setup', ['Run fluidics (no imaging)', 'Iterative imaging', 'Single round (test)'])
+    if run_type == str('Run fluidics (no imaging)'):
         flush_system = True
         run_fluidics = True
         # load fluidics program
@@ -106,7 +115,7 @@ def main():
 
         # load user defined program from hard disk
         df_program, n_iterative_rounds = read_fluidics_program(program_name)
-        print('Number of iterative rounds: '+str(n_iterative_rounds))
+        print(f'Number of iterative rounds: {n_iterative_rounds}.')
 
     if flush_system:
         # run fluidics program for this round
@@ -124,7 +133,7 @@ def main():
     shutter_controller.closeShutter()
     
     # setup O3 piezo stage
-    O3_stage_name = df_config['O3_stage_name']
+    O3_stage_name = str(df_config['O3_stage_name'])
 
     # connect to Micromanager core instance
     core = Core()
@@ -346,6 +355,24 @@ def main():
 
         if config_changed:
 
+            # turn on 'transmit repeated commands' for Tiger
+            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
+
+            # set scan axis speed for large move to initial position
+            command = 'SPEED X=.1'
+            core.set_property('TigerCommHub','SerialCommand',command)
+
+            # check to make sure Tiger is not busy
+            ready='B'
+            while(ready!='N'):
+                command = 'STATUS'
+                core.set_property('TigerCommHub','SerialCommand',command)
+                ready = core.get_property('TigerCommHub','SerialResponse')
+                time.sleep(.500)
+
+            # turn off 'transmit repeated commands' for Tiger
+            core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
+
             core.set_xy_position(float(df_MM_setup['scan_axis_start_um']),float(df_MM_setup['tile_axis_start_um']))
             core.wait_for_device(xy_stage)
 
@@ -377,7 +404,10 @@ def main():
 
         gc.collect()
 
-        for y_idx in range(int(df_MM_setup['tile_axis_positions'])):
+        n_y_tiles = int(df_MM_setup['tile_axis_positions'])
+        n_z_tiles = int(df_MM_setup['height_axis_positions'])
+
+        for y_idx in range(n_y_tiles):
             
             # calculate tile axis position
             tile_position_um = float(df_MM_setup['tile_axis_start_um'])+(float(df_MM_setup['tile_axis_step_um'])*y_idx)
@@ -400,7 +430,7 @@ def main():
             # turn off 'transmit repeated commands' for Tiger
             core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
             
-            for z_idx in range(int(df_MM_setup['height_axis_positions'])):
+            for z_idx in range(n_z_tiles):
                 if df_MM_setup['height_strategy'] == 'tile':
                     # calculate height axis position
                     height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*z_idx)
@@ -492,7 +522,8 @@ def main():
                     core.wait_for_config('Camera-TriggerSource','EXTERNAL')
                     trigger_state = core.get_property('OrcaFusionBT','TRIGGER SOURCE')
 
-                print(time_stamp(), f'R: {r_idx+1}; Y: {y_idx+1} Z: {z_idx+1}.\nStage X: {stage_x}; Stage Y: {stage_y}; Stage Z: {stage_z}')
+                print(time_stamp(), f'round {r_idx+1}/{n_iterative_rounds}; y tile {y_idx+1}/{n_y_tiles}; z tile {z_idx+1}/{n_z_tiles}.')
+                print(time_stamp(), f'Stage location (um): x={stage_x}, y={stage_y}, z={stage_z}.')
                 # run acquisition for this ryz combination
                 with Acquisition(directory=str(df_MM_setup['save_directory']), name=str(save_name_ryz),
                                 post_camera_hook_fn=camera_hook_fn_with_core, show_display=False, max_multi_res_index=0) as acq:
@@ -575,7 +606,8 @@ def main():
 
                 # run O3 focus optimizer
                 O3_focus_positions[r_idx,y_idx,z_idx] = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
-                
+                print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions[r_idx,y_idx,z_idx]}.')
+
             gc.collect()
 
     # set lasers to zero power and software control

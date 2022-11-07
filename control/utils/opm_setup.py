@@ -292,7 +292,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     core.set_config('Camera-Setup','ScanMode3')
     core.wait_for_config('Camera-Setup','ScanMode3')
 
-    if debug: print('Exposure time = ' + str(exposure_ms))
+    if debug: print(f'Exposure time: {exposure_ms}.')
     
     # enforce exposure time
     core.set_exposure(exposure_ms)
@@ -302,7 +302,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
 
     # get actual framerate from micromanager properties
     actual_readout_ms = true_exposure+float(core.get_property('OrcaFusionBT','ReadoutTime')) #unit: ms
-    if debug: print('Full readout time = ' + str(actual_readout_ms))
+    if debug: print(f'Full readout time: {actual_readout_ms}.')
 
     # scan axis setup
     scan_axis_step_um = float(df_config['scan_axis_step_um'])  # unit: um 
@@ -314,7 +314,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     actual_exposure_s = actual_readout_ms / 1000. #unit: s
     scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s / n_active_channels,5) #unit: mm/s
     scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
-    if debug: print('Scan speed = '+str(scan_axis_speed))
+    if debug: print(f'Scan speed: {scan_axis_speed}.')
 
     # tile axis setup
     tile_axis_overlap=0.2 #unit: percentage
