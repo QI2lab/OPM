@@ -80,7 +80,7 @@ def read_fluidics_program(program_path):
     except Exception as e:
         raise Exception("Error in loading fluidics file:\n", e)
 
-    return df_fluidics, n_iterative_rounds
+    return df_fluidics
 
 def write_metadata(data_dict, save_path):
     """

@@ -114,13 +114,15 @@ def main():
         valve_controller.autoAddress()
 
         # load user defined program from hard disk
-        df_program, n_iterative_rounds = read_fluidics_program(program_name)
-        print(f'Number of iterative rounds: {n_iterative_rounds}.')
+        df_program = read_fluidics_program(program_name)
+        fluidics_rounds = df_program["rounds"]
+        n_iterative_rounds = len(fluidics_rounds)
+        print('Number of iterative rounds: '+str(n_iterative_rounds))
 
     if flush_system:
         # run fluidics program for this round
         success_fluidics = False
-        success_fluidics = run_fluidic_program(0, df_program, valve_controller, pump_controller)
+        success_fluidics = run_fluidic_program(1, df_program, valve_controller, pump_controller)
         if not(success_fluidics):
             print('Error in fluidics! Stopping scan.')
             sys.exit()
@@ -220,13 +222,15 @@ def main():
 
     gc.collect()
 
+    # @Doug: r_idx not defined yet right?
+    # maybe n_iterative_rounds, n_y, n_z?
     O3_focus_positions = np.zeros((r_idx,y_idx,z_idx),dtype=np.float)
 
     # setup functools to pass same core into camera trigger
     camera_hook_fn_with_core = partial(camera_hook_fn,core)
 
     # iterate over user defined program
-    for r_idx in range(n_iterative_rounds):
+    for r_idx, r_name in enumerate(fluidics_rounds):
  
         studio = bridge.get_studio()
         
@@ -235,12 +239,12 @@ def main():
         z_stage = core.get_focus_device()
 
         # TO DO: Fix this so it automatically detects what is already on the disk if user chooses to restart.
-        resume_r_idx = 0
+        resume_r_name = 0      # round index in human notation, starts from 1
         resume_y_tile_idx = 0
         resume_z_tile_idx = 0
 
         success_fluidics = False
-        success_fluidics = run_fluidic_program(r_idx, df_program, valve_controller, pump_controller)
+        success_fluidics = run_fluidic_program(r_name, df_program, valve_controller, pump_controller)
         if not(success_fluidics):
             print('Error in fluidics! Stopping scan.')
             sys.exit()
@@ -442,10 +446,10 @@ def main():
                 core.wait_for_device(z_stage)
 
                 # update save_name with current tile information
-                if (r_idx == resume_r_idx) and (y_idx == resume_y_tile_idx) and (z_idx == resume_z_tile_idx):
-                    save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a')
+                if (r_name == resume_r_name) and (y_idx == resume_y_tile_idx) and (z_idx == resume_z_tile_idx):
+                    save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_name).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a')
                 else:
-                    save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4))
+                    save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_name).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4))
 
                 # turn on 'transmit repeated commands' for Tiger
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
@@ -583,10 +587,10 @@ def main():
                     setup_metadata=False
 
                 # save stage scan positions after each tile
-                if (r_idx == resume_r_idx) and (y_idx == resume_y_tile_idx) and (z_idx == resume_z_tile_idx):
-                    save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a_stage_positions.csv')
+                if (r_name == resume_r_name) and (y_idx == resume_y_tile_idx) and (z_idx == resume_z_tile_idx):
+                    save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_name).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a_stage_positions.csv')
                 else:
-                    save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
+                    save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_name).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
                 save_name_stage_path = Path(df_MM_setup['save_directory']) / save_name_stage_positions
                 write_metadata(current_stage_data[0], save_name_stage_path)
 
@@ -605,6 +609,7 @@ def main():
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
                 # run O3 focus optimizer
+                # @Doug should we run it before the aquisition?
                 O3_focus_positions[r_idx,y_idx,z_idx] = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
                 print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions[r_idx,y_idx,z_idx]}.')
 
