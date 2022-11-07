@@ -239,11 +239,18 @@ def main():
         resume_y_tile_idx = 0
         resume_z_tile_idx = 0
 
+        # run O3 focus optimizer
+        manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
+        print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions[r_idx,y_idx,z_idx]}.')
+
         success_fluidics = False
         success_fluidics = run_fluidic_program(r_idx, df_program, valve_controller, pump_controller)
         if not(success_fluidics):
             print('Error in fluidics! Stopping scan.')
             sys.exit()
+        
+        manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
+        print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions[r_idx,y_idx,z_idx]}.')
 
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
         if r_idx == 0:
@@ -467,11 +474,6 @@ def main():
                 stage_y = np.round(float(xy_pos.y),2)
                 stage_z = np.round(float(core.get_position()),2)
 
-                # create stage position dictionary 
-                current_stage_data = [{'stage_x': float(stage_x), 
-                                    'stage_y': float(stage_y), 
-                                    'stage_z': float(stage_z)}]
-
                 # setup DAQ for laser strobing
                 try:    
                     # ----- DIGITAL input -------
@@ -522,13 +524,27 @@ def main():
                     core.wait_for_config('Camera-TriggerSource','EXTERNAL')
                     trigger_state = core.get_property('OrcaFusionBT','TRIGGER SOURCE')
 
+                # run O3 focus optimizer
+                O3_focus_position = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
+                print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_position}.')
+
+                # create stage position dictionary 
+                current_stage_data = [{'stage_x': float(stage_x), 
+                                    'stage_y': float(stage_y), 
+                                    'stage_z': float(stage_z),
+                                    'stage_O3': float(O3_focus_position)}]
+
+                # run acquisition for this ryz combination
                 print(time_stamp(), f'round {r_idx+1}/{n_iterative_rounds}; y tile {y_idx+1}/{n_y_tiles}; z tile {z_idx+1}/{n_z_tiles}.')
                 print(time_stamp(), f'Stage location (um): x={stage_x}, y={stage_y}, z={stage_z}.')
-                # run acquisition for this ryz combination
                 with Acquisition(directory=str(df_MM_setup['save_directory']), name=str(save_name_ryz),
                                 post_camera_hook_fn=camera_hook_fn_with_core, show_display=False, max_multi_res_index=0) as acq:
                     acq.acquire(events)
-                
+
+                # run O3 focus optimizer
+                manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
+                print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions[r_idx,y_idx,z_idx]}.')
+
                 # stop DAQ and make sure it is at zero
                 try:
                     ## Stop and clear both tasks
@@ -603,10 +619,6 @@ def main():
 
                 # turn off 'transmit repeated commands' for Tiger
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
-
-                # run O3 focus optimizer
-                O3_focus_positions[r_idx,y_idx,z_idx] = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
-                print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions[r_idx,y_idx,z_idx]}.')
 
             gc.collect()
 
