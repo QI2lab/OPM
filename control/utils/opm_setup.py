@@ -6,6 +6,21 @@ import easygui
 from pycromanager import Core
 
 def setup_asi_tiger(core,scan_axis_speed,scan_axis_start_mm,scan_axis_end_mm):
+    """
+    Setup ASI Tiger controller for constant speed stage scan
+
+    :param core: Core
+        current pycromanager core
+    :param scan_axis_speed: float
+        speed of scan axis in mm/s
+    :param scan_axis_start_mm: float
+        starting point for stage scan in mm
+    :param scan_axis_end_mm: float
+        stopping point for stage scan in mm
+    
+    :return None:
+    """
+
 
     # Setup Tiger controller to pass signal when the scan stage cross the start position to the PLC
     plcName = 'PLogic:E:36'
@@ -94,6 +109,18 @@ def setup_asi_tiger(core,scan_axis_speed,scan_axis_start_mm,scan_axis_end_mm):
 
 
 def setup_obis_laser_boxx(core,channel_powers,state):
+    """
+    Setup Coherent obis laser boxx
+
+    :param core: Core
+        current pycromanager core
+    :param channel_powers: ndarray
+        array of powers as percentage of max power
+    :param state: str
+        how laser boxx should expect input ('software' or 'digital')
+    
+    :return None:
+    """
 
     # turn off lasers
     core.set_config('Laser','Off')
@@ -140,10 +167,12 @@ def setup_obis_laser_boxx(core,channel_powers,state):
         core.wait_for_config('Laser','AllOn')
 
 
-def camera_hook_fn(event,bridge,event_queue):
+def camera_hook_fn(core,event,bridge,event_queue):
     """
     Hook function to start stage controller once camera is activated in EXTERNAL/START mode
 
+    :param core: Core
+        current pycromanager core
     :param event: dict
         dictionary of pycromanager events
     :param bridge: Bridge
@@ -154,22 +183,14 @@ def camera_hook_fn(event,bridge,event_queue):
     :return None:
     """
 
-    core_trigger = Core()
     command='1SCAN'
-    core_trigger.set_property('TigerCommHub','SerialCommand',command)
-
-    core_trigger = None
-    del core_trigger
-    gc.collect()
+    core.set_property('TigerCommHub','SerialCommand',command)
 
     return event
-    '''
-
-
 
 def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     """
-    Hook function to start stage controller once camera is activated in EXTERNAL/START mode
+    Parse MM GUI to retrieve exposure time, channels to use, powers, and stage positions
 
     :param core: Core
         active pycromanager MMcore object

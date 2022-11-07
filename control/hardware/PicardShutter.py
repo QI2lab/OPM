@@ -14,17 +14,17 @@ import time
 import clr
 clr.AddReference('PiUsbNet')
 import PiUsbNet
+import gc
 
 # ----------------------------------------------------------------------------------------
 # PicardShutter Class Definition
 # ----------------------------------------------------------------------------------------
 class PicardShutter():
-    def __init__(self,
-                 parameters = False):
+    def __init__(self,shutter_id,verbose=False):
 
         # Define attributes
-        self.shutter_id = parameters.get('picard_shutter_id', 752)
-        self.verbose = parameters.get('verbose',False)   
+        self.shutter_id = shutter_id
+        self.verbose = verbose  
         
         try:
             self.shutter: PiUsbNet.Shutter = PiUsbNet.Shutter()
@@ -39,6 +39,12 @@ class PicardShutter():
     # This function runs in a worker thread.
     def _shutter_state_changed(self, sender: PiUsbNet.Shutter, args: PiUsbNet.ShutterStateChangedEventArgs):
         if (self.verbose): print(f'Shutter state: {args.State}')
+
+    def printShutterState(self):
+        try:
+            print(self.shutter.State)
+        except PiUsbNet.UsbDeviceException as exc:
+            if self.verbose: print(f'PiUsbNet exception: {exc}')
 
     # open shutter
     def openShutter(self):
@@ -77,5 +83,8 @@ class PicardShutter():
             if self.verbose: print(f'PiUsbNet exception: {exc}')
 
     # make sure shutter is closed at shutdown
-    def close(self):
+    def shutDown(self):
         self.closeShutter()
+        self.shutter = None
+        time.sleep(.1)
+        gc.collect()

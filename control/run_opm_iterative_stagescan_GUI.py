@@ -4,8 +4,6 @@
 OPM stage control with iterative fluidics.
 
 TO DO:
-- Find all of Alexis' changes on OPM machine and server. Need to get everything into one branch and pushed to Github.
-- Commit my file clean so that this branch  only handles iterative stage scan acquisitions and creation of fidicual rounds
 - Fix 405 nm laser or comment out "last round" code
 - Test autofocus code. Make SURE it cannot move beyond safe range. Better to fail than damage O3.
 - Fix harcoded crop areas in this code for new instrument build.
@@ -27,7 +25,7 @@ from hardware.HamiltonMVP import HamiltonMVP
 from hardware.PicardShutter import PicardShutter
 
 # qi2lab OPM stage scan control functions for pycromanager
-from utils.data_io import read_config_file, read_fluidics_program, write_metadata
+from utils.data_io import read_config_file, read_fluidics_program, write_metadata, time_stamp
 from utils.fluidics_control import run_fluidic_program
 from utils.opm_setup import setup_asi_tiger, setup_obis_laser_boxx, camera_hook_fn, retrieve_setup_from_MM
 from utils.autofocus_remote_unit import manage_O3_focus
@@ -45,6 +43,7 @@ import sys
 import gc
 from pathlib import Path
 import numpy as np
+from functools import partial
 import easygui
 
 def main():
@@ -120,15 +119,12 @@ def main():
         sys.exit()
 
     # connect to alignment laser shutter
-    shutter_id = df_config['shutter_id']
-    shutter_parameters = {'shutter_id': shutter_id,
-                         'verbose': False}
-    shutter_controller = PicardShutter(shutter_parameters)
+    shutter_id = int(df_config['shutter_id'])
+    shutter_controller = PicardShutter(shutter_id=shutter_id,verbose=False)
     shutter_controller.closeShutter()
     
     # setup O3 piezo stage
-    # controller must be setup to have a virtual com port. Might need to follow 
-    O3_stage_name = df_config['piezo_stage_name']
+    O3_stage_name = df_config['O3_stage_name']
 
     # connect to Micromanager core instance
     core = Core()
@@ -151,7 +147,6 @@ def main():
     if roi_selection == str('256x2304'):
         roi_y_corner = 1152-128
         roi_imaging = [0,roi_y_corner,2304,256]
-        roi_alignment = [876,85,64,64]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('512x2304'):
         roi_y_corner = 1152-256
@@ -217,6 +212,9 @@ def main():
     gc.collect()
 
     O3_focus_positions = np.zeros((r_idx,y_idx,z_idx),dtype=np.float)
+
+    # setup functools to pass same core into camera trigger
+    camera_hook_fn_with_core = partial(camera_hook_fn,core)
 
     # iterate over user defined program
     for r_idx in range(n_iterative_rounds):
@@ -435,9 +433,9 @@ def main():
 
                 # query current stage positions
                 xy_pos = core.get_xy_stage_position()
-                stage_x = xy_pos.x
-                stage_y = xy_pos.y
-                stage_z = core.get_position()
+                stage_x = np.round(float(xy_pos.x),2)
+                stage_y = np.round(float(xy_pos.y),2)
+                stage_z = np.round(float(core.get_position()),2)
 
                 # create stage position dictionary 
                 current_stage_data = [{'stage_x': float(stage_x), 
@@ -494,10 +492,10 @@ def main():
                     core.wait_for_config('Camera-TriggerSource','EXTERNAL')
                     trigger_state = core.get_property('OrcaFusionBT','TRIGGER SOURCE')
 
-                print('R: '+str(r_idx)+' Y: '+str(y_idx)+' Z: '+str(z_idx))
+                print(time_stamp(), f'R: {r_idx+1}; Y: {y_idx+1} Z: {z_idx+1}.\nStage X: {stage_x}; Stage Y: {stage_y}; Stage Z: {stage_z}')
                 # run acquisition for this ryz combination
                 with Acquisition(directory=str(df_MM_setup['save_directory']), name=str(save_name_ryz),
-                                post_camera_hook_fn=camera_hook_fn, show_display=False, max_multi_res_index=0) as acq:
+                                post_camera_hook_fn=camera_hook_fn_with_core, show_display=False, max_multi_res_index=0) as acq:
                     acq.acquire(events)
                 
                 # stop DAQ and make sure it is at zero
@@ -576,7 +574,7 @@ def main():
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
                 # run O3 focus optimizer
-                O3_focus_positions[r_idx,y_idx,z_idx] = manage_O3_focus(core,roi_alignment,shutter_controller,O3_stage_name,verbose=False)
+                O3_focus_positions[r_idx,y_idx,z_idx] = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
                 
             gc.collect()
 
@@ -597,9 +595,9 @@ def main():
         # shutter_controller.close()
         valve_controller.close()
         pump_controller.close()
-    shutter_controller.close()
+    shutter_controller.shutDown()
 
-    del core
+    del core, bridge, studio
     gc.collect()
     
 #-----------------------------------------------------------------------------
