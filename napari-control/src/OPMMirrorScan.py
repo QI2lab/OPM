@@ -26,16 +26,16 @@ class OPMMirrorScan(MagicTemplate):
         self.channel_states=[False,False,False,False,False]
         self.exposure_ms = 10.0                 # unit: ms
         self.scan_axis_step_um = 0.4            # unit: um
-        self.scan_axis_calibration = 0.03925      # unit: V / um
-        self.galvo_neutral_volt = 0          # unit: V
-        self.scan_mirror_footprint_um = 50.0      # unit: um
+        self.scan_axis_calibration = 0.03925    # unit: V / um
+        self.galvo_neutral_volt = 0.            # unit: V
+        self.scan_mirror_footprint_um = 50.0    # unit: um
         self.camera_pixel_size_um = .115        # unit: um
         self.opm_tilt = 30                      # unit: degrees
 
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
         self.ROI_uleft_corner_x = int(0)  # unit: camera pixels
-        self.ROI_uleft_corner_y = int(896)  # unit: camera pixels
+        self.ROI_uleft_corner_y = int(1152-256)  # unit: camera pixels
         self.ROI_width_x = int(2304)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
 
@@ -549,7 +549,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal',
         call_button='Update exposure'
     )
-    def set_exposure(self, exposure_ms=2.0):
+    def set_exposure(self, exposure_ms=10.0):
         """
         Magicgui element to get camera exposure time
 
@@ -573,7 +573,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='vertical', 
         call_button="Update crop"
     )
-    def set_ROI(self, uleft_corner_x=200,uleft_corner_y=1300,width_x=1800,width_y=256):
+    def set_ROI(self, uleft_corner_x=0,uleft_corner_y=1152-256,width_x=2304,width_y=512):
         """
         Magicgui element to get camera ROI
 
@@ -607,7 +607,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='vertical',
         call_button='Update powers'
     )
-    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=100.0, power_730=0.0):
+    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=0.0, power_730=0.0):
         """
         Magicgui element to get laser powers (0-100%)
 
@@ -778,7 +778,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal', 
         call_button="Set"
     )
-    def set_save_path(self, save_path='d:/20220305_franky_MT_20nM_suc90_25um_2ms'):
+    def set_save_path(self, save_path=''):
         self.save_path = Path(save_path)
         self.save_path_setup = True
 
