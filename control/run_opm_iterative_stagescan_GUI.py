@@ -40,7 +40,7 @@ from utils.opm_setup import setup_asi_tiger, setup_obis_laser_boxx, camera_hook_
 from utils.autofocus_remote_unit import manage_O3_focus
 
 # pycromanager
-from pycromanager import Bridge, Core, Acquisition
+from pycromanager import Core, Acquisition, Studio
 
 # NI DAQ control
 import PyDAQmx as daq
@@ -115,8 +115,8 @@ def main():
 
         # load user defined program from hard disk
         df_program = read_fluidics_program(program_name)
-        fluidics_rounds = df_program["rounds"]
-        n_iterative_rounds = len(fluidics_rounds)
+        fluidics_rounds = df_program["round"]
+        n_iterative_rounds = df_program["round"].max()
         print('Number of iterative rounds: '+str(n_iterative_rounds))
 
     if flush_system:
@@ -139,7 +139,7 @@ def main():
 
     # connect to Micromanager core instance
     core = Core()
-    bridge = Bridge()
+    #bridge = Bridge()
 
     # make sure camera does not have an ROI set
     core.snap_image()
@@ -156,15 +156,15 @@ def main():
     # set ROI
     roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x2304', '512x2304', '1024x2034'])
     if roi_selection == str('256x2304'):
-        roi_y_corner = 1152-128
+        roi_y_corner = 1165-128
         roi_imaging = [0,roi_y_corner,2304,256]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('512x2304'):
-        roi_y_corner = 1152-256
+        roi_y_corner = 1165-256
         roi_imaging = [0,roi_y_corner,2304,512]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('1024x2304'):
-        roi_y_corner = 1152-512
+        roi_y_corner = 1165-512
         roi_imaging = [0,roi_y_corner,2304,1024]
         core.set_roi(*roi_imaging)
     
@@ -224,7 +224,6 @@ def main():
 
     # @Doug: r_idx not defined yet right?
     # maybe n_iterative_rounds, n_y, n_z?
-    O3_focus_positions = np.zeros((r_idx,y_idx,z_idx),dtype=np.float)
 
     # setup functools to pass same core into camera trigger
     camera_hook_fn_with_core = partial(camera_hook_fn,core)
@@ -232,7 +231,8 @@ def main():
     # iterate over user defined program
     for r_idx, r_name in enumerate(fluidics_rounds):
  
-        studio = bridge.get_studio()
+        #studio = bridge.get_studio()
+        studio = Studio()
         
         # get handle to xy and z stages
         xy_stage = core.get_xy_stage_device()
@@ -610,8 +610,8 @@ def main():
 
                 # run O3 focus optimizer
                 # @Doug should we run it before the aquisition?
-                O3_focus_positions[r_idx,y_idx,z_idx] = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
-                print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions[r_idx,y_idx,z_idx]}.')
+                O3_focus_position = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
+                print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_position}.')
 
             gc.collect()
 
@@ -634,7 +634,7 @@ def main():
         pump_controller.close()
     shutter_controller.shutDown()
 
-    del core, bridge, studio
+    del core, studio
     gc.collect()
     
 #-----------------------------------------------------------------------------

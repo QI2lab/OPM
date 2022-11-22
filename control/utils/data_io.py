@@ -75,7 +75,6 @@ def read_fluidics_program(program_path):
         df_fluidics["round"] = df_fluidics["round"].astype(int)
         df_fluidics["pump"] = df_fluidics["pump"].astype(int)
 
-        n_iterative_rounds = df_fluidics["round"].max()
         print("Fluidics program loaded")
     except Exception as e:
         raise Exception("Error in loading fluidics file:\n", e)
