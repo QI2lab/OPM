@@ -115,9 +115,14 @@ def main():
 
         # load user defined program from hard disk
         df_program = read_fluidics_program(program_name)
-        fluidics_rounds = df_program["round"]
-        n_iterative_rounds = df_program["round"].max()
+        fluidics_rounds = df_program["round"].unique()
+        print('Will execute fluidics rounds:', fluidics_rounds)
+        # When resuming fluidics experiments, the max round name and number can differ
+        max_round_name = df_program["round"].max()
+        n_iterative_rounds = len(fluidics_rounds)
         print('Number of iterative rounds: '+str(n_iterative_rounds))
+        if max_round_name != n_iterative_rounds:
+            print(f"Max round label is {max_round_name}")
 
     if flush_system:
         # run fluidics program for this round
