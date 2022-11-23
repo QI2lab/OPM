@@ -5,6 +5,8 @@ from npy2bdv import BdvEditor
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import os
+import pathlib
 
 def read_metadata(fname):
     """
@@ -155,3 +157,22 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
 
 def time_stamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def append_index_filepath(filepath):
+    """
+    Append a number to a file path if the file already exists,
+    the number increases as long as there is a file that exists.
+    """
+    if isinstance(filepath, (pathlib.WindowsPath, pathlib.PosixPath)):
+        to_pathlib = True
+        filepath = str(filepath.as_posix())
+    else:
+        to_pathlib = False
+
+    i = 1
+    while os.path.exists(filepath):
+        filepath = "".join(filepath.split('.')[:-1]) + f"-{i}." + filepath.split('.')[-1]
+        i += 1
+    if to_pathlib:
+        filepath = pathlib.Path(filepath)
+    return filepath

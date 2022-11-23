@@ -34,7 +34,7 @@ from hardware.HamiltonMVP import HamiltonMVP
 from hardware.PicardShutter import PicardShutter
 
 # qi2lab OPM stage scan control functions for pycromanager
-from utils.data_io import read_config_file, read_fluidics_program, write_metadata, time_stamp
+from utils.data_io import read_config_file, read_fluidics_program, write_metadata, time_stamp, append_index_filepath
 from utils.fluidics_control import run_fluidic_program
 from utils.opm_setup import setup_asi_tiger, setup_obis_laser_boxx, camera_hook_fn, retrieve_setup_from_MM
 from utils.autofocus_remote_unit import manage_O3_focus
@@ -62,6 +62,7 @@ def main():
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
     setup_metadata=True
     debug_flag = False
+    avoid_overwriting = True
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -462,6 +463,8 @@ def main():
                     save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_name).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_a')
                 else:
                     save_name_ryz = Path(str(df_MM_setup['save_name'])+'_r'+str(r_name).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4))
+                if avoid_overwriting:
+                    save_name_ryz = append_index_filepath(save_name_ryz)
 
                 # turn on 'transmit repeated commands' for Tiger
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','No')
@@ -602,7 +605,9 @@ def main():
                                         '561_power': float(channel_powers[2]),
                                         '635_power': float(channel_powers[3]),
                                         '730_power': float(channel_powers[4])}]
-                    scan_metadata_path = Path(df_MM_setup['save_directory']) / Path('scan_metadata.csv')
+                    scan_metadata_path = Path(df_MM_setup['save_directory']) / 'scan_metadata.csv'
+                    if avoid_overwriting:
+                        scan_metadata_path = append_index_filepath(scan_metadata_path)
                     write_metadata(scan_param_data[0], scan_metadata_path)
 
                     setup_metadata=False
@@ -613,6 +618,8 @@ def main():
                 else:
                     save_name_stage_positions = Path(str(df_MM_setup['save_name'])+'_r'+str(r_name).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
                 save_name_stage_path = Path(df_MM_setup['save_directory']) / save_name_stage_positions
+                if avoid_overwriting:
+                    save_name_stage_path = append_index_filepath(save_name_stage_path)
                 write_metadata(current_stage_data[0], save_name_stage_path)
 
                 # turn on 'transmit repeated commands' for Tiger
