@@ -62,6 +62,7 @@ def main():
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
     setup_metadata=True
     debug_flag = False
+    switch_last_round = False
     avoid_overwriting = True
 
     # check if user wants to flush system?
@@ -316,7 +317,7 @@ def main():
                     config_changed = True
 
         # if last round, switch to DAPI + alexa488 readout instead
-        if (r_idx == (n_iterative_rounds - 1)) and (run_fluidics):
+        if switch_last_round and (r_idx == (n_iterative_rounds - 1)) and (run_fluidics):
 
             # enable joystick
             core.set_property('XYStage:XY:31','JoystickEnabled','Yes')
