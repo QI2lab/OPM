@@ -177,8 +177,8 @@ def manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False):
     core.set_config('Camera-TriggerSource','INTERNAL')
     core.wait_for_config('Camera-TriggerSource','INTERNAL')
 
-    # set exposure to 50 ms
-    core.set_exposure(50)
+    # set exposure to 10 ms
+    core.set_exposure(10)
 
     updated_O3_stage_position = find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose)
    

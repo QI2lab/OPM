@@ -125,7 +125,7 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
                     print('Error in determining pump rate. Exiting.')
                     sys.exit()
 
-            print(f'Source: {source_name}; MVP unit: {mvp_unit}; Valve #: {valve_number}; Pump rate: {pump_rate}')
+            print(time_stamp(), f'Source: {source_name}; MVP unit: {mvp_unit}; Valve #: {valve_number}; Pump rate: {pump_rate}')
 
             # run pump
             pump_controller.startFlow(pump_rate,direction='Forward')

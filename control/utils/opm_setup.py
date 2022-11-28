@@ -166,8 +166,7 @@ def setup_obis_laser_boxx(core,channel_powers,state):
         core.set_config('Laser','AllOn')
         core.wait_for_config('Laser','AllOn')
 
-
-def camera_hook_fn(core,event,bridge,event_queue):
+def camera_hook_fn(event):
     """
     Hook function to start stage controller once camera is activated in EXTERNAL/START mode
 
@@ -183,8 +182,13 @@ def camera_hook_fn(core,event,bridge,event_queue):
     :return None:
     """
 
+    core_trigger = Core()
     command='1SCAN'
-    core.set_property('TigerCommHub','SerialCommand',command)
+    core_trigger.set_property('TigerCommHub','SerialCommand',command)
+    
+    core_trigger = None
+    del core_trigger
+    gc.collect()
 
     return event
 
