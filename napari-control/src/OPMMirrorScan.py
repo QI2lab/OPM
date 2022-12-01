@@ -10,6 +10,8 @@ import time
 import zarr
 
 from src.hardware.OPMNIDAQ import OPMNIDAQ
+from src.hardware.PicardShutter import PicardShutter
+from utils.autofocus_remote_unit import manage_O3_focus
 from src.utils.data_io import write_metadata
 from src.utils.image_post_processing import deskew
 from datetime import datetime
@@ -35,10 +37,17 @@ class OPMMirrorScan(MagicTemplate):
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
         self.ROI_uleft_corner_x = int(0)  # unit: camera pixels
-        self.ROI_uleft_corner_y = int(1152-256)  # unit: camera pixels
+        self.ROI_uleft_corner_y = int(1156-256)  # unit: camera pixels
         self.ROI_width_x = int(2304)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
 
+        # O3 piezo stage name
+        self.O3_stage_name='MCL NanoDrive Z Stage'
+
+        # shutter ID
+        self.shutter_id = 712
+
+        # default save path
         self.save_path = Path('D:/')
 
         self.channel_labels = ["405", "488", "561", "635", "730"]
@@ -72,7 +81,6 @@ class OPMMirrorScan(MagicTemplate):
     def _create_3d_t_worker(self):
         worker_3d_t = self._acquire_3d_t_data()
         self._set_worker_3d_t(worker_3d_t)
-        
 
     # set 3D timelapse acquistion thread worker
     def _set_worker_3d_t(self,worker_3d_t):
@@ -527,6 +535,10 @@ class OPMMirrorScan(MagicTemplate):
         # reset scan mirror position to neutral
         self.opmdaq.reset_scan_mirror()
 
+        # connect to Picard shutter
+        self.shutter_controller = PicardShutter(shutter_id=self.shutter_id,verbose=False)
+        self.shutter_controller.closeShutter()
+
     def _shutdown(self):
         """
         Shutdown OPM instrument in neutral state for all hardware
@@ -796,5 +808,18 @@ class OPMMirrorScan(MagicTemplate):
                 self.worker_3d_t_running = True
             else:
                 raise Exception('Setup save path and timelapse first.')
+        else:
+            raise Exception('Stop active live mode first.')
+
+    @magicgui(
+        auto_call=True,
+        autofocus_O2O3={"widget_type": "PushButton", "label": 'Autofocus O2-O3'},
+        layout='horizontal'
+    )
+    def autofocus_O2O3(self,autofocus_O2O3):
+        if not(self.worker_2d_running) and not(self.worker_3d_running) and not(self.worker_3d_t_running):
+            if self.DAQ_running:
+                self.opmdaq.stop_waveform_playback()
+            self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
         else:
             raise Exception('Stop active live mode first.')

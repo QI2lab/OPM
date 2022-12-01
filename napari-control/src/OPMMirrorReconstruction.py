@@ -110,7 +110,7 @@ class OPMMirrorReconstruction(MagicTemplate):
         nx = np.int64(x_pixels)                                           # (pixels)
 
         # create and open zarr file
-        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, int(nz), int(ny), int(nx)), dtype=np.uint16)
+        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, int(nz), int(ny)//2, int(nx)//2), dtype=np.uint16)
             
         # if retrospective flatfield is requested, try to import CuPY based flat-fielding
         if self.flatfield:
