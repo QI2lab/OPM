@@ -3,6 +3,7 @@ from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
 from magicgui.tqdm import trange
 from napari.qt.threading import thread_worker
+#from superqt.utils import ensure_main_thread
 
 from pathlib import Path
 import numpy as np
@@ -11,7 +12,7 @@ import zarr
 
 from src.hardware.OPMNIDAQ import OPMNIDAQ
 from src.hardware.PicardShutter import PicardShutter
-from utils.autofocus_remote_unit import manage_O3_focus
+from src.utils.autofocus_remote_unit import manage_O3_focus
 from src.utils.data_io import write_metadata
 from src.utils.image_post_processing import deskew
 from datetime import datetime
@@ -64,7 +65,7 @@ class OPMMirrorScan(MagicTemplate):
         self.DAQ_running = False
         self.save_path_setup = False
 
-        self.mmc = CMMCorePlus()
+        self.mmc = CMMCorePlus.instance()
 
     # set 2D acquistion thread worker
     def _set_worker_2d(self,worker_2d):
@@ -538,6 +539,7 @@ class OPMMirrorScan(MagicTemplate):
         # connect to Picard shutter
         self.shutter_controller = PicardShutter(shutter_id=self.shutter_id,verbose=False)
         self.shutter_controller.closeShutter()
+        self.shutter_state = 0
 
     def _shutdown(self):
         """
@@ -554,6 +556,8 @@ class OPMMirrorScan(MagicTemplate):
         if self.DAQ_running:
             self.opmdaq.stop_waveform_playback()
         self.opmdaq.reset_scan_mirror()
+
+        self.shutter_controller.shutDown()
 
     @magicgui(
         auto_call=False,
@@ -797,7 +801,7 @@ class OPMMirrorScan(MagicTemplate):
     # control timelapse 3D volume (hardware triggering)
     @magicgui(
         auto_call=True,
-        timelapse_mode_3D={"widget_type": "PushButton", "label": 'Start/Stop live (3D)'},
+        timelapse_mode_3D={"widget_type": "PushButton", "label": 'Start acquistion'},
         layout='horizontal'
     )
     def timelapse_mode_3D(self,timelapse_mode_3D):
@@ -811,6 +815,18 @@ class OPMMirrorScan(MagicTemplate):
         else:
             raise Exception('Stop active live mode first.')
 
+    @magicgui(
+        auto_call=True,
+        shutter_change={"widget_type": "PushButton", "label": 'Toggle alignment laser shutter.'},
+        layout='horizontal'
+    )
+    def shutter_change(self,shutter_change):
+            if self.shutter_state == 0:
+                self.shutter_controller.openShutter()
+                self.shutter_state = 1
+            else:
+                self.shutter_controller.closeShutter()
+                self.shutter_state = 0
     @magicgui(
         auto_call=True,
         autofocus_O2O3={"widget_type": "PushButton", "label": 'Autofocus O2-O3'},

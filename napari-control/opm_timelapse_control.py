@@ -13,6 +13,7 @@ douglas.shepherd@asu.edu
 
 from src.OPMMirrorScan import OPMMirrorScan
 import napari
+from pymmcore_widgets import StageWidget
 from pathlib import Path
 import sys
 
@@ -48,6 +49,9 @@ def main(path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_config
     instrument_control_widget._create_3d_t_worker()
 
     viewer.window.add_dock_widget(instrument_control_widget,name='Instrument control')
+    
+    stage_03 = StageWidget('MCL NanoDrive Z Stage')
+    viewer.window.add_dock_widget(stage_03)
 
     # start Napari
     napari.run()
