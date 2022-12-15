@@ -664,9 +664,8 @@ class OPMMirrorScan(MagicTemplate):
         states = [False,False,False,False,False]
         for channel in active_channels:
             if channel == 'Off':
-                states = [False,False,False,False,False]
-                break
-            if channel == '405':
+                states[0]=True
+            elif channel == '405':
                 states[0]=True
             elif channel == '488':
                 states[1]=True
@@ -685,7 +684,7 @@ class OPMMirrorScan(MagicTemplate):
 
     @magicgui(
         auto_call=False,
-        scan_mirror_footprint_um={"widget_type": "FloatSpinBox", "min": 5, "max": 225, "label": 'Mirror sweep (um)'},
+        scan_mirror_footprint_um={"widget_type": "FloatSpinBox", "min": 5, "max": 250, "label": 'Mirror sweep (um)'},
         layout='horizontal',
         call_button='Update scan range'
     )
