@@ -1,5 +1,5 @@
-pump_com_port,COM4
-valve_com_port,COM6
+pump_com_port,COM12
+valve_com_port,COM13
 shutter_id,712
 O3_stage_name,MCL NanoDrive Z Stage
 galvo_ao_pin,/Dev1/ao0

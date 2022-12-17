@@ -411,15 +411,15 @@ def main():
             for ii, ind in enumerate(active_channel_indices):
                 dataDO[2*ii::2*n_active_channels, int(ind)] = 1
 
-            # stop DAQ and make sure it is at zero
-            try:
-                ## Stop and clear both tasks
-                taskDI.StopTask()
-                taskDO.StopTask()
-                taskDI.ClearTask()
-                taskDO.ClearTask()
-            except daq.DAQError as err:
-                print("DAQmx Error %s"%err)
+            # # stop DAQ and make sure it is at zero
+            # try:
+            #     ## Stop and clear both tasks
+            #     taskDI.StopTask()
+            #     taskDO.StopTask()
+            #     taskDI.ClearTask()
+            #     taskDO.ClearTask()
+            # except daq.DAQError as err:
+            #     print("DAQmx Error %s"%err)
 
         # set camera to internal control
         core.set_config('Camera-TriggerSource','INTERNAL')
