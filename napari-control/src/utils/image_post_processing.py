@@ -18,7 +18,7 @@ from functools import partial
 import dask.array as da
 from dask.diagnostics import ProgressBar
 import gc
-import cupy as cp
+#import cupy as cp
 
 #try:
 #    import microvolution_py as mv
