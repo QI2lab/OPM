@@ -51,7 +51,9 @@ def main(path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_config
     viewer.window.add_dock_widget(instrument_control_widget,name='Instrument control')
     
     stage_03 = StageWidget('MCL NanoDrive Z Stage')
-    viewer.window.add_dock_widget(stage_03)
+    viewer.window.add_dock_widget(stage_03,name='O3 Zstage')
+    stage_01 = StageWidget('ZStage:M:37')
+    viewer.window.add_dock_widget(stage_01,name='O1 Zstage')
 
     # start Napari
     napari.run()
