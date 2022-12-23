@@ -8,6 +8,48 @@ Shepherd 11/2022
 
 import numpy as np
 from scipy import ndimage
+import time
+
+def apply_O3_focus_offset(core,O3_stage_name,current_O3_focus,O3_stage_offset,verbose=False):
+    """
+    :param core: Core
+        pycromanager Core object
+    :param O3_piezo_stage: str
+        name of O3 piezo stage in MM config
+    :param current_03_focus: float
+        current O3 position
+    :param O3_stage_offset: float
+        offset in microns
+    :param verbose: bool
+        print information on autofocus
+    
+    :returns O3_stage_pos:
+        offset O3 stage position
+    """
+
+    # grab position and name of current MM focus stage
+    exp_zstage_pos = np.round(core.get_position(),2)
+    exp_zstage_name = core.get_focus_device()
+    if verbose: print(f'Current z-stage: {exp_zstage_name} with position {exp_zstage_pos}')
+
+    # set MM focus stage to O3 piezo stage
+    core.set_focus_device(O3_stage_name)
+    core.wait_for_device(O3_stage_name)
+
+    # grab O3 focus stage position
+
+    O3_stage_pos = current_O3_focus + O3_stage_offset
+
+    core.set_position(np.round(O3_stage_pos,2))
+    core.wait_for_device(O3_stage_name)
+    time.sleep(.1)
+
+    core.set_focus_device(exp_zstage_name)
+    exp_zstage_pos = np.round(core.get_position(),2)
+    core.wait_for_device(exp_zstage_name)
+
+    return O3_stage_pos
+
 
 def calculate_focus_metric(image):
     """
@@ -21,7 +63,7 @@ def calculate_focus_metric(image):
     """
 
     # calculate focus metric
-    image[image>10000]=0
+    image[image>60000]=0
     image[image<100]=0
     kernel = [[0,1,0],[1,1,1],[0,1,0]]
     focus_metric = np.max(ndimage.minimum_filter(image,footprint=kernel))
@@ -62,7 +104,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
 
     # generate arrays
     n_O3_stage_steps=20.
-    O3_stage_step_size = .25
+    O3_stage_step_size = .1
     O3_stage_positions = np.round(np.arange(O3_stage_pos_start-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_pos_start+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float)
     focus_metrics = np.zeros(O3_stage_positions.shape[0])
     if verbose: print('Starting rough alignment.')
@@ -88,7 +130,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
 
     if verbose: print(f'Rough align position: {rough_best_O3_stage_pos} vs starting position: {O3_stage_pos_start}')
 
-    if np.abs(rough_best_O3_stage_pos-O3_stage_pos_start) < 2.:
+    if np.abs(rough_best_O3_stage_pos-O3_stage_pos_start) < 1.:
         core.set_position(rough_best_O3_stage_pos)
         core.wait_for_device(O3_stage_name)
         perform_fine = True
@@ -104,7 +146,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
     
     if perform_fine:
         n_O3_stage_steps=10.
-        O3_stage_step_size = .1
+        O3_stage_step_size = .05
         O3_stage_positions = np.round(np.arange(rough_best_O3_stage_pos-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),rough_best_O3_stage_pos+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float)
         focus_metrics = np.zeros(O3_stage_positions.shape[0])
         if verbose: print('Starting fine alignment.')
@@ -127,7 +169,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
         
         if verbose: print(f'Fine align position: {fine_best_O3_stage_pos} vs starting position: {rough_best_O3_stage_pos}')
         
-        if np.abs(fine_best_O3_stage_pos-rough_best_O3_stage_pos) < .5:
+        if np.abs(fine_best_O3_stage_pos-rough_best_O3_stage_pos) < .2:
             core.set_position(fine_best_O3_stage_pos)
             core.wait_for_device(O3_stage_name)
             best_03_stage_pos = fine_best_O3_stage_pos
@@ -177,8 +219,8 @@ def manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False):
     core.set_config('Camera-TriggerSource','INTERNAL')
     core.wait_for_config('Camera-TriggerSource','INTERNAL')
 
-    # set exposure to 10 ms
-    core.set_exposure(10)
+    # set exposure to 5 ms
+    core.set_exposure(5)
 
     updated_O3_stage_position = find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose)
    

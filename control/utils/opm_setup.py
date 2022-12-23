@@ -321,7 +321,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     if debug: print(f'Scan speed: {scan_axis_speed}.')
 
     # tile axis setup
-    tile_axis_overlap=0.2 #unit: percentage
+    tile_axis_overlap=0.1 #unit: percentage
     tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
     tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
     tile_axis_ROI = x_pixels*pixel_size_um  #unit: um
@@ -346,7 +346,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     height_strategy = 'tile'
     
     if height_strategy == str('tile'):
-        height_axis_overlap=0.2 #unit: percentage
+        height_axis_overlap=0.1 #unit: percentage
         height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
         height_axis_ROI = y_pixels*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
         height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um

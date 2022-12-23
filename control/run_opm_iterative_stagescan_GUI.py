@@ -18,6 +18,7 @@ Instrument rebuild (11/2022) TO DO (in order of priority):
 6. Find a better way to resume a broken acquisition
   - in addition to instrument setup on disk, update file with last succesful tile?
 
+Shepherd 12/22 - hack together O3 focus changing to account for RI mismatch. NOT a good solution, but want to get data.
 Shepherd 11/22 - many changes to support instrument being rebuilt in new lab space.
 Shepherd 08/21 - refactor for easier reading, O2-O3 autofocus, and managing file transfer in seperate Python process
 Shepherd 07/21 - switch to interleaved excitation during stage scan and initial work on O2-O3 autofocusing
@@ -37,7 +38,7 @@ from hardware.PicardShutter import PicardShutter
 from utils.data_io import read_config_file, read_fluidics_program, write_metadata, time_stamp, append_index_filepath
 from utils.fluidics_control import run_fluidic_program
 from utils.opm_setup import setup_asi_tiger, setup_obis_laser_boxx, camera_hook_fn, retrieve_setup_from_MM
-from utils.autofocus_remote_unit import manage_O3_focus
+from utils.autofocus_remote_unit import manage_O3_focus, apply_O3_focus_offset
 
 # pycromanager
 from pycromanager import Core, Acquisition, Studio
@@ -59,10 +60,13 @@ def main():
     """"
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
+    # O3 offset per plane
+    O3_offset_per_z = -0.8
+
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
     setup_metadata=True
     debug_flag = False
-    switch_last_round = False
+    switch_last_round = True
     avoid_overwriting = True
 
     # check if user wants to flush system?
@@ -160,18 +164,19 @@ def main():
         x_pixels = core.get_image_width()
     
     # set ROI
-    roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x2304', '512x2304', '1024x2034'])
-    if roi_selection == str('256x2304'):
-        roi_y_corner = 1165-128
-        roi_imaging = [0,roi_y_corner,2304,256]
+    roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x1900', '512x1900', '1024x1900'])
+    if roi_selection == str('256x1900'):
+        roi_y_corner = 1180-128
+        roi_x_corner = 224
+        roi_imaging = [roi_x_corner,roi_y_corner,1900,256]
         core.set_roi(*roi_imaging)
-    elif roi_selection == str('512x2304'):
-        roi_y_corner = 1165-256
-        roi_imaging = [0,roi_y_corner,2304,512]
+    elif roi_selection == str('512x1900'):
+        roi_y_corner = 1180-256
+        roi_imaging = [roi_x_corner,roi_y_corner,1900,512]
         core.set_roi(*roi_imaging)
-    elif roi_selection == str('1024x2304'):
-        roi_y_corner = 1165-512
-        roi_imaging = [0,roi_y_corner,2304,1024]
+    elif roi_selection == str('1024x1900'):
+        roi_y_corner = 1180-512
+        roi_imaging = [roi_x_corner,roi_y_corner,1900,1024]
         core.set_roi(*roi_imaging)
     
     # set lasers to zero power and software control
@@ -496,6 +501,12 @@ def main():
                 O3_focus_position = manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
                 print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_position}.')
 
+                # move O3 to correct position to account for RI mismatch
+                O3_focus_offset = z_idx * O3_offset_per_z
+                offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,O3_focus_offset,verbose=False)
+                print(time_stamp(), f'Offset O3 focus stage position (um) = {offset_O3_focus_position}.')
+                
+
                 # setup DAQ for laser strobing
                 try:    
                     # ----- DIGITAL input -------
@@ -575,6 +586,10 @@ def main():
 
                 core.set_config('Laser','Off')
                 core.wait_for_config('Laser','Off')
+
+                # move O3 back to "real" focus
+                offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,0.0,verbose=False)
+                print(time_stamp(), f'Offset O3 focus stage position (um) = {offset_O3_focus_position}.')
 
                 # save experimental info after first tile. 
                 # we do it this way so that Pycromanager can manage directory creation
