@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp2d
 
+
 # ROI tools
 def get_skewed_roi_size(sizes, theta, dc, dstep, ensure_odd=True):
     """
@@ -72,7 +73,7 @@ def get_skewed_coords(sizes, dc, ds, theta, scan_direction="lateral"):
 
     return x, y, z
 
-def create_psf_silicone_100x(dxy, dz, nxy, nz, ex_NA,ex_wvl,em_wvl):
+def create_psf_silicone_100x(dxy, dz, nxy, nz, ex_NA,ex_wvl,em_wvl,pz):
     """
     Create OPM PSF in coverslip coordinates
     :param dxy: spacing of xy pixels
@@ -81,40 +82,63 @@ def create_psf_silicone_100x(dxy, dz, nxy, nz, ex_NA,ex_wvl,em_wvl):
     :param nz: number of z planes
     :param ex_NA: excitaton NA
     :param ex_wvl: excitation wavelength in microns
-    :param em_wvl: emission wavelength in microns 
+    :param em_wvl: emission wavelength in microns
+    :param pz: microns above coverslip
     :return tot_psf:
     """
 
     silicone_lens = {
+
         'ni0': 1.4, # immersion medium RI design value
         'ni': 1.4,  # immersion medium RI experimental value
-        'ns': 1.45,  # specimen refractive index
-        'tg': 170, # microns, coverslip thickness
-        'tg0': 170 # microns, coverslip thickness design value
+        'tg0': 170, # microns, coverslip thickness design value
+        'tg': 170,  # microns, coverslip thickness
+        'ns': 1.38,  # specimen refractive index
+        'ti0': 300,
+        #'nxy': nxy,
+        #'dxy': dxy,
+        #'wvl': em_wvl,
+        #'pz': pz
     }
     ex_lens = {**silicone_lens, 'NA': ex_NA}
     em_lens = {**silicone_lens, 'NA': 1.35}
 
-    # The psf model to use
-    # can be any of {'vectorial', 'scalar', or 'microscpsf'}
-    func = 'vectorial'
+    # # The psf model to use
+    # # can be any of {'vectorial', 'scalar', or 'microscpsf'}
+    # func = 'vectorial'
 
-    # the main function
-    _, _, tot_psf = psfm.tot_psf(nx=nxy, nz=nz, dxy=dxy, dz=dz, pz=15,
-                                        x_offset=0, z_offset=0,
-                                        ex_wvl = ex_wvl, em_wvl = em_wvl,
-                                        ex_params=ex_lens, em_params=em_lens,
-                                        psf_func=func)    
+    # # the main function
+    # _, _, tot_psf = psfm._core.tot_psf(nx=nxy, nz=nz, dxy=dxy, dz=dz, 
+    #                                     pz = pz, x_offset=0, z_offset=0,
+    #                                     ex_wvl = ex_wvl, em_wvl = em_wvl,
+    #                                     ex_params=ex_lens, em_params=em_lens,
+    #                                     psf_func=func)
+
+    lim = (nz - 1) * dz / 2
+    zv = np.linspace(-lim + pz, lim + pz, nz)
+    
+    tot_psf = psfm.vectorial_psf(zv=zv,nx=nxy,dxy=dxy,pz=pz,wvl=em_wvl,params=em_lens)
+    #tot_psf = psfm.vectorialXYZFocalScan(em_lens, dxy, nxy, zv2_mod, pz=pz, wvl=em_wvl, zd=200e3)
+
     return tot_psf
 
-def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
+def generate_skewed_psf(ex_NA,ex_wvl,em_wvl,pz,plot=False):
     """
     Create OPM PSF in skewed coordinates
-    :param ex_NA: excitaton NA
-    :param ex_wvl: excitation wavelength in microns
-    :param em_wvl: emission wavelength in microns 
-    :return skewed_psf:
+    :param ex_NA: float
+        excitaton NA
+    :param ex_wvl: float
+        excitation wavelength in microns
+    :param em_wvl: float
+        emission wavelength in microns 
+   :param pz: float
+        distance above coverslip in microns
+    
+    :return skewed_psf: np.ndarray
+        OPM PSF in skewed coordinates
     """
+
+    
     
     dc = 0.115
     na = 1.35
@@ -124,8 +148,9 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
 
     xy_res = 1.6163399561827614 / np.pi * em_wvl / na
     z_res = 2.355*(np.sqrt(6) / np.pi * ni * em_wvl / na ** 2)
-
-    roi_skewed_size = get_skewed_roi_size([z_res * 5, xy_res * 5, xy_res * 5],
+    z_res_mod = z_res + np.divide(pz+1e-12,15) / 5
+    
+    roi_skewed_size = get_skewed_roi_size([z_res_mod * 5, xy_res * 5, xy_res * 5],
                                                           theta, dc, dstage, ensure_odd=True)
     # make square
     roi_skewed_size[2]= roi_skewed_size[1]
@@ -153,23 +178,39 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
     yg = np.arange(nxy) * dxy
     yg -= yg.mean()
 
-    psf_grid = create_psf_silicone_100x(dxy, dz, nxy, nz, na,ex_wvl,em_wvl)
-    psf_grid = psf_grid / np.max(psf_grid[nz//2])
 
-    #psf_norm = psf_full[nz//2,:]
-    #psf_grid = psf_full/(psf_norm+1e-10)
+    psf_grid = create_psf_silicone_100x(dxy, dz, nxy, nz, na, ex_wvl, em_wvl, pz)
 
-    # # plot gridded psf
-    # figh = plt.figure()
-    # ax = plt.subplot(1, 2, 1)
-    # plt.imshow(psf_grid[nz//2])
+    if plot:
+    # plot gridded psf
+        figh1 = plt.figure()
+        ax11 = plt.subplot(2, 2, 1)
+        plt.imshow(psf_grid[psf_grid.shape[0]//2])
 
-    # ax = plt.subplot(1, 2, 2)
-    # plt.imshow(psf_grid[:, nxy//2])
+        ax12 = plt.subplot(2, 2, 2)
+        plt.imshow(psf_grid[:, psf_grid.shape[1]//2, :])
+
+        ax13 = plt.subplot(2, 2, 3)
+        plt.imshow(psf_grid[:, :, psf_grid.shape[2]//2])
 
     # get value from interpolation
     skewed_psf = np.zeros(roi_skewed_size)
     for ii in range(nz):
         skewed_psf[:, ii, :] = interp2d(xg, yg, psf_grid[ii], kind="linear")(x.ravel(), y[:, ii].ravel())
+
+    if plot:
+        # plot gridded psf
+        figh2 = plt.figure()
+        ax21 = plt.subplot(2, 2, 1)
+        plt.imshow(skewed_psf[skewed_psf.shape[0]//2])
+
+        ax22 = plt.subplot(2, 2, 2)
+        plt.imshow(skewed_psf[:, skewed_psf.shape[1]//2, :])
+
+        ax23 = plt.subplot(2, 2, 3)
+        plt.imshow(skewed_psf[:, :, skewed_psf.shape[2]//2])
+
+        figh1.show()
+        figh2.show()
 
     return skewed_psf

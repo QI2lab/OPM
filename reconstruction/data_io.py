@@ -187,7 +187,7 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
 
     return affine_xforms
 
-def return_opm_psf(wavelength_um):
+def return_opm_psf(wavelength_um,z_idx):
     """
     Load pre-generated OPM psf
 
@@ -195,14 +195,34 @@ def return_opm_psf(wavelength_um):
 
     :param wavelength: float
         wavelength in um
+
+    :param z_idx: int
+        index of z slice. Assume 15 steps above coverslip for now
         
     :return psf: ndarray
         pre-generated skewed PSF
     """ 
+    if z_idx == 0 or z_idx == 1:
+        psf_idx = 0
+    elif z_idx == 2 or z_idx == 3:
+        psf_idx = 1
+    elif z_idx == 4 or z_idx == 5:
+        psf_idx = 2
+    elif z_idx == 6 or z_idx == 7:
+        psf_idx = 3
+    elif z_idx == 8 or z_idx == 9:
+        psf_idx = 4
+    elif z_idx == 10 or z_idx == 11:
+        psf_idx = 5
+    elif z_idx == 12 or z_idx == 13:
+        psf_idx = 6
+    elif z_idx == 14 or z_idx == 15:
+        psf_idx = 7
 
-    wavelength_nm = int(np.round(wavelength_um*1000,0))
+    wavelength_nm = int(wavelength_um*100)
+    pz = int((psf_idx) * 15)
 
-    psf_path = Path('opm_psf_'+str(wavelength_nm).zfill(0)+'_nm.tif')
+    psf_path = Path('psfs') / Path('opm_psf_w'+str(wavelength_nm)+'_p'+str(pz)+'.tiff')
     opm_psf = tifffile.imread(psf_path)
 
     return np.flipud(opm_psf)

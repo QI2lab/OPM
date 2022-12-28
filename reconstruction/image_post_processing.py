@@ -4,7 +4,12 @@ Reconstruction tools
 
 Image processing tools for OPM reconstruction
 
-Last updated: Shepherd 01/22 - changes to include dexp deconvolution and recent other changes.
+Last updated: Shepherd 12/22 - Remove dexp, use cucim L-R, add CuPy verison of periodic-smooth decomposition before L-R decon
+
+To install cucim on windows:
+pip install -e "git+https://github.com/rapidsai/cucim.git@v22.12.00#egg=cucim&subdirectory=python/cucim"
+
+Check version number (...@v22.12.00...) for most recent RapidsAI API to install 
 '''
 
 #!/usr/bin/env python
@@ -18,19 +23,33 @@ from functools import partial
 import dask.array as da
 from dask.diagnostics import ProgressBar
 import gc
-import cupy as cp
 
 try:
-    import microvolution_py as mv
-    DECON_LIBRARY = 'mv'
+    import cupy as cp
+    GPU_AVAILABLE=True
 except:
+    GPU_AVAILABLE=False
+
+if GPU_AVAILABLE:
     try:
-        from dexp.utils.backends import Backend, CupyBackend, NumpyBackend
-        from dexp.processing.deconvolution.lr_deconvolution import lucy_richardson_deconvolution
-        from dexp.processing.restoration.dehazing import dehaze
-        DECON_LIBRARY = 'dexp'
+        import microvolution_py as mv_decon
+        DECON_LIBRARY = 'mv'
     except:
-        DECON_LIBRARY = None
+        try:
+            from clij2fft.richardson_lucy import richardson_lucy_nc
+            import clij2fft
+            DECON_LIBRARY = 'clij'
+        except:
+            try:
+                from cupyx.scipy.signal import fftconvolve
+                from cucim.skimage.restoration import denoise_tv_chambolle
+                DECON_LIBRARY = 'custom'
+            except:
+                try:
+                    from cucim.skimage.restoration import richardson_lucy as cucim_decon
+                    DECON_LIBRARY = 'cucim'
+                except:
+                    DECON_LIBRARY = None
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
 @njit(parallel=True)
@@ -175,7 +194,7 @@ def perform_flat_field(flat_field,dark_field,stack):
 
     return corrected_stack
 
-def lr_deconvolution(image,psf,iterations=50):
+def lr_deconvolution(image,psf,iterations=5):
     """
     Tiled Lucy-Richardson deconvolution using DECON_LIBRARY
 
@@ -188,70 +207,80 @@ def lr_deconvolution(image,psf,iterations=50):
     :return deconvolved: ndarray
         deconvolved image
     """
-    
-    # create dask array
-    scan_chunk_size = 512
+
+    # create dask array and apodization window
+    scan_chunk_size = 256
     if image.shape[0]<scan_chunk_size:
-        dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]))
-        overlap_depth = (0,2*psf.shape[1],2*psf.shape[1])
+        dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]//2))
+        overlap_depth = (psf.shape[0],psf.shape[1],psf.shape[2])
     else:
-        dask_raw = da.from_array(image,chunks=(scan_chunk_size,image.shape[1],image.shape[2]))
-        overlap_depth = 2*psf.shape[0]
+        dask_raw = da.from_array(image,chunks=(scan_chunk_size,image.shape[1],image.shape[2]//2))
+        overlap_depth = (psf.shape[0],psf.shape[1],psf.shape[2])
     del image
     gc.collect()
 
-    if DECON_LIBRARY=='dexp':
-        # define dask dexp partial function for GPU LR deconvolution
-        lr_dask = partial(dexp_lr_decon,psf=psf,num_iterations=iterations,padding=2*psf.shape[0],internal_dtype=np.float16)
-    else:
+    if DECON_LIBRARY=='mv':
         lr_dask = partial(mv_lr_decon,psf=psf,num_iterations=iterations)
-
+    elif DECON_LIBRARY=='cucim':
+        lr_dask = partial(cucim_lr_decon,psf=psf,num_iter=iterations,clip=False,filter_epsilon=1)
+    elif DECON_LIBRARY=='custom':
+        lr_dask = partial(custom_lr,psf=psf,num_iters=iterations)
+    elif DECON_LIBRARY=='clij':
+        lr_dask = partial(clij_lr,psf=psf,num_iters=iterations,tau=.0002)
 
     # create dask plan for overlapped blocks
-    dask_decon = da.map_overlap(lr_dask,dask_raw,depth=overlap_depth,boundary=None,trim=True,meta=np.array((), dtype=np.uint16))
+    dask_decon = da.map_overlap(lr_dask,dask_raw,depth=overlap_depth,boundary='reflect',trim=True,meta=np.array((), dtype=np.uint16))
 
     # perform LR deconvolution in blocks
-    if DECON_LIBRARY=='dexp':
-        with CupyBackend(enable_cutensor=True,enable_cub=True,enable_fft_planning=True):
-            with ProgressBar():
-                decon_data = dask_decon.compute(scheduler='single-threaded')
-    else:
-        with ProgressBar():
-            decon_data = dask_decon.compute(scheduler='single-threaded')
+    with ProgressBar():
+        decon_data = dask_decon.compute(scheduler='single-threaded')
 
     # clean up memory
-    cp.clear_memo()
     del dask_decon
     gc.collect()
-    
+
+    cp.clear_memo()
+    cp._default_memory_pool.free_all_blocks()
+
     return decon_data.astype(np.uint16)
 
-def dexp_lr_decon(image,psf,num_iterations,padding,internal_dtype):
+def cucim_lr_decon(image,psf,num_iter,clip=False,filter_epsilon=1,camera_bkd=100):
     """
-    Lucy-Richardson deconvolution using dexp library
+    Lucy-Richardson deconvolution using RapidsAI cuCIM library
 
     :param image: ndarray
         data tile generated by dask
-    :param skewed_psf: ndarray
-        theoretical PSF
-    :param padding: int
-        internal padding for deconvolution
-    :param internal_dtype: dtype
-        data type to use on GPU
+    :param psf: ndarray
+        skewed PSF
+    :param num_iters: int
+        number of iterations
+    :param clip: bool
+        clip above np.abs(1). Default False
+    :param filter_epsilon:
+        set values below this to zero
+    :param camera_bkd:
+        camera background to substract
+
     :return result: ndarray
         deconvolved data tile
     """
 
-    # LR deconvolution on GPU
-    deconvolved = lucy_richardson_deconvolution(image.astype(np.float16), psf.astype(np.float16), num_iterations=num_iterations, padding=padding, blind_spot=3, internal_dtype=internal_dtype)
-    deconvolved = _c(dehaze(deconvolved, in_place=True, internal_dtype=internal_dtype))
+    # substract camera offset and enforce positivity
+    image_cp = cp.asarray(image.astype(np.float32))
+    psf_cp = cp.asarray(psf.astype(np.float32))
 
-    # clean up memory
-    del image, psf
-    cp.clear_memo()
+    result_cp = cucim_decon(image_cp,psf_cp,num_iter=num_iter,clip=clip,filter_epsilon=filter_epsilon)
+    result_cp[result_cp<0]=0
+    result = cp.asnumpy(result_cp)
+    del image_cp, psf_cp, result_cp
+
     gc.collect()
+
     
-    return deconvolved.astype(np.uint16)
+    cp.clear_memo()
+    cp._default_memory_pool.free_all_blocks()
+
+    return result.astype(np.uint16)
 
 def mv_lr_decon(image,psf,num_iterations):
     '''
@@ -267,7 +296,7 @@ def mv_lr_decon(image,psf,num_iterations):
         deconvolved image 
     '''
 
-    params = mv.DeconParameters()
+    params = mv_decon.DeconParameters()
     params.generatePsf = False
     params.nx = image.shape[2]
     params.ny = image.shape[1]
@@ -281,12 +310,12 @@ def mv_lr_decon(image,psf,num_iterations):
     params.psfDr = 115.0
     params.psfDz = 400.0
     params.iterations = num_iterations
-    params.background = 50
-    params.regularizationType=mv.RegularizationType_TV
-    params.scaling = mv.Scaling_U16
+    params.background = 100
+    params.regularizationType=mv_decon.RegularizationType_TV
+    params.scaling = mv_decon.Scaling_U16
 
     try:
-        launcher = mv.DeconvolutionLauncher()
+        launcher = mv_decon.DeconvolutionLauncher()
         image = image.astype(np.float16)
 
         launcher.SetParameters(params)
@@ -314,13 +343,71 @@ def mv_lr_decon(image,psf,num_iterations):
 
     return new_image.astype(np.uint16)
 
-def _c(array):
-    """
-    Transfer dexp image from GPU to CPU
+def clij_lr(image,psf,num_iters,tau):
 
-    :param array: dexp
-        array on dexp backend
-    :return array: ndarray
-        array converted to numpy
-    """
-    return Backend.to_numpy(array)
+    result = richardson_lucy_nc(image.astype(np.float32),psf.astype(np.float32),num_iters,tau)
+
+    return result.astype(np.uint16)
+
+def custom_lr(image,psf,num_iters):
+
+    cache = cp.fft.config.get_plan_cache()
+
+    image_cp = cp.asarray(image.astype(np.float32),dtype=cp.float32)
+    psf_cp = cp.asarray(psf.astype(np.float32),dtype=cp.float32)
+
+    nz, ny, nx = image_cp.shape
+
+    crop_z = psf_cp.shape[0]//2
+    crop_y = psf_cp.shape[1]//2
+    crop_x = psf_cp.shape[2]//2
+
+    def H(density):
+
+        blurred_glow = fftconvolve(density, psf_cp, mode='same')
+        blurred_glow[blurred_glow <= 1e-12] = 1e-12 # Avoid true zeros
+        blurred_glow_crop = blurred_glow[crop_z:density.shape[0]-crop_z,
+                                        crop_y:density.shape[1]-crop_y,
+                                        crop_x:density.shape[2]-crop_x]
+
+        del blurred_glow
+        gc.collect()
+
+        return blurred_glow_crop
+            
+    # Define H_t, the transpose of the forward measurement operator
+    def H_t(ratio):
+        correction_factor = cp.zeros((nz, ny, nx),dtype=cp.float32)
+        padded_ratio = cp.pad(ratio,
+                             ((crop_z, crop_z),
+                              (crop_y, crop_y),
+                              (crop_x, crop_x)),
+                             mode='constant')
+        correction_factor = fftconvolve(padded_ratio, psf_cp, mode='same')
+
+        del padded_ratio
+        gc.collect()
+
+        return correction_factor
+
+    H_t_norm = H_t(cp.ones_like(image_cp)) # Normalization factor
+
+    estimate = H_t(cp.ones_like(image_cp)) # Naive initial belief
+
+    for ii in range(num_iters):
+        estimate *= H_t(image_cp / H(estimate)) / H_t_norm
+        estimate = denoise_tv_chambolle(estimate,weight=1e-6,channel_axis=0)
+
+    result = cp.asnumpy(estimate[crop_z:estimate.shape[0]-crop_z,
+                                 crop_y:estimate.shape[1]-crop_y,
+                                 crop_x:estimate.shape[2]-crop_x])
+
+    del image_cp, psf_cp, H_t_norm, estimate
+    gc.collect()
+
+    cache.clear()
+
+    cp.clear_memo()
+    cp._default_memory_pool.free_all_blocks()
+
+    return result.astype(np.uint16)

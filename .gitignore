@@ -6,3 +6,5 @@ control/define_fluidics_program.ipynb
 reconstruction/microvolution.lic
 *.dll
 *.xml
+*.tif
+*.tiff
