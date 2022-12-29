@@ -1,23 +1,45 @@
 '''
-Initial work on napari interface to reconstruct OPM timelapse data
+Napari interface to process OPM timelapse data
 
+TO DO: - Change to OME-Zarr output
+       - Add OME-tiff resave option
+       - Add ability to load old data
+       - Add option for number of iterations & TV setting for clij2-fft
+
+Last update: 12/2022; Update to use clij2-fft, remove flatfield (due to Powell lens), remove dexp dependence
 D. Shepherd - 12/2021
 '''
 
 from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
 from magicgui.tqdm import trange
-import napari
 from pathlib import Path
 import numpy as np
 from src.utils.image_post_processing import deskew
 from napari.qt.threading import thread_worker
+from napari.utils import progress
 import zarr
 import dask.array as da
 from src.utils.data_io import read_metadata, return_data_from_zarr_to_numpy, return_opm_psf
 from skimage.measure import block_reduce
 from itertools import compress
 import gc
+try:
+    import cupy as cp
+    CP_AVAILABLE = True
+except:
+    CP_AVAILABLE = False
+
+if CP_AVAILABLE:
+    try:
+        from cucim.skimage.exposure import match_histograms
+        CUCIM_AVAILABLE = True
+    except:
+        from skimage.exposure import match_histograms
+        CUCIM_AVAILABLE = False
+else:
+    from skimage.exposure import match_histograms
+    CUCIM_AVAILABLE = False
 
 # OPM control UI element            
 @magicclass(labels=False)
@@ -25,7 +47,6 @@ class OPMMirrorReconstruction(MagicTemplate):
 
     def __init__(self):
         self.decon = False
-        self.flatfield = False
         self.debug = False
         self.channel_idxs=[0,1,2,3,4]
         self.active_channels=[False,False,False,False,False]
@@ -84,14 +105,10 @@ class OPMMirrorReconstruction(MagicTemplate):
         dataset_zarr = zarr.open(self.data_path / Path(root_name+'.zarr'),mode='r')
 
         # create output directory
-        if self.decon == 0 and self.flatfield == 0:
+        if self.decon == 0:
             output_dir_path = self.data_path / 'deskew_output'
-        elif self.decon == 0 and self.flatfield == 1:
-            output_dir_path = self.data_path / 'deskew_flatfield_output'
-        elif self.decon == 1 and self.flatfield == 0:
+        elif self.decon == 1:
             output_dir_path = self.data_path / 'deskew_decon_output'
-        elif self.decon == 1 and self.flatfield == 1:
-            output_dir_path = self.data_path / 'deskew_flatfield_decon_output'
         output_dir_path.mkdir(parents=True, exist_ok=True)
 
         # create name for zarr directory
@@ -111,12 +128,8 @@ class OPMMirrorReconstruction(MagicTemplate):
 
         # create and open zarr file
         opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, int(nz), int(ny)//2, int(nx)//2), dtype=np.uint16)
-            
-        # if retrospective flatfield is requested, try to import CuPY based flat-fielding
-        if self.flatfield:
-            pass
-
-        # if decon is requested, try to import microvolution wrapper or dexp library
+        
+        # if decon is requested, try to import microvolution wrapper or clij2-fft library
         if self.decon:
             #from src.utils.opm_psf import generate_skewed_psf
             from src.utils.image_post_processing import lr_deconvolution
@@ -124,10 +137,11 @@ class OPMMirrorReconstruction(MagicTemplate):
             skewed_psf = []
 
             for ch_idx in np.flatnonzero(active_channels):
-                print(ch_idx)
                 skewed_psf.append(return_opm_psf(ch_idx))
 
-        # loop over all timepoints and channels
+        if self.match_histograms:
+            reference_images = np.zeros((num_ch, nz, ny, nx), dtype=np.uint16)
+        
         for t_idx in trange(num_t,desc='t',position=0):
             for ch_idx in trange(n_active_channels,desc='c',position=1, leave=False):
 
@@ -146,20 +160,11 @@ class OPMMirrorReconstruction(MagicTemplate):
                     pass
                 del raw_data
 
-                # perform flat-fielding
-                if self.flatfield:
-                    corrected=decon
-                else:
-                    if self.debug:
-                        print('Flatfield.')
-                    corrected=decon
-                del decon
-
                 # deskew
                 if self.debug:
                     print('Deskew.')
-                deskewed = deskew(np.flipud(corrected),*deskew_parameters)
-                del corrected
+                deskewed = deskew(np.flipud(decon),*deskew_parameters)
+                del decon
 
                 # downsample in z due to oversampling when going from OPM to coverslip geometry
                 if z_down_sample==1:
@@ -170,13 +175,35 @@ class OPMMirrorReconstruction(MagicTemplate):
                     deskewed_downsample = block_reduce(deskewed, block_size=(z_down_sample,1,1), func=np.mean)
                 del deskewed
 
+                if self.match_histograms:
+                    if self.debug:
+                        print('Match histogram.')
+
+                    if t_idx == 0:
+                        reference_images[ch_idx,:] = deskewed_downsample
+                        deskewed_matched = deskewed_downsample
+                    else:
+                        if CUCIM_AVAILABLE:
+                            reference_image_cp = cp.asarray(reference_images[ch_idx,:],dtype=cp.uint16)
+                            deskewed_downsample_cp = cp.asarray(deskewed_downsample,dtype=cp.uint16)
+                            deskewed_matched = cp.asnumpy(match_histograms(reference_image_cp,deskewed_downsample_cp)).astype(np.uint16)
+                            del reference_image_cp, deskewed_downsample_cp
+                            cp.clear_memo()
+                            cp._default_memory_pool.free_all_blocks()
+                        else:
+                            deskewed_matched = match_histograms(reference_images[ch_idx,:],deskewed_downsample)
+                        
+                else:
+                    deskewed_matched = deskewed_downsample
+                del deskewed_downsample
+
                 if self.debug:
                     print('Write data into Zarr container')
 
-                opm_data[t_idx, ch_idx, :, :, :] = deskewed_downsample
+                opm_data[t_idx, ch_idx, :, :, :] = deskewed_matched
 
                 # free up memory
-                del deskewed_downsample
+                del deskewed_matched
                 gc.collect()
 
         # exit
@@ -228,16 +255,16 @@ class OPMMirrorReconstruction(MagicTemplate):
     )
     def set_deconvolution_option(self,use_decon = False):
         self.decon = use_decon
-        
-    # set flatfield option
+
+    # set histogram matching option
     @magicgui(
         auto_call=True,
-        use_flatfield = {"widget_type": "CheckBox", "label": "Flatfield"},
+        use_match_histograms = {"widget_type": "CheckBox", "label": "Match histograms"},
         layout="horizontal"
     )
-    def set_flatfield_option(self,use_flatfield = False):
-        self.flatfield = use_flatfield
-
+    def set_histogram_option(self,use_match_histograms = False):
+        self.match_histograms = use_match_histograms
+        
     # set path to dataset for procesing
     @magicgui(
         auto_call=False,
@@ -247,6 +274,8 @@ class OPMMirrorReconstruction(MagicTemplate):
     )
     def run_data_processing(self, data_path='d:/'):
         self.data_path = data_path
+        df_metadata = read_metadata(self.data_path / Path('scan_metadata.csv'))
+        self.time_points = df_metadata['num_t']
 
     # control data processing
     @magicgui(

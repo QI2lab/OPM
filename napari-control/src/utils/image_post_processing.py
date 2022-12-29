@@ -21,18 +21,17 @@ import gc
 
 try:
     import cupy as cp
-    GPU_AVAILABLE = True
+    CP_AVAILABLE = True
 except:
-    GPU_AVAILABLE = False
+    CP_AVAILABLE = False
 
-if GPU_AVAILABLE:
+if CP_AVAILABLE:
     try:
         import microvolution_py as mv_decon
         DECON_LIBRARY = 'mv'
     except:
         try:
             from clij2fft.richardson_lucy import richardson_lucy_nc
-            import clij2fft
             DECON_LIBRARY = 'clij'
         except:
             DECON_LIBRARY = None
@@ -197,13 +196,13 @@ def lr_deconvolution(image,psf,iterations=5):
     """
 
     # create dask array and apodization window
-    scan_chunk_size = 256
+    scan_chunk_size = 128
     if image.shape[0]<scan_chunk_size:
-        dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]//2))
-        overlap_depth = (0,0,psf.shape[2])
+        dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]))
+        overlap_depth = (0,0,0)
     else:
-        dask_raw = da.from_array(image,chunks=(scan_chunk_size,image.shape[1],image.shape[2]//2))
-        overlap_depth = (psf.shape[0],0,psf.shape[2])
+        dask_raw = da.from_array(image,chunks=(scan_chunk_size,image.shape[1],image.shape[2]))
+        overlap_depth = (psf.shape[0],0,0)
     del image
     gc.collect()
 
