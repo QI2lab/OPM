@@ -18,7 +18,7 @@ from pathlib import Path
 import sys
 
 # need to add MM path to load some dlls
-sys.path.append(r"C:\Program Files\Micro-Manager-2.0gamma")
+#sys.path.append(r"C:\Program Files\Micro-Manager-2.0gamma")
 
 # def main(path_to_mm_config=Path('C:/Program Files/Micro-Manager-2.0gamma/opm_new.cfg')):
 def main(path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_configs\OPM_20221221.cfg')):

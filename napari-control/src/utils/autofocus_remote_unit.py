@@ -10,7 +10,7 @@ import numpy as np
 from scipy import ndimage
 from pymmcore_plus import CMMCorePlus
 
-def calculate_focus_metric(image):
+def calculate_focus_metric(image: np.ndarray):
     """
     calculate focus metric
 
@@ -22,7 +22,7 @@ def calculate_focus_metric(image):
     """
 
     # calculate focus metric
-    image[image>10000]=0
+    image[image>2**16-10]=0
     image[image<100]=0
     kernel = [[0,1,0],[1,1,1],[0,1,0]]
     focus_metric = np.max(ndimage.minimum_filter(image,footprint=kernel))

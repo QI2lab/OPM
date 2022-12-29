@@ -15,6 +15,8 @@ import re
 from npy2bdv import BdvEditor
 import pandas as pd
 import numpy as np
+from pathlib import Path
+import tifffile
 
 def read_metadata(fname):
     """
@@ -155,3 +157,37 @@ def return_data_from_zarr_to_numpy(dataset, time_idx, channel_idx, num_images, y
     data_numpy = dataset[time_idx,channel_idx,0:num_images,:]
 
     return data_numpy
+
+
+def return_opm_psf(ch_idx):
+    """
+    Load pre-generated OPM psf
+
+    TO DO: write checks and generate PSF if it does not exist on disk
+
+    :param z_idx: int
+        index of z slice. Assume 15 steps above coverslip for now
+        
+    :return psf: ndarray
+        pre-generated skewed PSF
+    """ 
+
+    root_path = Path(__file__).parent.resolve()
+
+
+    if ch_idx == 0:
+        psf_name = Path('psfs') / Path('opm_psf_420_nm.tif')
+    elif ch_idx == 1:
+        psf_name = Path('psfs') / Path('opm_psf_520_nm.tif')
+    elif ch_idx == 2:
+        psf_name = Path('psfs') / Path('opm_psf_580_nm.tif')
+    elif ch_idx == 3:
+        psf_name = Path('psfs') / Path('opm_psf_670_nm.tif')
+    elif ch_idx == 4:
+        psf_name = Path('psfs') / Path('opm_psf_780_nm.tif')
+
+
+    psf_path = root_path / psf_name
+    opm_psf = tifffile.imread(psf_path)
+
+    return np.flipud(opm_psf)

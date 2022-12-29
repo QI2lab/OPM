@@ -16,7 +16,7 @@ def main():
     viewer.window.add_dock_widget(reconstruction_widget,name='ASU Snouty-OPM timelapse reconstruction')
 
     # start Napari
-    napari.run(max_loop_level=2)
+    napari.run()
 
 if __name__ == "__main__":
     main()

@@ -14,7 +14,7 @@ from src.utils.image_post_processing import deskew
 from napari.qt.threading import thread_worker
 import zarr
 import dask.array as da
-from src.utils.data_io import read_metadata, return_data_from_zarr_to_numpy
+from src.utils.data_io import read_metadata, return_data_from_zarr_to_numpy, return_opm_psf
 from skimage.measure import block_reduce
 from itertools import compress
 import gc
@@ -118,16 +118,14 @@ class OPMMirrorReconstruction(MagicTemplate):
 
         # if decon is requested, try to import microvolution wrapper or dexp library
         if self.decon:
-            from src.utils.opm_psf import generate_skewed_psf
-            from src.utils.image_post_processing import lr_deconvolution_cupy
-
-            ex_wavelengths = [.405,.488,.561,.635,.730]
-            em_wavelengths = [.420,.520,.605,.680,.760]
+            #from src.utils.opm_psf import generate_skewed_psf
+            from src.utils.image_post_processing import lr_deconvolution
 
             skewed_psf = []
 
-            for ch_idx in active_channels:
-                skewed_psf.append(generate_skewed_psf(0.1,ex_wavelengths[ch_idx],em_wavelengths[ch_idx]))
+            for ch_idx in np.flatnonzero(active_channels):
+                print(ch_idx)
+                skewed_psf.append(return_opm_psf(ch_idx))
 
         # loop over all timepoints and channels
         for t_idx in trange(num_t,desc='t',position=0):
@@ -142,7 +140,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                 if self.decon:
                     if self.debug:
                         print('Deconvolve.')
-                    decon = lr_deconvolution_cupy(raw_data,skewed_psf[ch_idx])
+                    decon = lr_deconvolution(raw_data,skewed_psf[ch_idx],iterations=30)
                 else:
                     decon = raw_data
                     pass

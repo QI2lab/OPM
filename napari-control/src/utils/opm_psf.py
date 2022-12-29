@@ -116,7 +116,7 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
     z_res = 2.355*(np.sqrt(6) / np.pi * ni * em_wvl / na ** 2)
 
     roi_skewed_size = get_skewed_roi_size([z_res * 5, xy_res * 5, xy_res * 5],
-                                                          theta, dc, dstage, ensure_odd=True)
+                                          theta, dc, dstage, ensure_odd=True)
     # make square
     roi_skewed_size[2]= roi_skewed_size[1]
 
@@ -145,17 +145,6 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
 
     psf_grid = create_psf_silicone_100x(dxy, dz, nxy, nz, na,ex_wvl,em_wvl)
     psf_grid = psf_grid / np.max(psf_grid[nz//2])
-
-    #psf_norm = psf_full[nz//2,:]
-    #psf_grid = psf_full/(psf_norm+1e-10)
-
-    # # plot gridded psf
-    # figh = plt.figure()
-    # ax = plt.subplot(1, 2, 1)
-    # plt.imshow(psf_grid[nz//2])
-
-    # ax = plt.subplot(1, 2, 2)
-    # plt.imshow(psf_grid[:, nxy//2])
 
     # get value from interpolation
     skewed_psf = np.zeros(roi_skewed_size)
