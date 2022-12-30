@@ -91,14 +91,14 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
     for i in range(excess_images,num_images):
         if (time_axis is None):
             if (channel_axis is None):
-                data_numpy[j,:,:] = dataset.read_image(z=i)
+                data_numpy[j,:,:] = dataset.read_image(z=i,channel=0)
             else:
-                data_numpy[j,:,:] = dataset.read_image(z=i, c=channel_axis)
+                data_numpy[j,:,:] = dataset.read_image(z=i, c=channel_axis,channel=0)
         else:
             if (channel_axis is None):
-                data_numpy[j,:,:] = dataset.read_image(z=i, t=time_axis)
+                data_numpy[j,:,:] = dataset.read_image(z=i, t=time_axis,channel=0)
             else:
-                data_numpy[j,:,:] = dataset.read_image(z=i, t=time_axis, c=channel_axis)
+                data_numpy[j,:,:] = dataset.read_image(z=i, t=time_axis, c=channel_axis,channel=0)
         j = j + 1
 
     return data_numpy
