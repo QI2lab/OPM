@@ -235,7 +235,7 @@ def main(argv):
                     print('Deconvolve.')
                     em_wvl = em_wavelengths[ch_idx]
                     channel_opm_psf = np.flip(data_io.return_opm_psf(em_wvl,z_idx),axis=1)
-                    decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
+                    decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=10)
                 else:
                     decon = raw_data
                 del raw_data
