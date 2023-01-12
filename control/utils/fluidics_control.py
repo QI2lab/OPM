@@ -63,6 +63,7 @@ def run_fluidic_program(r_idx, df_program, mvp_controller, pump_controller):
         if source_name == 'RUN':
             pump_controller.stopFlow()
             print(time_stamp(), ': Fluidics round done, running imaging.')
+            break # DPS added - this caused a MERFISH run to fail.
         elif source_name == 'PAUSE':
             pump_controller.stopFlow()
             print(time_stamp(), ': Pausing for:' +str(pump_time_min*60)+' seconds.')

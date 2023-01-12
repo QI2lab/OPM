@@ -28,7 +28,7 @@ def apply_O3_focus_offset(core,O3_stage_name,current_O3_focus,O3_stage_offset,ve
     """
 
     # grab position and name of current MM focus stage
-    exp_zstage_pos = np.round(core.get_position(),2)
+    exp_zstage_pos = np.round(core.get_position(),2).astype(float)
     exp_zstage_name = core.get_focus_device()
     if verbose: print(f'Current z-stage: {exp_zstage_name} with position {exp_zstage_pos}')
 
@@ -40,12 +40,12 @@ def apply_O3_focus_offset(core,O3_stage_name,current_O3_focus,O3_stage_offset,ve
 
     O3_stage_pos = current_O3_focus + O3_stage_offset
 
-    core.set_position(np.round(O3_stage_pos,2))
+    core.set_position(np.round(O3_stage_pos,2).astype(float))
     core.wait_for_device(O3_stage_name)
     time.sleep(.1)
 
     core.set_focus_device(exp_zstage_name)
-    exp_zstage_pos = np.round(core.get_position(),2)
+    exp_zstage_pos = np.round(core.get_position(),2).astype(float)
     core.wait_for_device(exp_zstage_name)
 
     return O3_stage_pos
@@ -63,7 +63,7 @@ def calculate_focus_metric(image):
     """
 
     # calculate focus metric
-    image[image>60000]=0
+    image[image>65500]=0
     image[image<100]=0
     kernel = [[0,1,0],[1,1,1],[0,1,0]]
     focus_metric = np.max(ndimage.minimum_filter(image,footprint=kernel))
@@ -73,7 +73,7 @@ def calculate_focus_metric(image):
  
 def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=False):
     """
-    optimize position of O3 with respect to O2 using TTL control of a Thorlabs K101 controller, Thorlabs PIA25 piezo motor, and Thorlabs 1" translation stage.
+    optimize position of O3 with respect to O2 using piezo stage
 
     :param core: Core
         pycromanager Core object
@@ -89,7 +89,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
     """
     
     # grab position and name of current MM focus stage
-    exp_zstage_pos = np.round(core.get_position(),2)
+    exp_zstage_pos = np.round(core.get_position(),2).astype(float)
     exp_zstage_name = core.get_focus_device()
     if verbose: print(f'Current z-stage: {exp_zstage_name} with position {exp_zstage_pos}')
 
@@ -98,7 +98,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
     core.wait_for_device(O3_stage_name)
 
     # grab O3 focus stage position
-    O3_stage_pos_start = np.round(core.get_position(),2)
+    O3_stage_pos_start = np.round(core.get_position(),2).astype(float)
     core.wait_for_device(O3_stage_name)
     if verbose: print(f'O3 z-stage: {O3_stage_name} with position {O3_stage_pos_start}')
 
@@ -208,7 +208,7 @@ def manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False):
     """
 
     # get exposure for experiment
-    exposure_experiment_ms = core.get_exposure()
+    exposure_experiment_ms = np.round(core.get_exposure(),2).astype(float)
 
     # set camera to fast readout mode
     readout_mode_experiment = core.get_current_config('Camera-Setup')
@@ -220,7 +220,7 @@ def manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False):
     core.wait_for_config('Camera-TriggerSource','INTERNAL')
 
     # set exposure to 5 ms
-    core.set_exposure(5)
+    core.set_exposure(5.0)
 
     updated_O3_stage_position = find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose)
    

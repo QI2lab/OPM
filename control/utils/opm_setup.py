@@ -305,7 +305,9 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     true_exposure = core.get_exposure()
 
     # get actual framerate from micromanager properties
-    actual_readout_ms = true_exposure+float(core.get_property('OrcaFusionBT','ReadoutTime')) #unit: ms
+    #actual_readout_ms = true_exposure+float(core.get_property('OrcaFusionBT','ReadoutTime')) #unit: ms
+    # DPS test how this change alters readout frames in strip scan
+    actual_readout_ms = true_exposure
     if debug: print(f'Full readout time: {actual_readout_ms}.')
 
     # scan axis setup

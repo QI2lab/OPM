@@ -7,6 +7,7 @@ import numpy as np
 from datetime import datetime
 import os
 import pathlib
+from pycromanager import Dataset
 
 def read_metadata(fname):
     """
@@ -100,6 +101,7 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
     :param num_images: integer for number of images to return 
     :param y_pixels: integer for y pixel size
     :param x_pixels: integer for x pixel size
+    
     :return data_numpy: 3D numpy array of requested data
     """
 
@@ -119,6 +121,16 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
         j = j + 1
 
     return data_numpy
+
+def return_data_dask(data_path, axes_order):
+    """
+    :param dataset: pycromanager dataset object
+    :param axes_order: order to load axes in
+
+    :return data_dask: ND dask array of requested data
+    """
+
+    return Dataset(data_path).as_array(axes=axes_order)
 
 def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
 

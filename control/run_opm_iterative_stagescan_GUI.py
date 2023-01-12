@@ -4,18 +4,17 @@
 ASU high-NA OPM multi-channel stage scanning with iterative fluidics using pycromanager.
 
 Instrument rebuild (11/2022) TO DO (in order of priority):
-1. Alexis needs to check that fluidics code matches his napari-mm widefield code
-2. Fix 405 nm laser coupling into fiber or comment out "last round" code
+1. Fix "last round" code
   - find cleaner way to note in the instrument setup and metadata so that this is easier to process
-3. ETL control. Device works in MM - can MM MDA stage widget record and then we grab during setup?
-4. Write out instrument configuration (.json instead of .csv?)
+2. ETL control. Device works in MM - can MM MDA stage widget record and then we grab during setup?
+3. Write out instrument configuration (.json instead of .csv?)
   - stage and ETL positions
   - laser powers
   - camera exposure
   - fluidics program path
   - what else?
-5. Create "metadata" and "instrument" directories to keep file structure cleaner 
-6. Find a better way to resume a broken acquisition
+4. Create "metadata" and "instrument" directories to keep file structure cleaner 
+5. Find a better way to resume a broken acquisition
   - in addition to instrument setup on disk, update file with last succesful tile?
 
 Shepherd 12/22 - hack together O3 focus changing to account for RI mismatch. NOT a good solution, but want to get data.
@@ -61,11 +60,17 @@ def main():
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
     # O3 offset per plane
-    O3_offset_per_z = -0.8
+    O3_offset_per_z = -2.2 # DOUBLE CHECK BEFORE RUNNING!
+    # This is for 30% overlap of 30 um ROI (512)
+
+    # 15432 44.7
+    # 15453 44.9
+    # 14475 42.5
+    # 15495 40.3
 
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
     setup_metadata=True
-    debug_flag = False
+    debug_flag = True
     switch_last_round = True
     avoid_overwriting = True
 
@@ -89,6 +94,7 @@ def main():
         flush_system = False
         run_fluidics = False
         n_iterative_rounds = 1
+        fluidics_rounds= [1]
 
     file_directory = Path(__file__).resolve().parent
     config_file = file_directory / Path('opm_config.csv')
@@ -166,16 +172,18 @@ def main():
     # set ROI
     roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x1900', '512x1900', '1024x1900'])
     if roi_selection == str('256x1900'):
-        roi_y_corner = 1180-128
-        roi_x_corner = 224
+        roi_y_corner = 928
+        roi_x_corner = 168
         roi_imaging = [roi_x_corner,roi_y_corner,1900,256]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('512x1900'):
-        roi_y_corner = 1180-256
+        roi_y_corner = 928
+        roi_x_corner = 168
         roi_imaging = [roi_x_corner,roi_y_corner,1900,512]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('1024x1900'):
-        roi_y_corner = 1180-512
+        roi_y_corner = 928
+        roi_x_corner = 168
         roi_imaging = [roi_x_corner,roi_y_corner,1900,1024]
         core.set_roi(*roi_imaging)
     
@@ -233,6 +241,11 @@ def main():
 
     gc.collect()
 
+    # TO DO: Fix this so it automatically detects what is already on the disk if user chooses to restart.
+    resume_r_name = 3     # round index in human notation, starts from 1
+    resume_y_tile_idx = 0
+    resume_z_tile_idx = 0
+
     # iterate over user defined program
     for r_idx, r_name in enumerate(fluidics_rounds):
  
@@ -243,25 +256,21 @@ def main():
         xy_stage = core.get_xy_stage_device()
         z_stage = core.get_focus_device()
 
-        # TO DO: Fix this so it automatically detects what is already on the disk if user chooses to restart.
-        resume_r_name = 0      # round index in human notation, starts from 1
-        resume_y_tile_idx = 0
-        resume_z_tile_idx = 0
-
         # run O3 focus optimizer
         O3_focus_positions=manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
         print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions}.')
 
         time_now = time.perf_counter()
 
-        success_fluidics = False
-        success_fluidics = run_fluidic_program(r_name, df_program, valve_controller, pump_controller)
-        if not(success_fluidics):
-            print('Error in fluidics! Stopping scan.')
-            sys.exit()
+        if run_fluidics:
+            success_fluidics = False
+            success_fluidics = run_fluidic_program(r_name, df_program, valve_controller, pump_controller)
+            if not(success_fluidics):
+                print('Error in fluidics! Stopping scan.')
+                sys.exit()
         
-        O3_focus_positions=manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
-        print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions}.')
+            O3_focus_positions=manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False)
+            print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_positions}.')
 
         # if first round, have user setup positions, laser intensities, and exposure time in MM GUI
         if r_idx == 0:
@@ -399,10 +408,16 @@ def main():
             setup_obis_laser_boxx(core,channel_powers,state='digital')
             
             # create events to execute scan
+            # DPS: trial new event structure to disambiguate excess stage positions and channel names
             events = []
-            for x in range(int(df_MM_setup['scan_axis_positions'])+int(df_config['excess_scan_positions'])):
+            channel_names = ['ch405','ch488','ch561','ch635','ch730']
+            for excess_scan_idx in range(int(df_config['excess_scan_positions'])):
                 for c in active_channel_indices:
-                    evt = { 'axes': {'z': x,'c': c}}
+                    evt = { 'axes': {'s': 0, 'channel': str(channel_names[int(c)]), 'e': excess_scan_idx}}
+                    events.append(evt)
+            for scan_idx in range(int(df_MM_setup['scan_axis_positions'])):
+                for c in active_channel_indices:
+                    evt = { 'axes': {'s': scan_idx,'channel': str(channel_names[int(c)]), 'e': (int(df_config['excess_scan_positions'])+1)}}
                     events.append(evt)
 
             # setup digital trigger buffer on DAQ
@@ -435,7 +450,7 @@ def main():
         n_y_tiles = int(df_MM_setup['tile_axis_positions'])
         n_z_tiles = int(df_MM_setup['height_axis_positions'])
 
-        for y_idx in range(n_y_tiles):
+        for y_idx in range(resume_y_tile_idx,n_y_tiles):
             
             # calculate tile axis position
             tile_position_um = float(df_MM_setup['tile_axis_start_um'])+(float(df_MM_setup['tile_axis_step_um'])*y_idx)
@@ -458,7 +473,7 @@ def main():
             # turn off 'transmit repeated commands' for Tiger
             core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
             
-            for z_idx in range(n_z_tiles):
+            for z_idx in range(resume_z_tile_idx,n_z_tiles):
                 if df_MM_setup['height_strategy'] == 'tile':
                     # calculate height axis position
                     height_position_um = float(df_MM_setup['height_axis_start_um'])+(float(df_MM_setup['height_axis_step_um'])*z_idx)
@@ -502,11 +517,11 @@ def main():
                 print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_position}.')
 
                 # move O3 to correct position to account for RI mismatch
-                O3_focus_offset = z_idx * O3_offset_per_z
-                offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,O3_focus_offset,verbose=False)
-                print(time_stamp(), f'Offset O3 focus stage position (um) = {offset_O3_focus_position}.')
+                if z_idx > 1:
+                    O3_focus_offset = (z_idx-1) * O3_offset_per_z
+                    offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,O3_focus_offset,verbose=False)
+                    print(time_stamp(), f'Offset O3 focus stage position (um) = {offset_O3_focus_position}.')
                 
-
                 # setup DAQ for laser strobing
                 try:    
                     # ----- DIGITAL input -------
@@ -589,7 +604,7 @@ def main():
 
                 # move O3 back to "real" focus
                 offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,0.0,verbose=False)
-                print(time_stamp(), f'Offset O3 focus stage position (um) = {offset_O3_focus_position}.')
+                print(time_stamp(), f'O3 focus stage position (um) = {offset_O3_focus_position}.')
 
                 # save experimental info after first tile. 
                 # we do it this way so that Pycromanager can manage directory creation
@@ -661,6 +676,8 @@ def main():
                 core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
             gc.collect()
+            resume_y_tile_idx = 0
+            resume_z_tile_idx = 0
 
     # set lasers to zero power and software control
     channel_powers = [0.,0.,0.,0.,0.]
