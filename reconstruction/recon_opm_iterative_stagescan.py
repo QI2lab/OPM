@@ -129,7 +129,7 @@ def main(argv):
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
                                        nchannels=num_ch+1,
                                        ntiles=num_y*num_z,
-                                       subsamp=((1,1,1),(4,2,2),(4,8,8),(8,16,16)),
+                                       subsamp=((1,1,1),(4,8,8),(8,16,16)),
                                        blockdim=((32, 128, 128),))
 
         # create blank affine transformation to use for stage translation
@@ -178,7 +178,8 @@ def main(argv):
     ch_in_BDV = list(range(n_active_channels))
     em_wavelengths=[.420,.520,.580,.670,.780]
     tile_idx=0
-    
+
+    channel_ids = ['ch405','ch488','ch561','ch635','ch730']
     first_flatfield = True
 
     # loop over all rounds.
@@ -196,7 +197,6 @@ def main(argv):
             stage_y = np.round(float(df_stage_positions['stage_y']),2)
             stage_z = np.round(float(df_stage_positions['stage_z']),2)
 
-           
             # construct directory name
             current_tile_dir_path = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
             tile_dir_path_to_load = input_dir_path / current_tile_dir_path
@@ -212,6 +212,8 @@ def main(argv):
             for (t_idx, ch_BDV_idx) in product(timepoints_in_data, ch_in_BDV):
 
                 ch_idx = channels_in_data[ch_BDV_idx]
+                channel_id = channel_ids[ch_idx]
+                print(ch_idx,channel_id)
 
                 # deal with last round channel idx change via brute force right now
                 # need to fix more elegantly!
@@ -221,14 +223,16 @@ def main(argv):
                 print('round '+str(r_idx+1)+' of '+str(num_r)+'; y tile '+str(y_idx+1)+' of '+str(num_y)+'; z tile '+str(z_idx+1)+' of '+str(num_z)+'; channel '+str(ch_BDV_idx+1)+' of '+str(n_active_channels))
                 print('Stage location (um): x='+str(stage_x)+', y='+str(stage_y)+', z='+str(stage_z)+'.')
 
-                if (t_idx == 0) and not(interleaved):
-                    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=None, channel_axis=None, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
-                elif (t_idx == 0) and (interleaved):
-                    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=None, channel_axis=ch_idx, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
-                elif not(t_idx == 0) and not(interleaved):
-                    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=t_idx, channel_axis=None, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
-                elif not(t_idx == 0) and (interleaved):
-                    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=t_idx, channel_axis=ch_idx, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
+                raw_data = data_io.return_data_dask(dataset,excess_images,channel_id)
+                print(np.max(raw_data))
+                #if (t_idx == 0) and not(interleaved):
+                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=None, channel_axis=None, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
+                #elif (t_idx == 0) and (interleaved):
+                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=None, channel_axis=ch_idx, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
+                #elif not(t_idx == 0) and not(interleaved):
+                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=t_idx, channel_axis=None, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
+                #elif not(t_idx == 0) and (interleaved):
+                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=t_idx, channel_axis=ch_idx, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
 
                 # run deconvolution on skewed image
                 if decon_flag == 1:

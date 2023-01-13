@@ -103,6 +103,24 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
 
     return data_numpy
 
+def return_data_dask(dataset,excess_images,channel_id):
+    """
+    :param dataset: dataset
+        pycromanager dataset object
+    :param excess_images: int
+        number of excess images for stage warmup
+    :param channel_axis: str
+        channel axis name
+
+    :return data: np.ndarray
+        load disk
+    """
+
+    data = dataset.as_array(e=excess_images+1,channel=channel_id,axes=['s'])
+    data = data.compute(scheduler="single-threaded")
+
+    return np.squeeze(data)
+
 
 def return_data_numpy_widefield(dataset, channel_axis, ch_BDV_idx, num_z, y_pixels,x_pixels):
     """
