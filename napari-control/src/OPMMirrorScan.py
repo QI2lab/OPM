@@ -37,9 +37,9 @@ class OPMMirrorScan(MagicTemplate):
 
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
-        self.ROI_uleft_corner_x = int(0)  # unit: camera pixels
-        self.ROI_uleft_corner_y = int(1156-256)  # unit: camera pixels
-        self.ROI_width_x = int(2304)        # unit: camera pixels
+        self.ROI_uleft_corner_x = int(168)  # unit: camera pixels
+        self.ROI_uleft_corner_y = int(928)  # unit: camera pixels
+        self.ROI_width_x = int(1900)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
 
         # O3 piezo stage name
@@ -589,7 +589,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='vertical', 
         call_button="Update crop"
     )
-    def set_ROI(self, uleft_corner_x=0,uleft_corner_y=1152-256,width_x=2304,width_y=512):
+    def set_ROI(self, uleft_corner_x=168,uleft_corner_y=928,width_x=1900,width_y=512):
         """
         Magicgui element to get camera ROI
 
