@@ -154,7 +154,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                 if self.decon:
                     if self.debug:
                         print('Deconvolve.')
-                    decon = lr_deconvolution(raw_data,skewed_psf[ch_idx],iterations=30)
+                    decon = lr_deconvolution(raw_data,skewed_psf[ch_idx],iterations=10)
                 else:
                     decon = raw_data
                     pass
