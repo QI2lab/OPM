@@ -81,7 +81,7 @@ def main(argv):
     num_y = df_metadata['num_y']
     num_z = df_metadata['num_z']
     num_ch = df_metadata['num_ch']
-    num_images = df_metadata['scan_positions']
+    #num_images = df_metadata['scan_positions']
     excess_images = df_metadata['excess_scan_positions']
     y_pixels = df_metadata['y_pixels']
     x_pixels = df_metadata['x_pixels']
@@ -335,8 +335,8 @@ def main(argv):
 
                     # save tile in BDV H5 with actual stage positions
                     print('Write into BDV H5.')
-                    print('Channel:' + str(ch_idx))
-                    bdv_writer.append_view(deskewed, time=r_idx, channel=ch_idx,
+                    #print('Channel:' + str(ch_idx))
+                    bdv_writer.append_view(deskewed[:,445:-445,:], time=r_idx, channel=ch_idx,
                                             tile=tile_idx,
                                             voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
                                             voxel_units='um',

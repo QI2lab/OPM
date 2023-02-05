@@ -339,7 +339,6 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
 
     scan_axis_start_pos_mm = np.round(np.arange(scan_axis_start_mm,scan_axis_end_mm+(1-scan_tile_overlap)*scan_tile_length_mm,(1-scan_tile_overlap)*scan_tile_length_mm),2) #unit: mm
     scan_axis_end_pos_mm = np.round(scan_axis_start_pos_mm + scan_tile_length_mm * (1+scan_tile_overlap),2)
-    scan_axis_end_pos_mm[0] = np.round(scan_axis_start_pos_mm[0]+scan_tile_length_mm,2)
     actual_exposure_s = actual_readout_ms / 1000. #unit: s
     scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s / n_active_channels,5) #unit: mm/s
     scan_axis_positions = np.rint((scan_tile_length_mm* (1+scan_tile_overlap)) / scan_axis_step_mm).astype(int)  #unit: number of positions
@@ -362,60 +361,6 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     if debug: 
         print(f'Tile axis step: {tile_axis_step_um}')
         print(f'Tile axis start positions: {tile_axis_pos_um}.')
-
-    """
-    # scan axis setup
-    scan_axis_step_um = float(df_config['scan_axis_step_um'])  # unit: um 
-    scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
-    scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
-    scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
-    scan_axis_range_um = np.abs(scan_axis_end_um-scan_axis_start_um)  # unit: um
-    scan_axis_range_mm = scan_axis_range_um / 1000 #unit: mm
-    actual_exposure_s = actual_readout_ms / 1000. #unit: s
-    scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s / n_active_channels,5) #unit: mm/s
-    scan_axis_positions = np.rint(scan_axis_range_mm / scan_axis_step_mm).astype(int)  #unit: number of positions
-    if debug: print(f'Scan speed: {scan_axis_speed}.')
-
-    # tile axis setup
-    tile_axis_overlap=0.1 #unit: percentage
-    tile_axis_range_um = np.abs(tile_axis_end_um - tile_axis_start_um) #unit: um
-    tile_axis_range_mm = tile_axis_range_um / 1000 #unit: mm
-    tile_axis_ROI = x_pixels*pixel_size_um  #unit: um
-    tile_axis_step_um = np.round((tile_axis_ROI) * (1-tile_axis_overlap),2) #unit: um
-    tile_axis_step_mm = tile_axis_step_um / 1000 #unit: mm
-    tile_axis_positions = np.rint(tile_axis_range_mm / tile_axis_step_mm).astype(int)+1  #unit: number of positions
-    # if tile_axis_positions rounded to zero, make sure we acquire at least one position
-    if tile_axis_positions == 0:
-        tile_axis_positions=1
-
-    # height axis setup
-    # check if there are multiple heights
-    height_axis_range_um = np.abs(height_axis_end_um-height_axis_start_um) #unit: um
-    # if multiple heights, check if heights are due to uneven tissue position or for z tiling
-    if height_axis_range_um > 0:
-        height_selection = easygui.choicebox('Z axis strategy.', 'Z axis positions', ['Tile in Z', 'Track in Z'])
-        if height_selection == str('Tile in Z'):
-            height_strategy = 'tile'
-        elif height_selection == str('Track in Z'):
-            height_strategy = 'track'
-    # the bug is back, here is a dirty patch
-    height_strategy = 'tile'
-    
-    if height_strategy == str('tile'):
-        height_axis_overlap=0.1 #unit: percentage
-        height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
-        height_axis_ROI = y_pixels*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
-        height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
-        height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
-        height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int)+1 #unit: number of positions
-        # if height_axis_positions rounded to zero, make sure we acquire at least one position
-        if height_axis_positions==0:
-            height_axis_positions=1
-    elif height_strategy == str('track'):
-        height_axis_step_um = height_axis_range_um / tile_axis_positions
-        height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
-        height_axis_positions=1
-    """
 
     # generate dictionary to return with scan parameters
     df_MM_setup = {'tile_axis_positions': int(len(tile_axis_pos_um)),
