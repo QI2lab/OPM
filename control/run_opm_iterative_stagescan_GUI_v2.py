@@ -16,6 +16,7 @@ Instrument rebuild (11/2022) TO DO (in order of priority):
 4. Create "metadata" and "instrument" directories to keep file structure cleaner 
 5. Find a better way to resume a broken acquisition
   - in addition to instrument setup on disk, update file with last succesful tile?
+6. Add O2-O3 autofocus every 10 minutes during fluidics round.
 
 Shepherd 01/23 - breaking change -> v2.0. Scans are now split up into smaller chunks to account for small coverslip tilt on our setup.
                  this should help solve coverslip tilt issue and make registration easier on the deskewed data (more flexibility for tile positioning)
@@ -71,10 +72,15 @@ def main():
     # 15495 40.3
 
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
-    setup_metadata=True
+    setup_metadata=False
     debug_flag = True
-    switch_last_round = False
+    switch_last_round = True
     avoid_overwriting = True
+
+    # flags for resuming acquisition
+    # TO DO: Make this a user setting during acquisition so that it can't screw up a restart.
+    resume_x_tile = 0
+    resume_y_tile = 0
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -464,13 +470,13 @@ def main():
         n_y_tiles = int(df_MM_setup['tile_axis_positions'])
         n_z_tiles = int(len(z_stack_offset_um))
 
-        for x_idx in range(n_x_tiles):
+        for x_idx in range(resume_x_tile,n_x_tiles):
 
             scan_axis_start_mm = scan_axis_start_pos_mm[x_idx]
             scan_axis_end_mm = scan_axis_end_pos_mm[x_idx]
             height_position_start_um = height_axis_start_pos_um[x_idx]
 
-            for y_idx in range(n_y_tiles):
+            for y_idx in range(resume_y_tile,n_y_tiles):
             
                 # calculate tile axis position
                 tile_position_um = tile_axis_pos_um[y_idx]
@@ -648,7 +654,7 @@ def main():
                                             'num_y': int(n_y_tiles),
                                             'num_z': int(n_z_tiles),
                                             'num_ch': int(df_MM_setup['n_active_channels']),
-                                            'scan_axis_positions': int(df_config['scan_axis_positions']),
+                                            'scan_axis_positions': int(df_MM_setup['scan_axis_positions']),
                                             'excess_scan_positions': int(df_config['excess_scan_positions']),
                                             'y_pixels': int(df_MM_setup['y_pixels']),
                                             'x_pixels': int(df_MM_setup['x_pixels']),
@@ -691,6 +697,9 @@ def main():
                     core.set_property('TigerCommHub','OnlySendSerialCommandOnChange','Yes')
 
                     gc.collect()
+            resume_y_tile = 0
+        resume_x_tile = 0
+        
 
     # set lasers to zero power and software control
     channel_powers = [0.,0.,0.,0.,0.]

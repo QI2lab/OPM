@@ -20,13 +20,13 @@ import npy2bdv
 import sys
 import gc
 import argparse
-from skimage.measure import block_reduce
 from image_post_processing import deskew
 from itertools import compress, product
 import data_io
 import zarr
 import tifffile
-
+import time
+from skimage.measure import block_reduce
 
 # parse experimental directory, load data, perform orthogonal deskew, and save as BDV H5 file
 def main(argv):
@@ -108,6 +108,7 @@ def main(argv):
         one_channel_flag = False
 
     if (r_idx_to_use == -1):
+        num_r = num_r - 1
         rounds_in_data = list(range(num_r))
     else:
         num_r=1
@@ -171,10 +172,10 @@ def main(argv):
         # create BDV H5 file with sub-sampling for BigStitcher
         bdv_output_path = bdv_output_dir_path / Path(root_name+'_bdv.h5')
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
-                                       nchannels=num_ch+1,
+                                       nchannels=n_active_channels+1,
                                        ntiles=num_x*num_y*num_z,
-                                       subsamp=((1,1,1),(4,8,8),(8,16,16)),
-                                       blockdim=((32, 128, 128),))
+                                       subsamp=((1,1,1), (4,8,8),(8,16,16)),
+                                       blockdim=((8,256,256),))
 
         # create blank affine transformation to use for stage translation
         unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
@@ -237,132 +238,173 @@ def main(argv):
             stage_position_filename = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_x'+str(x_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
             stage_position_path = input_dir_path / stage_position_filename
 
-            df_stage_positions = data_io.read_metadata(stage_position_path)
-
-            stage_x = np.round(float(df_stage_positions['stage_x']),2)
-            stage_y = np.round(float(df_stage_positions['stage_y']),2)
-            stage_z = np.round(float(df_stage_positions['stage_z']),2)
-
-            # construct directory name
-            current_tile_dir_path = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_x'+str(x_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
-            tile_dir_path_to_load = input_dir_path / current_tile_dir_path
-
-            # https://pycro-manager.readthedocs.io/en/latest/read_data.html
-            dataset = Dataset(str(tile_dir_path_to_load))
-
-            for (t_idx, ch_BDV_idx) in product(timepoints_in_data, ch_in_BDV):
-
-                ch_idx = channels_in_data[ch_BDV_idx]
-                channel_id = channel_ids[ch_idx]
-
-                # deal with last round channel idx change via brute force right now
-                # need to fix more elegantly!
-                #if r_idx == (num_r-1) and one_channel_flag:
-                #    ch_idx = ch_idx + 1
-
-                print('round '+str(r_idx+1)+' of '+str(num_r)+'; x tile '+str(x_idx+1)+' of '+str(num_x)+'; y tile '+str(y_idx+1)+' of '+str(num_y)+'; z tile '+str(z_idx+1)+' of '+str(num_z)+'; channel '+str(ch_BDV_idx+1)+' of '+str(n_active_channels))
-                print('Stage location (um): x='+str(stage_x)+', y='+str(stage_y)+', z='+str(stage_z)+'.')
-
-                raw_data = data_io.return_data_dask(dataset,excess_images,channel_id)
-                #if (t_idx == 0) and not(interleaved):
-                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=None, channel_axis=None, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
-                #elif (t_idx == 0) and (interleaved):
-                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=None, channel_axis=ch_idx, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
-                #elif not(t_idx == 0) and not(interleaved):
-                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=t_idx, channel_axis=None, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
-                #elif not(t_idx == 0) and (interleaved):
-                #    raw_data = data_io.return_data_numpy(dataset=dataset, time_axis=t_idx, channel_axis=ch_idx, num_images=num_images, excess_images=excess_images, y_pixels=y_pixels,x_pixels=x_pixels)
-
-                # run deconvolution on skewed image
-                if decon_flag == 1:
-                    print('Deconvolve.')
-                    em_wvl = em_wavelengths[ch_idx]
-                    channel_opm_psf = np.flip(data_io.return_opm_psf(em_wvl,z_idx),axis=1)
-                    decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=10)
-                else:
-                    decon = raw_data
-                del raw_data
-                gc.collect()
-
-                # perform flat-fielding
-                if flatfield_flag == 1:
-                    print('Flatfield.')
-
-                    if (first_flatfield):
-                        flat_field = np.zeros([num_y,num_z,n_active_channels,y_pixels,x_pixels])
-                        dark_field = np.zeros([num_y,num_z,n_active_channels,y_pixels,x_pixels])
-                        first_flatfield = False
-
-                    corrected_stack, flat_field[y_idx,z_idx,ch_BDV_idx,:], dark_field[y_idx,z_idx,ch_BDV_idx,:] = manage_flat_field_py(decon)
-
-                else:
-                    corrected_stack = decon
-                del decon
-                gc.collect()
-
-                # deskew
-                print('Deskew.')
-                # maybe just skip np.flipud, but have to check if it doesn't flip the major axis, which is z
-                deskewed = deskew(data=corrected_stack,theta=theta,distance=scan_step,pixel_size=pixel_size)
-                del corrected_stack
-                gc.collect()
-
-                # save deskewed image into TIFF stack
-                if (save_type==0):
-                    print('Write TIFF stack')
-                    tiff_filename= root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.tiff'
-                    tiff_output_path = tiff_output_dir_path / Path(tiff_filename)
-                    tifffile.imwrite(str(tiff_output_path), deskewed, imagej=True, resolution=(1/deskewed_x_pixel, 1/deskewed_y_pixel),
-                                    metadata={'spacing': (deskewed_z_pixel), 'unit': 'um', 'axes': 'ZYX'})
-
-                    metadata_filename = root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.csv'
-                    metadata_output_path = tiff_output_dir_path / Path(metadata_filename)
-                    tiff_stage_metadata = [{'stage_x': float(stage_x),
-                                            'stage_y': float(stage_y),
-                                            'stage_z': float(stage_z)}]
-                    data_io.write_metadata(tiff_stage_metadata[0], metadata_output_path)
-
-                elif (save_type==1):
-                    # create affine transformation for stage translation
-                    # swap x & y from instrument to BDV
-                    affine_matrix = unit_matrix
-                    affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # BDV x-translation (tile axis)
-                    if interleaved:
-                        affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)-((scan_step/1000)/deskewed_x_pixel)/(num_ch)*ch_BDV_idx  # BDV y-translation (scan axis)
+            read_metadata = False
+            retry_flag = 0
+            # check if this is the first tile. If so, wait longer for fluidics
+            if x_idx == 0 and y_idx == 0 and z_idx == 0:
+                while(not(read_metadata) and (retry_flag <4)):
+                    try:
+                        df_stage_positions = data_io.read_metadata(stage_position_path)
+                    except:
+                        read_metadata = False
+                        retry_flag = retry_flag + 1
+                        print(data_io.time_stamp(), "New round, initial stage position not found. Wait 20 minutes and try again.")
+                        time.sleep(60*20)
                     else:
-                        affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # BDV y-translation (scan axis)
-                    affine_matrix[2,3] = (-1*stage_z) / (deskewed_z_pixel)  # BDV z-translation (height axis)
+                        read_metadata = True
+            else:
+                while(not(read_metadata) and (retry_flag <4)):
+                    try:
+                        df_stage_positions = data_io.read_metadata(stage_position_path)
+                    except:
+                        read_metadata = False
+                        retry_flag = retry_flag + 1
+                        print(data_io.time_stamp(), "Stage position not found. Wait 1 minute and try again.")
+                        time.sleep(60)
+                    else:
+                        read_metadata = True
+                    
+            if retry_flag == 4:
+                skip_tile = True
+                print(data_io.time_stamp(), "Timeout occurred. Skipping this stage position.")
+            else:
+                skip_tile = False
 
-                    # save tile in BDV H5 with actual stage positions
-                    print('Write into BDV H5.')
-                    #print('Channel:' + str(ch_idx))
-                    bdv_writer.append_view(deskewed[:,445:-445,:], time=r_idx, channel=ch_idx,
-                                            tile=tile_idx,
-                                            voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
-                                            voxel_units='um',
-                                            calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
-                                            m_affine=affine_matrix,
-                                            name_affine = 'tile '+str(tile_idx)+' translation')
+            if not(skip_tile):
 
-                elif (save_type==2):
-                    print('Write data into Zarr container')
-                    opm_data[t_idx, tile_idx, ch_BDV_idx, :, :, :] = deskewed
-                    metadata_filename = root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.csv'
-                    metadata_output_path = zarr_output_dir_path / Path(metadata_filename)
-                    zarr_stage_metadata = [{'stage_x': float(stage_x),
-                                            'stage_y': float(stage_y),
-                                            'stage_z': float(stage_z)}]
-                    data_io.write_metadata(zarr_stage_metadata[0], metadata_output_path)
+                # grab recorded stage positions
+                stage_x = np.round(float(df_stage_positions['stage_x']),2)
+                stage_y = np.round(float(df_stage_positions['stage_y']),2)
+                stage_z = np.round(float(df_stage_positions['stage_z']),2)
 
-                # free up memory
-                del deskewed
+                # construct directory name
+                current_tile_dir_path = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_x'+str(x_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
+                tile_dir_path_to_load = input_dir_path / current_tile_dir_path
+
+                # https://pycro-manager.readthedocs.io/en/latest/read_data.html
+                dataset = Dataset(str(tile_dir_path_to_load))
+
+                for (t_idx, ch_BDV_idx) in product(timepoints_in_data, ch_in_BDV):
+
+                    ch_idx = channels_in_data[ch_BDV_idx]
+                    channel_id = channel_ids[ch_idx]
+                    # deal with last round channel idx change via brute force right now
+                    # need to fix more elegantly!
+                    #if r_idx == (num_r-1) and one_channel_flag:
+                    #    ch_idx = ch_idx + 1
+
+                    print(data_io.time_stamp(), 'round '+str(r_idx+1)+' of '+str(num_r)+'; x tile '+str(x_idx+1)+' of '+str(num_x)+'; y tile '+str(y_idx+1)+' of '+str(num_y)+'; z tile '+str(z_idx+1)+' of '+str(num_z)+'; channel '+str(ch_BDV_idx+1)+' of '+str(n_active_channels))
+                    print(data_io.time_stamp(), 'Stage location (um): x='+str(stage_x)+', y='+str(stage_y)+', z='+str(stage_z)+'.')
+
+                    # load raw data using Dask interface to NDTIFF
+                    raw_data = data_io.return_data_dask(dataset,excess_images,channel_id)
+
+                    # run deconvolution on skewed image
+                    if decon_flag == 1:
+                        print(data_io.time_stamp(), 'Deconvolve.')
+                        em_wvl = em_wavelengths[ch_idx]
+                        channel_opm_psf = np.flip(data_io.return_opm_psf(em_wvl,z_idx),axis=1)
+                        decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=10)
+                    else:
+                        decon = raw_data
+                    del raw_data
+                    gc.collect()
+
+                    # perform flat-fielding
+                    if flatfield_flag == 1:
+                        print(data_io.time_stamp(), 'Flatfield.')
+
+                        if (first_flatfield):
+                            flat_field = np.zeros([num_y,num_z,n_active_channels,y_pixels,x_pixels])
+                            dark_field = np.zeros([num_y,num_z,n_active_channels,y_pixels,x_pixels])
+                            first_flatfield = False
+
+                        corrected_stack, flat_field[y_idx,z_idx,ch_BDV_idx,:], dark_field[y_idx,z_idx,ch_BDV_idx,:] = manage_flat_field_py(decon)
+
+                    else:
+                        corrected_stack = decon
+                    del decon
+                    gc.collect()
+
+                    # deskew
+                    print(data_io.time_stamp(), 'Deskew.')
+                    # maybe just skip np.flipud, but have to check if it doesn't flip the major axis, which is z
+                    deskewed = deskew(data=corrected_stack,theta=theta,distance=scan_step,pixel_size=pixel_size)
+                    del corrected_stack
+                    gc.collect()
+
+                    # print('Downsample')
+                    # downsampled = block_reduce(image=deskewed,
+                    #                           block_size=(2,2,2),
+                    #                           func=np.mean,
+                    #                           func_kwargs={'dtype': np.uint16})
+                    # del deskewed
+                    # gc.collect()
+
+                    # save deskewed image into TIFF stack
+                    if (save_type==0):
+                        print(data_io.time_stamp(), 'Write TIFF stack')
+                        tiff_filename= root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.tiff'
+                        tiff_output_path = tiff_output_dir_path / Path(tiff_filename)
+                        tifffile.imwrite(str(tiff_output_path), deskewed, imagej=True, resolution=(1/deskewed_x_pixel, 1/deskewed_y_pixel),
+                                        metadata={'spacing': (deskewed_z_pixel), 'unit': 'um', 'axes': 'ZYX'})
+
+                        metadata_filename = root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.csv'
+                        metadata_output_path = tiff_output_dir_path / Path(metadata_filename)
+                        tiff_stage_metadata = [{'stage_x': float(stage_x),
+                                                'stage_y': float(stage_y),
+                                                'stage_z': float(stage_z)}]
+                        data_io.write_metadata(tiff_stage_metadata[0], metadata_output_path)
+
+                    elif (save_type==1):
+                        corner_crop = 445
+
+                        # create affine transformation for stage translation
+                        # swap x & y from instrument to BDV
+                        affine_matrix = unit_matrix
+                        affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # BDV x-translation (tile axis)
+                        if interleaved:
+                            affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)-((scan_step/1000)/deskewed_x_pixel)/(num_ch)*ch_BDV_idx  # BDV y-translation (scan axis)
+                        else:
+                            affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # BDV y-translation (scan axis)
+                        affine_matrix[2,3] = (-1*stage_z) / (deskewed_z_pixel)  # BDV z-translation (height axis)
+
+                        # save tile in BDV H5 with actual stage positions
+                        print(data_io.time_stamp(), 'Write into BDV H5.')
+                        #print('Channel:' + str(ch_idx))
+                        bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=r_idx, channel=ch_idx,
+                                                tile=tile_idx,
+                                                voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
+                                                voxel_units='um',
+                                                calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
+                                                m_affine=affine_matrix,
+                                                name_affine = 'tile '+str(tile_idx)+' translation')
+
+                    elif (save_type==2):
+                        print(data_io.time_stamp(), 'Write data into Zarr container')
+                        opm_data[t_idx, tile_idx, ch_BDV_idx, :, :, :] = deskewed
+                        metadata_filename = root_name+'_t'+str(t_idx).zfill(3)+'_p'+str(tile_idx).zfill(4)+'_c'+str(ch_idx).zfill(3)+'.csv'
+                        metadata_output_path = zarr_output_dir_path / Path(metadata_filename)
+                        zarr_stage_metadata = [{'stage_x': float(stage_x),
+                                                'stage_y': float(stage_y),
+                                                'stage_z': float(stage_z)}]
+                        data_io.write_metadata(zarr_stage_metadata[0], metadata_output_path)
+
+                    # free up memory
+                    del deskewed
+                    gc.collect()
+                
+                dataset.close()
+                del dataset
                 gc.collect()
 
             tile_idx=tile_idx+1
 
     if (save_type==1):
-        # write BDV xml file
+        # created downsampled views with compression and write BDV xml file
         # https://github.com/nvladimus/npy2bdv
+        bdv_writer.create_pyramids(subsamp=((4, 8, 8),(8, 16, 16)), 
+                           blockdim=((32, 32, 32), (64, 32, 32)))
         bdv_writer.write_xml()
         bdv_writer.close()
 

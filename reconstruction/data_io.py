@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from tifffile import tifffile
+from datetime import datetime
 
 def read_metadata(fname):
     """
@@ -244,3 +245,6 @@ def return_opm_psf(wavelength_um,z_idx):
     opm_psf = tifffile.imread(psf_path)
 
     return np.flipud(opm_psf)
+
+def time_stamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
