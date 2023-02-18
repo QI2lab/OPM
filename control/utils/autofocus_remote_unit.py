@@ -28,7 +28,7 @@ def apply_O3_focus_offset(core,O3_stage_name,current_O3_focus,O3_stage_offset,ve
     """
 
     # grab position and name of current MM focus stage
-    exp_zstage_pos = np.round(core.get_position(),2).astype(float)
+    exp_zstage_pos = np.round(core.get_position(),2).astype(np.float64)
     exp_zstage_name = core.get_focus_device()
     if verbose: print(f'Current z-stage: {exp_zstage_name} with position {exp_zstage_pos}')
 
@@ -40,12 +40,12 @@ def apply_O3_focus_offset(core,O3_stage_name,current_O3_focus,O3_stage_offset,ve
 
     O3_stage_pos = current_O3_focus + O3_stage_offset
 
-    core.set_position(np.round(O3_stage_pos,2).astype(float))
+    core.set_position(np.round(O3_stage_pos,2).astype(np.float64))
     core.wait_for_device(O3_stage_name)
     time.sleep(.1)
 
     core.set_focus_device(exp_zstage_name)
-    exp_zstage_pos = np.round(core.get_position(),2).astype(float)
+    exp_zstage_pos = np.round(core.get_position(),2).astype(np.float64)
     core.wait_for_device(exp_zstage_name)
 
     return O3_stage_pos
@@ -89,7 +89,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
     """
     
     # grab position and name of current MM focus stage
-    exp_zstage_pos = np.round(core.get_position(),2).astype(float)
+    exp_zstage_pos = np.round(core.get_position(),2).astype(np.float64)
     exp_zstage_name = core.get_focus_device()
     if verbose: print(f'Current z-stage: {exp_zstage_name} with position {exp_zstage_pos}')
 
@@ -98,14 +98,14 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
     core.wait_for_device(O3_stage_name)
 
     # grab O3 focus stage position
-    O3_stage_pos_start = np.round(core.get_position(),2).astype(float)
+    O3_stage_pos_start = np.round(core.get_position(),2).astype(np.float64)
     core.wait_for_device(O3_stage_name)
     if verbose: print(f'O3 z-stage: {O3_stage_name} with position {O3_stage_pos_start}')
 
     # generate arrays
     n_O3_stage_steps=20.
     O3_stage_step_size = .1
-    O3_stage_positions = np.round(np.arange(O3_stage_pos_start-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_pos_start+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float)
+    O3_stage_positions = np.round(np.arange(O3_stage_pos_start-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_pos_start+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float64)
     focus_metrics = np.zeros(O3_stage_positions.shape[0])
     if verbose: print('Starting rough alignment.')
 
@@ -147,7 +147,7 @@ def find_best_O3_focus_metric(core,shutter_controller,O3_stage_name,verbose=Fals
     if perform_fine:
         n_O3_stage_steps=10.
         O3_stage_step_size = .05
-        O3_stage_positions = np.round(np.arange(rough_best_O3_stage_pos-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),rough_best_O3_stage_pos+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float)
+        O3_stage_positions = np.round(np.arange(rough_best_O3_stage_pos-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),rough_best_O3_stage_pos+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float64)
         focus_metrics = np.zeros(O3_stage_positions.shape[0])
         if verbose: print('Starting fine alignment.')
 
@@ -208,7 +208,7 @@ def manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False):
     """
 
     # get exposure for experiment
-    exposure_experiment_ms = np.round(core.get_exposure(),2).astype(float)
+    exposure_experiment_ms = np.round(core.get_exposure(),2).astype(np.float64)
 
     # set camera to fast readout mode
     readout_mode_experiment = core.get_current_config('Camera-Setup')

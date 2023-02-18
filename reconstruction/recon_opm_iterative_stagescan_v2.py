@@ -175,7 +175,7 @@ def main(argv):
                                        nchannels=n_active_channels+1,
                                        ntiles=num_x*num_y*num_z,
                                        subsamp=((1,1,1), (4,8,8),(8,16,16)),
-                                       blockdim=((8,256,256),))
+                                       blockdim=((8,256,256),(4,384,384),(2,512,512)))
 
         # create blank affine transformation to use for stage translation
         unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
@@ -249,7 +249,7 @@ def main(argv):
                         read_metadata = False
                         retry_flag = retry_flag + 1
                         print(data_io.time_stamp(), "New round, initial stage position not found. Wait 20 minutes and try again.")
-                        time.sleep(60*20)
+                        time.sleep(1)
                     else:
                         read_metadata = True
             else:
@@ -260,7 +260,7 @@ def main(argv):
                         read_metadata = False
                         retry_flag = retry_flag + 1
                         print(data_io.time_stamp(), "Stage position not found. Wait 1 minute and try again.")
-                        time.sleep(60)
+                        time.sleep(1)
                     else:
                         read_metadata = True
                     
@@ -304,7 +304,7 @@ def main(argv):
                         print(data_io.time_stamp(), 'Deconvolve.')
                         em_wvl = em_wavelengths[ch_idx]
                         channel_opm_psf = np.flip(data_io.return_opm_psf(em_wvl,z_idx),axis=1)
-                        decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=10)
+                        decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
                     else:
                         decon = raw_data
                     del raw_data
@@ -399,12 +399,12 @@ def main(argv):
                 gc.collect()
 
             tile_idx=tile_idx+1
+            bdv_writer.write_xml() # try to update XML on the fly for viewing
+
 
     if (save_type==1):
         # created downsampled views with compression and write BDV xml file
         # https://github.com/nvladimus/npy2bdv
-        bdv_writer.create_pyramids(subsamp=((4, 8, 8),(8, 16, 16)), 
-                           blockdim=((32, 32, 32), (64, 32, 32)))
         bdv_writer.write_xml()
         bdv_writer.close()
 

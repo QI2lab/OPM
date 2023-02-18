@@ -321,7 +321,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
 
     # maximum allowed height change
     # for now, hardcode to 10% of coverslip height
-    max_height_change_um = 3
+    max_height_change_um = 1.5
 
     # calculate allowed scan length and number of scan tiles for allowed coverslip height change
     scan_tile_length_um = np.round((max_height_change_um / coverslip_slope_um),2)

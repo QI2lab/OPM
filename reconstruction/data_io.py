@@ -118,7 +118,7 @@ def return_data_dask(dataset,excess_images,channel_id):
     """
 
     data = dataset.as_array(e=excess_images+1,channel=channel_id,axes=['s'])
-    data = data.compute(scheduler="single-threaded")
+    data = data.compute(num_workers=5)
 
     return np.squeeze(data)
 

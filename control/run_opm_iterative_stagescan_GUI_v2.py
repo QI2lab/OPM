@@ -79,8 +79,8 @@ def main():
 
     # flags for resuming acquisition
     # TO DO: Make this a user setting during acquisition so that it can't screw up a restart.
-    resume_x_tile = 0
-    resume_y_tile = 0
+    resume_x_tile = 1
+    resume_y_tile = 22
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -147,7 +147,7 @@ def main():
     if flush_system:
         # run fluidics program for this round
         success_fluidics = False
-        success_fluidics = run_fluidic_program(1, df_program, valve_controller, pump_controller)
+        success_fluidics = run_fluidic_program(1, df_program, valve_controller, pump_controller, core=None,shutter_controller=None,O3_stage_name=None)
         if not(success_fluidics):
             print('Error in fluidics! Stopping scan.')
             sys.exit()
@@ -164,6 +164,8 @@ def main():
 
     # connect to Micromanager core instance
     core = Core()
+
+    core.set_focus_device("ZStage:M:37")
  
     # make sure camera does not have an ROI set
     core.snap_image()
@@ -267,7 +269,7 @@ def main():
 
         if run_fluidics:
             success_fluidics = False
-            success_fluidics = run_fluidic_program(r_name, df_program, valve_controller, pump_controller)
+            success_fluidics = run_fluidic_program(r_name, df_program, valve_controller, pump_controller,core,shutter_controller,O3_stage_name)
             if not(success_fluidics):
                 print('Error in fluidics! Stopping scan.')
                 sys.exit()
@@ -501,6 +503,8 @@ def main():
                         height_position_um = height_position_start_um
 
                     # move Z stage to new height axis position
+                    core.set_focus_device(z_stage)
+                    core.wait_for_device(z_stage)
                     core.set_position(height_position_um)
                     core.wait_for_device(z_stage)
 
