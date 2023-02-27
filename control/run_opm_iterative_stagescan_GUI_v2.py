@@ -62,25 +62,20 @@ def main():
     """"
     Execute iterative, interleaved OPM stage scan using MM GUI
     """
+    # flags for resuming acquisition
+    # TO DO: Make this a user setting during acquisition so that it can't screw up a restart.
+    resume_x_tile = 0
+    resume_y_tile = 0
+
     # O3 offset per plane
     O3_offset_per_z = -2.2 # DOUBLE CHECK BEFORE RUNNING!
     # This is for 30% overlap of 30 um ROI (512)
-
-    # 15432 44.7
-    # 15453 44.9
-    # 14475 42.5
-    # 15495 40.3
 
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
     setup_metadata=False
     debug_flag = True
     switch_last_round = True
     avoid_overwriting = True
-
-    # flags for resuming acquisition
-    # TO DO: Make this a user setting during acquisition so that it can't screw up a restart.
-    resume_x_tile = 1
-    resume_y_tile = 22
 
     # check if user wants to flush system?
     run_fluidics = False
@@ -183,18 +178,18 @@ def main():
     roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x1900', '512x1900', '1024x1900'])
     if roi_selection == str('256x1900'):
         roi_y_corner = 928
-        roi_x_corner = 168
-        roi_imaging = [roi_x_corner,roi_y_corner,1900,256]
+        roi_x_corner = 368
+        roi_imaging = [roi_x_corner,roi_y_corner,1700,256]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('512x1900'):
         roi_y_corner = 928
-        roi_x_corner = 168
-        roi_imaging = [roi_x_corner,roi_y_corner,1900,512]
+        roi_x_corner = 368
+        roi_imaging = [roi_x_corner,roi_y_corner,1700,512]
         core.set_roi(*roi_imaging)
     elif roi_selection == str('1024x1900'):
         roi_y_corner = 928
-        roi_x_corner = 168
-        roi_imaging = [roi_x_corner,roi_y_corner,1900,1024]
+        roi_x_corner = 368
+        roi_imaging = [roi_x_corner,roi_y_corner,1700,1024]
         core.set_roi(*roi_imaging)
     
     # set lasers to zero power and software control

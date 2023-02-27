@@ -108,7 +108,7 @@ def main(argv):
         one_channel_flag = False
 
     if (r_idx_to_use == -1):
-        num_r = num_r - 1
+        num_r = num_r
         rounds_in_data = list(range(num_r))
     else:
         num_r=1
@@ -399,7 +399,7 @@ def main(argv):
                 gc.collect()
 
             tile_idx=tile_idx+1
-            bdv_writer.write_xml() # try to update XML on the fly for viewing
+            #bdv_writer.write_xml() # try to update XML on the fly for viewing
 
 
     if (save_type==1):

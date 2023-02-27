@@ -18,7 +18,11 @@ import numpy as np
 from typing import List
 from skimage.transform import resize as skresize
 from scipy.fftpack import dct, idct
-import cupy as cp
+
+try:
+    import cupy as cp
+except:
+    cp = np
 
 RESIZE_ORDER = 1
 RESIZE_MODE = "symmetric"
