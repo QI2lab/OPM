@@ -188,6 +188,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                             deskewed_downsample_cp = cp.asarray(deskewed_downsample,dtype=cp.uint16)
                             deskewed_matched = cp.asnumpy(match_histograms(deskewed_downsample_cp,reference_image_cp)).astype(np.uint16)
                             del reference_image_cp, deskewed_downsample_cp
+                            gc.collect()
                             cp.clear_memo()
                             cp._default_memory_pool.free_all_blocks()
                         else:

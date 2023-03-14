@@ -16,3 +16,5 @@ __pycache__
 *.xml
 *.tif
 *.tiff
+conversion/multscale_omezarr.py
+conversion/zarr_2_omezarr.py

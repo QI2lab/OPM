@@ -179,7 +179,7 @@ def manage_O3_focus(mmc: CMMCorePlus,shutter_controller,O3_stage_name,verbose=Fa
     mmc.waitForConfig('Camera-TriggerSource','INTERNAL')
 
     # set exposure to 10 ms
-    mmc.setExposure(10)
+    mmc.setExposure(5)
 
     updated_O3_stage_position = find_best_O3_focus_metric(mmc,shutter_controller,O3_stage_name,verbose)
    
