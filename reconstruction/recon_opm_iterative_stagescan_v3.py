@@ -123,8 +123,8 @@ def main(argv):
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
                                         nchannels=nchannels,
                                         ntiles=num_x*num_y*num_z,
-                                        subsamp=((1,1,1), (4,8,8),(8,16,16)),
-                                        blockdim=((8,256,256),(4,384,384),(2,512,512)),
+                                        subsamp=((1,1,1), (4,4,4),(8,8,8),(16,16,16)),
+                                        blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
                                         compression='blosc')
     elif not(ch_fiducial_idx == 9):
         # create directory for data type
@@ -148,7 +148,7 @@ def main(argv):
                             (0.0, 0.0, 1.0, 0.0))) # change the 4. value for z_translation (px)
 
     # create directory for data type
-    zarr_output_dir_path = input_dir_path / Path("processed") / Path('raw_zarr')
+    zarr_output_dir_path = output_dir_path / Path('raw_zarr')
     zarr_output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # create name for zarr directory
@@ -175,7 +175,7 @@ def main(argv):
     corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
     
     # loop over all rounds.
-    for r_idx in range(num_r):
+    for r_idx in range(1,num_r):
 
         # create group for this round in Zarr
         round_name = 'r'+str(r_idx).zfill(3)
@@ -262,6 +262,12 @@ def main(argv):
                         chan_488_active_tile = True
                         chan_561_active_tile = False
                         chan_635_active_tile = False
+                        chan_730_active_tile = False
+                    else:
+                        chan_405_active_tile = False
+                        chan_488_active_tile = True
+                        chan_561_active_tile = True
+                        chan_635_active_tile = True
                         chan_730_active_tile = False
                 finally:
                     active_channels_tile = [chan_405_active_tile,chan_488_active_tile,chan_561_active_tile,chan_635_active_tile,chan_730_active_tile]
@@ -438,9 +444,9 @@ def main(argv):
 
                     # delete raw NDTIFF data
                     # TO DO: make sure this is possible on last round acquisition by running dummy acq w/o saving in acq. code
-                    # if not(do_not_delete):
-                    #     print(data_io.time_stamp(), 'Delete NDTIFF directory.')
-                    #     shutil.rmtree(tile_dir_path_to_load)
+                    if not(do_not_delete):
+                        print(data_io.time_stamp(), 'Delete NDTIFF directory.')
+                        shutil.rmtree(tile_dir_path_to_load)
 
             tile_idx=tile_idx+1
 

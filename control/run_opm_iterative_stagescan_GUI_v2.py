@@ -72,7 +72,7 @@ def main():
     # This is for 30% overlap of 30 um ROI (512)
 
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
-    setup_metadata=False
+    setup_metadata=True
     debug_flag = True
     switch_last_round = True
     avoid_overwriting = True
@@ -175,18 +175,18 @@ def main():
         x_pixels = core.get_image_width()
     
     # set ROI
-    roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x1900', '512x1900', '1024x1900'])
-    if roi_selection == str('256x1900'):
+    roi_selection = easygui.choicebox('Imaging volume setup.', 'ROI size', ['256x1700', '512x1700', '1024x1700'])
+    if roi_selection == str('256x1700'):
         roi_y_corner = 928
         roi_x_corner = 368
         roi_imaging = [roi_x_corner,roi_y_corner,1700,256]
         core.set_roi(*roi_imaging)
-    elif roi_selection == str('512x1900'):
+    elif roi_selection == str('512x1700'):
         roi_y_corner = 928
         roi_x_corner = 368
         roi_imaging = [roi_x_corner,roi_y_corner,1700,512]
         core.set_roi(*roi_imaging)
-    elif roi_selection == str('1024x1900'):
+    elif roi_selection == str('1024x1700'):
         roi_y_corner = 928
         roi_x_corner = 368
         roi_imaging = [roi_x_corner,roi_y_corner,1700,1024]
