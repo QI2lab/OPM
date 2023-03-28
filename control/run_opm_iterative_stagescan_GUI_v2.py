@@ -16,7 +16,6 @@ Instrument rebuild (11/2022) TO DO (in order of priority):
 4. Create "metadata" and "instrument" directories to keep file structure cleaner 
 5. Find a better way to resume a broken acquisition
   - in addition to instrument setup on disk, update file with last succesful tile?
-6. Add O2-O3 autofocus every 10 minutes during fluidics round.
 
 Shepherd 01/23 - breaking change -> v2.0. Scans are now split up into smaller chunks to account for small coverslip tilt on our setup.
                  this should help solve coverslip tilt issue and make registration easier on the deskewed data (more flexibility for tile positioning)
@@ -68,7 +67,7 @@ def main():
     resume_y_tile = 0
 
     # O3 offset per plane
-    O3_offset_per_z = -2.2 # DOUBLE CHECK BEFORE RUNNING!
+    O3_offset_per_z = -3.2 # DOUBLE CHECK BEFORE RUNNING!
     # This is for 30% overlap of 30 um ROI (512)
 
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
@@ -180,16 +179,22 @@ def main():
         roi_y_corner = 928
         roi_x_corner = 368
         roi_imaging = [roi_x_corner,roi_y_corner,1700,256]
+        y_pixels = 256
+        x_pixels = 1700
         core.set_roi(*roi_imaging)
     elif roi_selection == str('512x1700'):
         roi_y_corner = 928
         roi_x_corner = 368
         roi_imaging = [roi_x_corner,roi_y_corner,1700,512]
+        y_pixels = 512
+        x_pixels = 1700
         core.set_roi(*roi_imaging)
     elif roi_selection == str('1024x1700'):
         roi_y_corner = 928
         roi_x_corner = 368
         roi_imaging = [roi_x_corner,roi_y_corner,1700,1024]
+        y_pixels = 1024
+        x_pixels = 1700
         core.set_roi(*roi_imaging)
     
     # set lasers to zero power and software control
@@ -306,9 +311,14 @@ def main():
                     z_stack = True
                     z_stack_height_um = float(z_stack_height_input) #unit: um
                     z_axis_overlap=0.1 #unit: percentage
-                    z_axis_ROI = y_pixels*.115*np.sin(30.*np.pi/180.) #uni
+                    z_axis_ROI = y_pixels*.115*np.sin(30.*np.pi/180.) #unit: um  
                     z_axis_step_um = np.round((z_axis_ROI)*(1-z_axis_overlap),2) #unit: um
                     z_stack_offset_um = np.round(np.arange(0,z_stack_height_um,z_axis_step_um),2) #unit: um
+
+                    print(f'Z axis ROI: {z_axis_ROI}')
+                    print(f'Z axis height: {z_stack_height_input}')
+                    print(f'Z axis step: {z_axis_step_um}')
+                    print(f'Z axis offset: {z_stack_offset_um}')
 
                 # construct and display imaging summary to user
                 scan_settings = (f"Number of labeling rounds: {str(n_iterative_rounds)} \n\n"
@@ -447,16 +457,6 @@ def main():
             for ii, ind in enumerate(active_channel_indices):
                 dataDO[2*ii::2*n_active_channels, int(ind)] = 1
 
-            # # stop DAQ and make sure it is at zero
-            # try:
-            #     ## Stop and clear both tasks
-            #     taskDI.StopTask()
-            #     taskDO.StopTask()
-            #     taskDI.ClearTask()
-            #     taskDO.ClearTask()
-            # except daq.DAQError as err:
-            #     print("DAQmx Error %s"%err)
-
         # set camera to internal control
         core.set_config('Camera-TriggerSource','INTERNAL')
         core.wait_for_config('Camera-TriggerSource','INTERNAL')
@@ -547,10 +547,10 @@ def main():
                     print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_position}.')
 
                     # move O3 to correct position to account for RI mismatch
-                    #if z_stack and z_idx > 1:
-                    #    O3_focus_offset = (z_idx-1) * O3_offset_per_z
-                    #    offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,O3_focus_offset,verbose=False)
-                    #    print(time_stamp(), f'Offset O3 focus stage position (um) = {offset_O3_focus_position}.')
+                    if z_stack:
+                       O3_focus_offset = z_idx * O3_offset_per_z
+                       offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,O3_focus_offset,verbose=False)
+                       print(time_stamp(), f'Offset O3 focus stage position (um) = {offset_O3_focus_position}.')
                     
                     # setup DAQ for laser strobing
                     try:    
@@ -610,14 +610,22 @@ def main():
                     current_stage_data = [{'stage_x': float(stage_x), 
                                         'stage_y': float(stage_y), 
                                         'stage_z': float(stage_z),
-                                        'stage_O3': float(O3_focus_position)}]
+                                        'stage_O3': float(O3_focus_position),
+                                        '405_active': bool(channel_states[0]),
+                                        '488_active': bool(channel_states[1]),
+                                        '561_active': bool(channel_states[2]),
+                                        '635_active': bool(channel_states[3]),
+                                        '730_active': bool(channel_states[4])}]
 
-                    # run acquisition for this ryz combination
+                    # run acquisition for this rxyz combination
                     print(time_stamp(), f'round {r_idx+1}/{n_iterative_rounds}; x tile {x_idx+1}/{n_x_tiles}; y tile {y_idx+1}/{n_y_tiles}; z tile {z_idx+1}/{n_z_tiles}.')
                     print(time_stamp(), f'Stage location (um): x={stage_x}, y={stage_y}, z={stage_z}.')
                     with Acquisition(directory=str(df_MM_setup['save_directory']), name=str(save_name_rxyz),
                                     post_camera_hook_fn=camera_hook_fn, show_display=False) as acq:
                         acq.acquire(events)
+                    acq = None
+                    del acq
+                    gc.collect()
 
                     # stop DAQ and make sure it is at zero
                     try:
@@ -633,15 +641,15 @@ def main():
                     core.wait_for_config('Laser','Off')
 
                     # move O3 back to "real" focus
-                    #offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,0.0,verbose=False)
-                    #print(time_stamp(), f'O3 focus stage position (um) = {offset_O3_focus_position}.')
+                    offset_O3_focus_position = apply_O3_focus_offset(core,O3_stage_name,O3_focus_position,0.0,verbose=False)
+                    print(time_stamp(), f'O3 focus stage position (um) = {offset_O3_focus_position}.')
 
                     # save experimental info after first tile. 
                     # we do it this way so that Pycromanager can manage directory creation
                     if (setup_metadata):
                         # save stage scan parameters
                         scan_param_data = [{'root_name': str(df_MM_setup['save_name']),
-                                            'scan_type': str('OPM-stage-v2'),
+                                            'scan_type': str('OPM-stage-v3'),
                                             'interleaved': bool(True),
                                             'exposure': float(df_MM_setup['exposure_ms']),
                                             'theta': float(30.0), 
@@ -698,6 +706,15 @@ def main():
                     gc.collect()
             resume_y_tile = 0
         resume_x_tile = 0
+
+        # run empty acquisition to close file handle to previous acquistion
+        # need to do this because we process and delete raw data on the fly
+        events_flush = None
+        with Acquisition(directory=None,name=None,show_display=False) as acq_flush:
+            acq_flush.acquire(events_flush)
+        acq_flush = None
+        del acq_flush
+        gc.collect()
         
 
     # set lasers to zero power and software control

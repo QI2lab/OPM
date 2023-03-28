@@ -123,7 +123,7 @@ def main(argv):
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
                                         nchannels=nchannels,
                                         ntiles=num_x*num_y*num_z,
-                                        subsamp=((1,1,1), (4,4,4),(8,8,8),(16,16,16)),
+                                        subsamp=((1,1,1),(4,4,4),(8,8,8),(16,16,16)),
                                         blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
                                         compression='blosc')
     elif not(ch_fiducial_idx == 9):
@@ -138,8 +138,8 @@ def main(argv):
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
                                         nchannels=nchannels,
                                         ntiles=num_x*num_y*num_z,
-                                        subsamp=((1,1,1), (4,8,8),(8,16,16)),
-                                        blockdim=((8,256,256),(4,384,384),(2,512,512)),
+                                        subsamp=((1,1,1),(8,8,8),(16,16,16)),
+                                        blockdim=((64,64,64),(64,64,64),(64,64,64)),
                                         compression='blosc')
 
     # create blank affine transformation to use for stage translation
@@ -175,7 +175,7 @@ def main(argv):
     corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
     
     # loop over all rounds.
-    for r_idx in range(1,num_r):
+    for r_idx in range(num_r):
 
         # create group for this round in Zarr
         round_name = 'r'+str(r_idx).zfill(3)
@@ -197,42 +197,22 @@ def main(argv):
             stage_position_path = input_dir_path / stage_position_filename
 
             read_metadata = False
-            retry_flag = 0
+            skip_tile = False
             # check if this is the first tile. If so, wait longer for fluidics
-            if x_idx == 0 and y_idx == 0 and z_idx == 0:
-                while(not(read_metadata) and (retry_flag <4)):
-                    try:
-                        df_stage_positions = data_io.read_metadata(stage_position_path)
-                    except:
+            while(not(read_metadata)):
+                try:
+                    df_stage_positions = data_io.read_metadata(stage_position_path)
+                except:
+                    if real_time:
                         read_metadata = False
-                        retry_flag = retry_flag + 1
-                        if real_time:
-                            print(data_io.time_stamp(), "New round, initial stage position not found. Wait 20 minutes and try again.")
-                            time.sleep(20*60)
-                        else:
-                            retry_flag = 4
+                        print(data_io.time_stamp(), "Stage position not found. Wait 5 minutes and try again.")
+                        time.sleep(2*5)
                     else:
                         read_metadata = True
-            else:
-                while(not(read_metadata) and (retry_flag <4)):
-                    try:
-                        df_stage_positions = data_io.read_metadata(stage_position_path)
-                    except:
-                        read_metadata = False
-                        retry_flag = retry_flag + 1
-                        if real_time:
-                            print(data_io.time_stamp(), "Stage position not found. Wait 2 minute and try again.")
-                            time.sleep(2*60)
-                        else:
-                            retry_flag = 4
-                    else:
-                        read_metadata = True
-                    
-            if retry_flag == 4:
-                skip_tile = True
-                print(data_io.time_stamp(), "Timeout occurred. Skipping this stage position.")
-            else:
-                skip_tile = False
+                        skip_tile = True
+                        print(data_io.time_stamp(), "Stage position not found.")
+                else:
+                    read_metadata = True
 
             if not(skip_tile):
 
@@ -401,8 +381,18 @@ def main(argv):
                                 del corrected_stack
                                 gc.collect()
 
+                                # determine index in BDV file
+                                #ch_BDV_idx = ch_idx + (n_active_channels - max(channels_idxs_in_data_tile) - 1)
+                                if channel_id == 'ch488':
+                                    ch_BDV_idx = 0
+                                elif channel_id == 'ch561':
+                                    ch_BDV_idx = 1
+                                elif channel_id == 'ch635':
+                                    ch_BDV_idx = 2
+                                elif channel_id == 'ch405':
+                                    ch_BDV_idx = 1
+                                
                                 # create affine transformation for stage translation
-                                ch_BDV_idx = ch_idx + (n_active_channels - max(channels_idxs_in_data_tile) - 1)
                                 # swap x & y from instrument to BDV
                                 affine_matrix = unit_matrix
                                 affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # BDV x-translation (tile axis)
@@ -413,9 +403,8 @@ def main(argv):
                                 affine_matrix[2,3] = (-1*stage_z) / (deskewed_z_pixel)  # BDV z-translation (height axis)
 
                                 # save tile in BDV H5 with actual stage positions
-                                print(data_io.time_stamp(), 'Write deskewed data into BDV H5.')
+                                print(data_io.time_stamp(), 'Write deskewed data into BDV N5.')
                                 if ch_fiducial_idx == 8:
-                                    
                                     bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=r_idx, channel=ch_BDV_idx,
                                                             tile=tile_idx,
                                                             voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
@@ -446,14 +435,23 @@ def main(argv):
                     # TO DO: make sure this is possible on last round acquisition by running dummy acq w/o saving in acq. code
                     if not(do_not_delete):
                         print(data_io.time_stamp(), 'Delete NDTIFF directory.')
-                        shutil.rmtree(tile_dir_path_to_load)
-
+                        try_again = True
+                        n_delete_trys = 0
+                        while try_again and n_delete_trys < 10:
+                            try:
+                                shutil.rmtree(tile_dir_path_to_load)
+                            except:
+                                try_again = True
+                                n_delete_trys = n_delete_trys +1
+                                print(data_io.time_stamp(), 'Could not delete. Wait and try again.')
+                                time.sleep(60)
+                            finally:
+                                try_again = False
             tile_idx=tile_idx+1
 
     # write BDV xml file
     if (ch_fiducial_idx == 8) or not(ch_fiducial_idx == 9):
         bdv_writer.write_xml()
-        bdv_writer.close()
 
     # exit
     print('Finished.')
