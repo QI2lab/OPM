@@ -350,6 +350,7 @@ class OPMMirrorScan(MagicTemplate):
 
         # run hardware triggered acquisition
         if self.wait_time == 0:
+            self.mmc.setExposure(self.exposure_ms)
             self.opmdaq.start_waveform_playback()
             self.DAQ_running = True
             self.mmc.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
@@ -378,7 +379,7 @@ class OPMMirrorScan(MagicTemplate):
                 self.mmc.stopSequenceAcquisition()
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
-                if af_counter == 10:
+                if af_counter == 2:
                     t_start = time.perf_counter()
                     self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
                     self.mmc.setExposure(self.exposure_ms)

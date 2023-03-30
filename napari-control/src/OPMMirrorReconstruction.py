@@ -24,6 +24,8 @@ from src.utils.data_io import read_metadata, return_data_from_zarr_to_numpy, ret
 from skimage.measure import block_reduce
 from itertools import compress
 import gc
+from numcodecs import Blosc
+
 try:
     import cupy as cp
     CP_AVAILABLE = True
@@ -47,6 +49,7 @@ class OPMMirrorReconstruction(MagicTemplate):
 
     def __init__(self):
         self.decon = False
+        self.match_histograms = False
         self.debug = False
         self.channel_idxs=[0,1,2,3,4]
         self.active_channels=[False,False,False,False,False]
@@ -127,7 +130,14 @@ class OPMMirrorReconstruction(MagicTemplate):
         nx = np.int64(x_pixels)                                           # (pixels)
 
         # create and open zarr file
-        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(num_t, num_ch, nz, ny, nx), chunks=(1, 1, int(nz), int(ny)//2, int(nx)//2), dtype=np.uint16)
+        compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
+        opm_data = zarr.open(str(zarr_output_path), 
+                             mode="w", 
+                             shape=(num_t, num_ch, nz, ny, nx), 
+                             chunks=(1, 1, 1, int(ny), int(nx)), 
+                             dimension_separator='/',
+                             compressor = compressor,
+                             dtype=np.uint16)
         
         # if decon is requested, try to import microvolution wrapper or clij2-fft library
         if self.decon:
