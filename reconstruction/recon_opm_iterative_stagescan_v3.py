@@ -206,7 +206,7 @@ def main(argv):
                     if real_time:
                         read_metadata = False
                         print(data_io.time_stamp(), "Stage position not found. Wait 5 minutes and try again.")
-                        time.sleep(2*5)
+                        time.sleep(60*5)
                     else:
                         read_metadata = True
                         skip_tile = True

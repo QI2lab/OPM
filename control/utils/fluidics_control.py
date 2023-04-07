@@ -3,6 +3,7 @@
 '''
 Functions to execute fluidics programs
 
+Shepherd 03/23 - Add "REFRESH" setting to pause until user approves. Allows for solution change out.
 Shepherd 11/22 - Updates from Alexis Colloumb changes on his widefield setup. 
                  This has a breaking change! Rounds must now start at "1", not "0".
 Shepherd 05/21 - initial commit
@@ -12,6 +13,7 @@ import numpy as np
 import pandas as pd
 import time
 import sys
+import easygui
 from .data_io import time_stamp
 from .autofocus_remote_unit import manage_O3_focus
 
@@ -84,6 +86,11 @@ def run_fluidic_program(r_idx,
                     O3_focus_position = np.round(manage_O3_focus(core,shutter_controller,O3_stage_name,verbose=False),2)
                     print(time_stamp(), f'O3 focus stage position (um) = {O3_focus_position}.')
                     af_counter = 0
+        elif source_name == 'REFRESH':
+            pump_controller.stopFlow()
+            refresh_approved = False
+            while not(refresh_approved):
+                refresh_approved = easygui.ynbox('Refresh complete?', 'Title', ('Yes', 'No'))
         else:
             # extract and set valve
             valve_position = lookup_valve(source_name)
