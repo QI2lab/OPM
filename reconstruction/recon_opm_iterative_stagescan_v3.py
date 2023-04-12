@@ -134,7 +134,10 @@ def main(argv):
         # https://github.com/nvladimus/npy2bdv
         # create BDV H5 file with sub-sampling for BigStitcher
         bdv_output_path = bdv_output_dir_path / Path(root_name+'.n5')
-        nchannels = 1
+        if nuclei_round:
+            nchannels = 2
+        else:
+            nchannels = 1
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
                                         nchannels=nchannels,
                                         ntiles=num_x*num_y*num_z,
@@ -347,7 +350,7 @@ def main(argv):
                             gc.collect()
 
                             # write into BDV if requested
-                            if ((ch_idx == ch_fiducial_idx) or (ch_fiducial_idx == 8)) and not(ch_fiducial_idx==9):
+                            if ((ch_idx == ch_fiducial_idx) or (ch_fiducial_idx == 8) or (ch_idx==0)) and not(ch_fiducial_idx==9):
                                 # check if user flagged for further on-the-fly processing before BDV
                                 # run deconvolution on skewed image
                                 if decon_flag == 1:
@@ -382,7 +385,6 @@ def main(argv):
                                 gc.collect()
 
                                 # determine index in BDV file
-                                #ch_BDV_idx = ch_idx + (n_active_channels - max(channels_idxs_in_data_tile) - 1)
                                 if channel_id == 'ch488':
                                     ch_BDV_idx = 0
                                 elif channel_id == 'ch561':
@@ -412,14 +414,16 @@ def main(argv):
                                                             calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
                                                             m_affine=affine_matrix,
                                                             name_affine = 'tile '+str(tile_idx)+' translation')
+                                    bdv_writer.write_xml()
                                 elif not(ch_fiducial_idx == 9):
-                                    bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=r_idx, channel=0,
+                                    bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=0, channel=ch_BDV_idx,
                                                             tile=tile_idx,
                                                             voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
                                                             voxel_units='um',
                                                             calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
                                                             m_affine=affine_matrix,
                                                             name_affine = 'tile '+str(tile_idx)+' translation')
+                                    bdv_writer.write_xml()
                                 # free up memory
                                 del deskewed
                                 gc.collect()

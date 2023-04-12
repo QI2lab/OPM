@@ -67,7 +67,7 @@ def main():
     resume_y_tile = 0
 
     # O3 offset per plane
-    O3_offset_per_z = -3.2 # DOUBLE CHECK BEFORE RUNNING!
+    O3_offset_per_z = -3.5 # DOUBLE CHECK BEFORE RUNNING!
     # This is for 30% overlap of 30 um ROI (512)
 
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
