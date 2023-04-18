@@ -327,6 +327,9 @@ class OPMMirrorScan(MagicTemplate):
         self.output_dir_path = self.save_path / Path('timelapse_'+time_string)
         self.output_dir_path.mkdir(parents=True, exist_ok=True)
 
+        # grab O3 stage position
+
+
 
         # create name for zarr directory
         zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
@@ -379,13 +382,15 @@ class OPMMirrorScan(MagicTemplate):
                 self.mmc.stopSequenceAcquisition()
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
-                if af_counter == 2:
+                if af_counter == 0:
                     t_start = time.perf_counter()
                     self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
                     self.mmc.setExposure(self.exposure_ms)
                     t_end = time.perf_counter()
                     t_elapsed = t_end - t_start
-                    time.sleep(self.wait_time-t_elapsed)
+                    time.sleep(self.wait_time-t_elapsed*2)
+                    self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
+                    self.mmc.setExposure(self.exposure_ms)
                     af_counter = 0
                 else:
                     time.sleep(self.wait_time)
@@ -792,7 +797,7 @@ class OPMMirrorScan(MagicTemplate):
     @magicgui(
         auto_call=True,
         n_timepoints={"widget_type": "SpinBox", "min": 0, "max": 10000, "label": 'Timepoints to acquire'},
-        wait_time={"widget_type": "FloatSpinBox", "min": 0, "max": 240, "label": 'Delay between timepoints (s)'},
+        wait_time={"widget_type": "FloatSpinBox", "min": 0, "max": 720, "label": 'Delay between timepoints (s)'},
         layout='horizontal'
     )
     def set_timepoints(self, n_timepoints=400,wait_time=0):
