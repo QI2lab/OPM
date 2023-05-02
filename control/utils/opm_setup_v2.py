@@ -326,7 +326,6 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     # calculate allowed scan length and number of scan tiles for allowed coverslip height change
     scan_tile_length_um = np.round((max_height_change_um / coverslip_slope_um),2)
     num_scan_tiles = np.rint(np.abs(scan_axis_end_um-scan_axis_start_um) / scan_tile_length_um)
-    
 
     # calculate scan axis tile locations
     scan_tile_overlap = .2 # unit: percentage
@@ -337,13 +336,20 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
     scan_tile_length_mm = scan_tile_length_um / 1000. # unit: mm
 
-    scan_axis_start_pos_mm = np.round(np.arange(scan_axis_start_mm,scan_axis_end_mm+(1-scan_tile_overlap)*scan_tile_length_mm,(1-scan_tile_overlap)*scan_tile_length_mm),2) #unit: mm
-    scan_axis_end_pos_mm = np.round(scan_axis_start_pos_mm + scan_tile_length_mm * (1+scan_tile_overlap),2)
-    scan_axis_start_pos_mm = scan_axis_start_pos_mm[0:-1]
-    scan_axis_end_pos_mm = scan_axis_end_pos_mm[0:-1]
-    scan_tile_length_w_overlap_mm = scan_axis_end_pos_mm[0]-scan_axis_start_pos_mm[0]
-    scan_axis_positions = np.rint(scan_tile_length_w_overlap_mm / scan_axis_step_mm).astype(int)
-    num_scan_tiles = len(scan_axis_start_pos_mm)
+    if num_scan_tiles > 0:
+        scan_axis_start_pos_mm = np.round(np.arange(scan_axis_start_mm,scan_axis_end_mm+(1-scan_tile_overlap)*scan_tile_length_mm,(1-scan_tile_overlap)*scan_tile_length_mm),2) #unit: mm
+        scan_axis_end_pos_mm = np.round(scan_axis_start_pos_mm + scan_tile_length_mm * (1+scan_tile_overlap),2)
+        scan_axis_start_pos_mm = scan_axis_start_pos_mm[0:-1]
+        scan_axis_end_pos_mm = scan_axis_end_pos_mm[0:-1]
+        scan_tile_length_w_overlap_mm = np.abs(scan_axis_end_pos_mm[0]-scan_axis_start_pos_mm[0])
+        scan_axis_positions = np.rint(scan_tile_length_w_overlap_mm / scan_axis_step_mm).astype(int)
+        num_scan_tiles = len(scan_axis_start_pos_mm)
+    else:
+        scan_axis_start_pos_mm = [scan_axis_start_mm]
+        scan_axis_end_pos_mm = [scan_axis_end_mm]
+        scan_tile_length_w_overlap_mm = np.abs(scan_axis_end_pos_mm[0]-scan_axis_start_pos_mm[0])
+        scan_axis_positions = np.rint(scan_tile_length_w_overlap_mm / scan_axis_step_mm).astype(int)
+        num_scan_tiles = 1
     actual_exposure_s = actual_readout_ms / 1000. #unit: s
     scan_axis_speed = np.round(scan_axis_step_mm / actual_exposure_s / n_active_channels,5) #unit: mm/s
     #scan_axis_positions = np.rint((scan_tile_length_mm* (1+scan_tile_overlap)) / scan_axis_step_mm).astype(int)  #unit: number of positions
@@ -353,6 +359,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
         print(f'Scan axis end positions: {scan_axis_end_pos_mm}.')
         print(f'Scan axis positions: {scan_axis_positions}')
         print(f'Scan tile size: {scan_tile_length_w_overlap_mm}')
+        print(f'Scan axis speed (mm/s): {scan_axis_speed}')
 
     # calculate starting height axis locations
     height_axis_start_pos_um = np.round(np.linspace(height_axis_start_um,height_axis_end_um,len(scan_axis_start_pos_mm)),2)

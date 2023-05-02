@@ -178,7 +178,7 @@ def main(argv):
     corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
     
     # loop over all rounds.
-    for r_idx in range(num_r):
+    for r_idx in range(1,num_r):
 
         # create group for this round in Zarr
         round_name = 'r'+str(r_idx).zfill(3)
@@ -416,7 +416,7 @@ def main(argv):
                                                             name_affine = 'tile '+str(tile_idx)+' translation')
                                     bdv_writer.write_xml()
                                 elif not(ch_fiducial_idx == 9):
-                                    bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=0, channel=ch_BDV_idx,
+                                    bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=r_idx, channel=ch_BDV_idx,
                                                             tile=tile_idx,
                                                             voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
                                                             voxel_units='um',

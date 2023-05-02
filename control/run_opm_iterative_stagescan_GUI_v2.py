@@ -64,14 +64,14 @@ def main():
     # flags for resuming acquisition
     # TO DO: Make this a user setting during acquisition so that it can't screw up a restart.
     resume_x_tile = 0
-    resume_y_tile = 0
+    resume_y_tile = 11
 
     # O3 offset per plane
     O3_offset_per_z = -3.5 # DOUBLE CHECK BEFORE RUNNING!
     # This is for 30% overlap of 30 um ROI (512)
 
     # flags for metadata, processing, drift correction, and O2-O3 autofocusing
-    setup_metadata=True
+    setup_metadata=False
     debug_flag = True
     switch_last_round = True
     avoid_overwriting = True
