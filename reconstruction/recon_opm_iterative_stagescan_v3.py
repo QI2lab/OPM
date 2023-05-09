@@ -178,7 +178,7 @@ def main(argv):
     corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
     
     # loop over all rounds.
-    for r_idx in range(1,num_r):
+    for r_idx in range(num_r):
 
         # create group for this round in Zarr
         round_name = 'r'+str(r_idx).zfill(3)
