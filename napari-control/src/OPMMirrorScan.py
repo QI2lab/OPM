@@ -327,16 +327,14 @@ class OPMMirrorScan(MagicTemplate):
         self.output_dir_path = self.save_path / Path('timelapse_'+time_string)
         self.output_dir_path.mkdir(parents=True, exist_ok=True)
 
-        # grab O3 stage position
-
-
-
         # create name for zarr directory
         zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
 
         # create and open zarr file
         opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x),compressor=None, dtype=np.uint16)
 
+        # construct metadata and save
+        self._save_metadata()
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------End setup of scan parameters----------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
@@ -346,9 +344,13 @@ class OPMMirrorScan(MagicTemplate):
         #----------------------------------------------------Start acquisition---------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
 
+        # turn off Z motor
+        exp_zstage_name = self.mmc.getFocusDevice()
+        self.mmc.setProperty(exp_zstage_name,'MotorOnOff','Off')
+
         # set circular buffer to be large
         self.mmc.clearCircularBuffer()
-        circ_buffer_mb = 96000
+        circ_buffer_mb = 32000
         self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
         # run hardware triggered acquisition
@@ -396,8 +398,9 @@ class OPMMirrorScan(MagicTemplate):
                     time.sleep(self.wait_time)
                     af_counter = af_counter + 1
 
-        # construct metadata and save
-        self._save_metadata()
+        # turn on Z motors
+        exp_zstage_name = self.mmc.getFocusDevice()
+        self.mmc.setProperty(exp_zstage_name,'MotorOnOff','On')
 
         #------------------------------------------------------------------------------------------------------------------------------------
         #--------------------------------------------------------End acquisition-------------------------------------------------------------
@@ -559,6 +562,8 @@ class OPMMirrorScan(MagicTemplate):
         self.shutter_controller = PicardShutter(shutter_id=self.shutter_id,verbose=False)
         self.shutter_controller.closeShutter()
         self.shutter_state = 0
+
+        self.mmc.setProperty(self.mmc.getFocusDevice(),'MotorOnOff','On')
 
     def _shutdown(self):
         """

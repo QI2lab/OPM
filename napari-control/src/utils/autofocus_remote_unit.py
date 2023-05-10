@@ -144,8 +144,10 @@ def find_best_O3_focus_metric(mmc: CMMCorePlus,shutter_controller,O3_stage_name,
     # set focus device back to MM experiment focus stage
     mmc.setFocusDevice(exp_zstage_name)
     mmc.waitForDevice(exp_zstage_name)
-    mmc.setPosition(exp_zstage_pos)
-    mmc.waitForDevice(exp_zstage_name)
+    #mmc.setPosition(exp_zstage_pos)
+    #mmc.waitForDevice(exp_zstage_name)
+    exp_zstage_pos = np.round(mmc.getPosition(),2)
+    if verbose: print(f'Current z-stage: {exp_zstage_name} with position {exp_zstage_pos}')
 
     return best_03_stage_pos
 
