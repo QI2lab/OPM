@@ -32,6 +32,7 @@ if CP_AVAILABLE:
     except:
         try:
             from clij2fft.richardson_lucy import richardson_lucy_nc
+            from clij2fft.richardson_lucy import getlib
             DECON_LIBRARY = 'clij'
         except:
             DECON_LIBRARY = None
@@ -196,7 +197,7 @@ def lr_deconvolution(image,psf,iterations=5):
     """
 
     # create dask array and apodization window
-    scan_chunk_size = 128
+    scan_chunk_size = 64
     if image.shape[0]<scan_chunk_size:
         dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]))
         overlap_depth = (0,0,0)
@@ -209,7 +210,8 @@ def lr_deconvolution(image,psf,iterations=5):
     if DECON_LIBRARY=='mv':
         lr_dask = partial(mv_lr_decon,psf=psf,num_iterations=iterations)
     elif DECON_LIBRARY=='clij':
-        lr_dask = partial(clij_lr,psf=psf,num_iters=iterations,tau=.0002)
+        lib = getlib()
+        lr_dask = partial(clij_lr,psf=psf,num_iters=iterations,tau=0.0001,lib=lib)
 
     # create dask plan for overlapped blocks
     dask_decon = da.map_overlap(lr_dask,dask_raw,depth=overlap_depth,boundary='reflect',trim=True,meta=np.array((), dtype=np.uint16))
@@ -219,7 +221,7 @@ def lr_deconvolution(image,psf,iterations=5):
         decon_data = dask_decon.compute(scheduler='single-threaded')
 
     # clean up memory
-    del dask_decon
+    del dask_decon, lib
     gc.collect()
 
     cp.clear_memo()
@@ -288,8 +290,8 @@ def mv_lr_decon(image,psf,num_iterations):
 
     return new_image.astype(np.uint16)
 
-def clij_lr(image,psf,num_iters,tau):
+def clij_lr(image,psf,num_iters,tau,lib):
 
-    result = richardson_lucy_nc(image.astype(np.float32),psf.astype(np.float32),num_iters,tau)
+    result = richardson_lucy_nc(image.astype(np.float32),psf.astype(np.float32),num_iters,tau,lib)
 
     return result.astype(np.uint16)
