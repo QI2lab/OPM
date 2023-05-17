@@ -141,8 +141,8 @@ def main(argv):
         bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
                                         nchannels=nchannels,
                                         ntiles=num_x*num_y*num_z,
-                                        subsamp=((1,1,1),(8,8,8),(16,16,16)),
-                                        blockdim=((64,64,64),(64,64,64),(64,64,64)),
+                                        subsamp=((1,1,1),(4,4,4),(8,8,8),(16,16,16)),
+                                        blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
                                         compression='blosc')
 
     # create blank affine transformation to use for stage translation
