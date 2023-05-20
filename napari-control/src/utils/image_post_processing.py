@@ -197,7 +197,7 @@ def lr_deconvolution(image,psf,iterations=5):
     """
 
     # create dask array and apodization window
-    scan_chunk_size = 64
+    scan_chunk_size = 128
     if image.shape[0]<scan_chunk_size:
         dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]))
         overlap_depth = (0,0,0)
