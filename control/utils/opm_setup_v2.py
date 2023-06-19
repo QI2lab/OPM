@@ -339,8 +339,8 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     if num_scan_tiles > 0:
         scan_axis_start_pos_mm = np.round(np.arange(scan_axis_start_mm,scan_axis_end_mm+(1-scan_tile_overlap)*scan_tile_length_mm,(1-scan_tile_overlap)*scan_tile_length_mm),2) #unit: mm
         scan_axis_end_pos_mm = np.round(scan_axis_start_pos_mm + scan_tile_length_mm * (1+scan_tile_overlap),2)
-        scan_axis_start_pos_mm = scan_axis_start_pos_mm[0:-1]
-        scan_axis_end_pos_mm = scan_axis_end_pos_mm[0:-1]
+        scan_axis_start_pos_mm = scan_axis_start_pos_mm[0:-2]
+        scan_axis_end_pos_mm = scan_axis_end_pos_mm[0:-2]
         scan_tile_length_w_overlap_mm = np.abs(scan_axis_end_pos_mm[0]-scan_axis_start_pos_mm[0])
         scan_axis_positions = np.rint(scan_tile_length_w_overlap_mm / scan_axis_step_mm).astype(int)
         num_scan_tiles = len(scan_axis_start_pos_mm)
