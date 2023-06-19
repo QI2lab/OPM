@@ -1,16 +1,22 @@
 #!/usr/bin/env python
 '''
 QI2lab OPM suite
-Reconstruction suite
+Reconstruction suite v3
 
 Stage scanning iterative OPM post-processing.
-- Rewrites raw data in compressed Zarr.
-- Places all tiles in actual stage positions and places iterative rounds into the time axis of BDV H5 for alignment
+- Rewrites raw data in compressed Zarr
+- Places deskewed fiducial tiles in actual stage positions and iterative rounds into the time axis of BDV N5 for alignment
+- Calls BigStitcher to generate translation-only global tile alignment
+- Performs fine registration for each tile across iterative rounds using optical flow
 - Orthgonal interpolation method adapted from Vincent Maioli (http://doi.org/10.25560/68022)
 
-Change log: 
-Shepherd 02/22 - more error handling and flag for completed dataset vs. real-time conversion
-Shepherd 02/22 - updates for v2.1 acquisition approach.
+Change log:
+Shepherd 06/23 - breaking changes for v3.0 acquisition
+                 add `tile_idx` to zarr file to remove need for ambiguous conversion from xyz tile to BDV tile.
+                 automate bigstitcher translation stitching after dataset creation
+                 implement affine local registration using optical flow on BDV file 
+Shepherd 02/23 - more error handling and flag for completed dataset vs. real-time conversion
+Shepherd 02/23 - updates for v2.1 acquisition approach.
 Shepherd 01/23 - breaking change for v2.0 acquisition approach.
 Shepherd 01/23 - remove z downsampling and add option to select individual y & z tiles
 '''
@@ -23,28 +29,28 @@ import npy2bdv
 import sys
 import gc
 import argparse
-from image_post_processing import deskew
+from _imageprocessing import deskew, run_bigstitcher, perform_local_registration, generate_flatfield, apply_flatfield
 from itertools import compress, product
-import data_io
+import _dataio as data_io
 import zarr
+from numcodecs import Blosc
 import time
 import shutil
 import dask.array as da
-from numcodecs import Blosc
 
 # parse experimental directory, load data, and process
 def main(argv):
 
     # parse directory name from command line argument
     # parse command line arguments
-    parser = argparse.ArgumentParser(description="Process raw OPM data.")
+    parser = argparse.ArgumentParser(description="Prepare raw OPM MERFISH data for analysis.")
     parser.add_argument("-i", "--ipath", type=str, help="supply the directory to be processed")
     parser.add_argument("-o", "--opath", type=str, default="default", help="supply output directory (DEFAULT is input directory)")
-    parser.add_argument("-d", "--decon", type=int, default=0, help="0: no deconvolution (DEFAULT), 1: deconvolution")
-    parser.add_argument("-f", "--flatfield", type=int, default=0, help="0: No flat field (DEFAULT), 1: flat field")
+    parser.add_argument("-d", "--decon", type=int, default=0, help="0: no deconvolution (DEFAULT), 1: perform deconvolution")
+    parser.add_argument("-f", "--flatfield", type=int, default=1, help="0: no flatfield, 1: perform flatfield (DEFAULT)")
     parser.add_argument("-c", "--fiducial_channel",type=int, default=1, help="1: 488 nm laser (DEFAULT), n: channel index (starting from 0), 8: all channels, 9: no BDV")
-    parser.add_argument("-n", "--nuclei_round", type=int, default=0, help="0: No nuclei round (DEFAULT), 1: Last round is nuclei round")
-    parser.add_argument("-t", "--real_time", type=int, default=0, help="0: Completed aquisition (DEFAULT), 1: real time acquisition")
+    parser.add_argument("-n", "--nuclei_round", type=int, default=1, help="0: no nuclei staining, 1: last round has nuclei (DEFAULT)")
+    parser.add_argument("-t", "--real_time", type=int, default=0, help="0: real time aquisition (DEFAULT), 1: completed acquisition")
     args = parser.parse_args()
 
     input_dir_string = args.ipath
@@ -115,6 +121,7 @@ def main(argv):
         # create directory for data type
         bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
         bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
+        bdv_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
 
         # https://github.com/nvladimus/npy2bdv
         # create BDV H5 file with sub-sampling for BigStitcher
@@ -126,10 +133,12 @@ def main(argv):
                                         subsamp=((1,1,1),(4,4,4),(8,8,8),(16,16,16)),
                                         blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
                                         compression='blosc')
+
     elif not(ch_fiducial_idx == 9):
         # create directory for data type
         bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
         bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
+        BDV_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
 
         # https://github.com/nvladimus/npy2bdv
         # create BDV H5 file with sub-sampling for BigStitcher
@@ -161,17 +170,16 @@ def main(argv):
                      
     # if retrospective flatfield is requested, import GPU flatfield code
     if flatfield_flag==1:
-        from image_post_processing import manage_flat_field_py
+        from _imageprocessing import generate_flatfield, apply_flatfield
     # if decon is requested, import GPU deconvolution code
     if decon_flag==1:
-        from image_post_processing import lr_deconvolution
+        from _imageprocessing import lr_deconvolution
 
     # initialize tile counter and channel information
     ex_wavelengths=[.405,.488,.561,.635,.730]
     em_wavelengths=[.420,.520,.580,.670,.780]
 
     tile_idx=0
-    first_flatfield = True
 
     channel_idxs = [0,1,2,3,4]
     channel_ids = ['ch405','ch488','ch561','ch635','ch730']
@@ -355,31 +363,41 @@ def main(argv):
                                 # run deconvolution on skewed image
                                 if decon_flag == 1:
                                     print(data_io.time_stamp(), 'Deconvolve.')
-                                    decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=30)
+                                    decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=100)
                                 else:
                                     decon = raw_data
                                 del raw_data
                                 gc.collect()
 
-                                # perform flat-fielding
-                                if flatfield_flag == 1:
+                                # perform flat-fielding using random draw of images from the stack
+                                if flatfield_flag == 0:
                                     print(data_io.time_stamp(), 'Flatfield.')
+                                    n_flatfield_images = 1000
+                                    rand_draw_success = False
+                                    while not(rand_draw_success):
+                                        try:
+                                            rand_idx = np.random.randint(0,decon.shape[0],n_flatfield_images)
+                                        except:
+                                            rand_draw_success = False
+                                            n_flatfield_images = n_flatfield_images // 2
+                                        else:
+                                            rand_draw_success = True
 
-                                    if (first_flatfield):
-                                        flat_field = np.zeros([num_y,num_z,n_active_channels,y_pixels,x_pixels])
-                                        dark_field = np.zeros([num_y,num_z,n_active_channels,y_pixels,x_pixels])
-                                        first_flatfield = False
-
-                                    corrected_stack, flat_field[y_idx,z_idx,ch_idx,:], dark_field[y_idx,z_idx,ch_idx,:] = manage_flat_field_py(decon)
-
+                                    flatfield = generate_flatfield(decon[rand_idx,:])
+                                    corrected_stack = apply_flatfield(decon,flatfield)
+                                    current_flatfield = current_channel.zeros('flatfield',
+                                                                              shape=(flatfield.shape[0],flatfield.shape[1]),
+                                                                              chunks=(flatfield.shape[0],flatfield.shape[1]),
+                                                                              compressor=compressor,
+                                                                              dtype=np.float32)
+                                    current_flatfield[:] = flatfield.astype(np.float32)
                                 else:
                                     corrected_stack = decon
-                                del decon
+                                del decon, flatfield
                                 gc.collect()
 
                                 # deskew
                                 print(data_io.time_stamp(), 'Deskew.')
-                                # maybe just skip np.flipud, but have to check if it doesn't flip the major axis, which is z
                                 deskewed = deskew(data=corrected_stack,theta=theta,distance=scan_step,pixel_size=pixel_size)
                                 del corrected_stack
                                 gc.collect()
@@ -424,6 +442,8 @@ def main(argv):
                                                             m_affine=affine_matrix,
                                                             name_affine = 'tile '+str(tile_idx)+' translation')
                                     bdv_writer.write_xml()
+                                current_BDV_tile_idx = current_channel.zeros('BDV_tile_idx',shape=(1),compressor=compressor,dtype=float)
+                                current_BDV_tile_idx[:] = tile_idx
                                 # free up memory
                                 del deskewed
                                 gc.collect()
@@ -436,7 +456,6 @@ def main(argv):
                     gc.collect()
 
                     # delete raw NDTIFF data
-                    # TO DO: make sure this is possible on last round acquisition by running dummy acq w/o saving in acq. code
                     if not(do_not_delete):
                         print(data_io.time_stamp(), 'Delete NDTIFF directory.')
                         try_again = True
@@ -456,6 +475,28 @@ def main(argv):
     # write BDV xml file
     if (ch_fiducial_idx == 8) or not(ch_fiducial_idx == 9):
         bdv_writer.write_xml()
+
+    # run BigStitcher translation registration
+    # TO DO: load Fiji related paths from .json
+    print(data_io.time_stamp(),'Starting BigStitcher registration and poly-dT fusion (can take >8 hours).')
+    fiji_path = Path(r'c:/Fiji.app/ImageJ-win64.exe')
+    macro_path = Path(r'c:/Fiji.app/OPM_stitch.ijm')
+    run_bigstitcher(BDV_xml_path,fiji_path,macro_path)
+    print(data_io.time_stamp(),'Finished BigStitcher registration and poly-dT fusion.')
+
+    # run affine local registration across rounds.
+    # Both the BigStitcher and local affine results are placed 
+    # into raw data Zarr array for use in decoding.
+    print(data_io.time_stamp(), 'Local affine translation.')
+    perform_local_registration(bdv_output_path,
+                               bdv_xml_path,
+                               zarr_output_path,
+                               num_r,
+                               num_x,
+                               num_y,
+                               num_x,
+                               deskewed_x_pixel,
+                               compressor)
 
     # exit
     print('Finished.')
