@@ -32,6 +32,8 @@ import deeds
 import _dataio as data_io
 from localize_psf import affine
 from skimage.transform import downscale_local_mean, warp
+from tqdm import tqdm
+from tqdm.contrib.itertools import product as tqdm_product
 
 cupy_available = True
 try:
@@ -248,7 +250,7 @@ def deconvolve(image: Union[np.ndarray, dask.array.core.Array],
 
     return deconvolved_image.astype(np.uint16)
 
-def generate_flatfield(data: np.ndarray) -> np.ndarray:
+def generate_flatfield(data: np.ndarray,) -> np.ndarray:
     """
     Optimize parameters and generate shading correction via BaSiCpy.
 
@@ -263,18 +265,20 @@ def generate_flatfield(data: np.ndarray) -> np.ndarray:
         flatfield correction
     """
     
-    basic = BaSiC(get_darkfield=False,
-                  smoothness_flatfield=1)
-    basic.autotune(data, early_stop=True, n_iter=100)
+    basic = BaSiC(get_darkfield=True,
+                  smoothness_flatfield=.1,
+                  smoothness_darkfield=1)
+    #basic.autotune(data, early_stop=True, n_iter=100) # doesn't seem to work 20230619 - DPS
     basic.fit(data)
     flatfield = basic.flatfield
+    darkfield = basic.darkfield
 
-    return flatfield.astype(np.float32)
+    return flatfield.astype(np.float32), darkfield.astype(np.float32)
 
-@njit(nopython=True)
-def apply_flatfield(data: np.nadrray,
+def apply_flatfield(data: np.ndarray,
                     flatfield: np.ndarray,
-                    camera_offset: Optional[np.ndarray] = 110.0) -> np.ndarray:
+                    darkfield: np.ndarray,
+                    camera_offset: Optional[np.float32] = 100.0) -> np.ndarray:
     """
     Apply flatfield shading correction and remove camera offset
 
@@ -284,6 +288,8 @@ def apply_flatfield(data: np.nadrray,
         data to be corrected
     flatfield : np.ndarray
         flatfield image
+    darkfield : np.ndarray
+        darkfield image
     camera_offset : float
         scalar camera offset. Default is 110.0 for our FusionBT.
 
@@ -294,14 +300,15 @@ def apply_flatfield(data: np.nadrray,
     
     """
     
-    corrected_data = (data.astype(np.float32) - camera_offset.astype(np.float32)) / flatfield
-    corrected_data[corrected_data<0] = 0
+    corrected_data = (data.astype(np.float32) - darkfield.astype(np.float32)) / flatfield.astype(np.float32)
+    corrected_data[corrected_data<0]=0.0
 
     return corrected_data.astype(np.uint16)
 
 def run_bigstitcher(data_path: Path,
                     fiji_path: Path,
-                    macro_path: Path) -> None:
+                    macro_path: Path,
+                    bdv_xml_path: Path) -> None:
     """
     Run bigstitcher stitching using ImageJ headless
 
@@ -310,7 +317,11 @@ def run_bigstitcher(data_path: Path,
     data_path : Path
         path to datasets
     fiji_path : Path
-        path to Fiji
+        path to Fiji on local system
+    macro_pathh : Path
+        path to Fiji stitching macro on local system
+    fiji_path : Path
+        path to BDV xml to use
 
     Returns
     -------
@@ -318,20 +329,22 @@ def run_bigstitcher(data_path: Path,
     """
     
     # construct bigstitcher command
-    xml_path = data_path / Path('processed') / Path('deskewed_bdv') / Path('dataset.xml')
-    n5data_path = data_path / Path('processed') / Path('fused') / Path('fused4x.n5')
-    n5xml_path = data_path / Path('processed') / Path('fused') / Path('fused4x.xml')
-    command_to_run = str(fiji_path)+r' --headless -macro'+\
-                     str(macro_path) + ' \"' + str(xml_path) + r' ' +\
+    n5data_path = data_path / Path('fused') / Path('fused4x.n5')
+    n5xml_path = data_path / Path('fused') / Path('fused4x.xml')
+    command_to_run = str(fiji_path)+r' --headless -macro '+\
+                     str(macro_path) + ' \"' + str(bdv_xml_path) + r' ' +\
                      str(n5data_path) + r' ' + str(n5xml_path) +'\"'
+
+    print(command_to_run)
+
 
     # call bigstitcher and block until completion (long process)
     subprocess.run(command_to_run,capture_output=False)
     
-
     return None
 
 def make_composed_transformation(path_affine: Path,
+                                 tile_idx: int,
                                  r_idx: int,
                                  x_idx: int,
                                  y_idx: int,
@@ -361,13 +374,12 @@ def make_composed_transformation(path_affine: Path,
         composed transformation for all BigStitcher transformations
     """
     
-    xforms = data_io.return_affine_xform(path_affine,
+    xforms = data_io.return_affine_xform(path_to_xml=path_affine,
+                                         tile_idx=tile_idx,
                                          r_idx=r_idx,
                                          x_idx=x_idx,
                                          y_idx=y_idx,
                                          z_idx=z_idx,
-                                         ch_affine=0, 
-                                         tile_offset=0,
                                          verbose=0)
 
     # convert to homogeneous coordinate matrix
@@ -384,7 +396,16 @@ def make_composed_transformation(path_affine: Path,
     x_invert_xform = np.array([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
     xform = x_invert_xform.dot(coordinate_scale_xform.dot(xform_pix.dot(coordinate_scale_xform_inv)))
     
-    return xform
+    # generate scaled transforms for 4x isotropic downsampled data
+    scale_factor = 4
+    scaled_xform_pix = np.copy(xform_pix)
+    scaled_xform_pix[:-1,-1] /= scale_factor
+    scaled_coordinate_scale_xform = np.copy(coordinate_scale_xform)
+    scaled_coordinate_scale_xform *= scale_factor
+    scaled_coordinate_scale_xform_inv = np.linalg.inv(scaled_coordinate_scale_xform)
+    scaled_xform = x_invert_xform.dot(scaled_coordinate_scale_xform.dot(scaled_xform_pix.dot(scaled_coordinate_scale_xform_inv)))
+
+    return xform, scaled_xform
 
 def make_warper_from_field(field):
     """
@@ -487,7 +508,7 @@ def apply_relative_affine_transform(data_target: np.ndarray,
     warper = make_warper_from_affine(data_target.shape, transfo_ref_inv_trg_pix)
     # compute the warped image
 
-    data_warped = warp(data_target, warper, mode='edge')
+    data_warped = warp(data_target, warper, mode='edge',preserve_range=True)
 
     return data_warped
 
@@ -561,47 +582,59 @@ def perform_local_registration(BDV_N5_path: Path,
     n5_data  = zarr.open(BDV_N5_path)
 
     # loop over all tiles
-    for (x_idx,y_idx,z_idx) in product(range(num_x),range(num_y),range(num_z)):
+    tile_idx = -1
+    for (x_idx,y_idx,z_idx) in tqdm_product(range(num_x),range(num_y),range(num_z),
+                                            desc='Tiles'):
+        tile_idx = tile_idx + 1
         # create composed transformation for r_idx = 0
-        transform_reference = make_composed_transformation(path_affine=BDV_XML_path,
-                                                           r_idx=0,
-                                                           x_idx=x_idx,
-                                                           y_idx=y_idx,
-                                                           z_idx=z_idx,
-                                                           pixel_size=pixel_size)
-
-        # save composed transformation to zarr
+        round_name = 'r'+str(0).zfill(3)
         tile_name = 'x'+str(x_idx).zfill(3)+'_y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
         channel_id = 'ch488'
-        current_channel = zarr.open_group(zarr_path,mode='a',
-                                          path='r000'+'/'+tile_name+'/'+channel_id)
-        current_BDV_xform = current_channel.zeros('bdv_xform',
+        current_channel = zarr.open_group(zarr_path,mode='a',path=round_name+'/'+tile_name+'/'+channel_id)
+        BDV_tile_idx = current_channel.zeros('BDV_tile',
+                                            shape=(1),
+                                            compressor=compressor,
+                                            dtype=int)
+        BDV_tile_idx[:] = tile_idx
+#        tile_idx = int(da.from_zarr(current_channel['BDV_tile_idx']).compute())
+        xform_ref, scaled_xform_ref = make_composed_transformation(path_affine=BDV_XML_path,
+                                                                    tile_idx=tile_idx,
+                                                                    r_idx=0,
+                                                                    x_idx=x_idx,
+                                                                    y_idx=y_idx,
+                                                                    z_idx=z_idx,
+                                                                    pixel_size=pixel_size)
+
+        # save composed transformations to zarr
+        current_BDV_xform = current_channel.zeros('BDV_xform',
                                                   shape=(4,4),
                                                   compressor=compressor,
                                                   dtype=float)
-        current_BDV_xform[:] = transform_reference
-        current_BDV_tile_idx = current_channel['current_BDV_tile_idx']
+        current_BDV_xform[:] = xform_ref
 
-        # load reference tile at r_idx = 0
-        group_path = 'setup'+str(current_BDV_tile_idx)+'/timepoint0/s0'
-        data_reference = da.from_zarr(n5_data[group_path])
+        current_scaled_xform = current_channel.zeros('scaled_xform',
+                                                  shape=(4,4),
+                                                  compressor=compressor,
+                                                  dtype=float)
+        current_scaled_xform[:] = scaled_xform_ref
 
-        # downsample reference tile at r_idx =0
-        data_reference_downsampled = downscale_local_mean(data=data_reference.compute(),
-                                                          factors=(4,4,4),
-                                                          cval=0)
-        del data_reference, current_channel
+        # load 4x downsampled reference tile at r_idx = 0
+        group_path = 'setup'+str(tile_idx)+'/timepoint0/s0'
+        data_reference = da.from_zarr(n5_data[group_path]).compute()
+        scaled_data_reference = downscale_local_mean(data_reference,factors=(4,4,4),cval=0).astype(np.float32)
+        del data_reference
         gc.collect()
 
         # loop over all rounds in BDV N5 file
-        for r_idx in range(num_r):
+        for r_idx in tqdm(range(1,num_r),desc='Rounds',leave=False):
             # create composed transformation for this r_idx
-            transform_target = make_composed_transformation(path_affine=BDV_XML_path,
-                                                            r_idx=r_idx,
-                                                            x_idx=x_idx,
-                                                            y_idx=y_idx,
-                                                            z_idx=z_idx,
-                                                            pixel_size=pixel_size)
+            xform_target, scaled_xform_target = make_composed_transformation(path_affine=BDV_XML_path,
+                                                                            tile_idx=tile_idx,
+                                                                            r_idx=r_idx,
+                                                                            x_idx=x_idx,
+                                                                            y_idx=y_idx,
+                                                                            z_idx=z_idx,
+                                                                            pixel_size=pixel_size)
 
             # save composed transformation to zarr
             round_name = 'r'+str(r_idx).zfill(3)
@@ -610,33 +643,36 @@ def perform_local_registration(BDV_N5_path: Path,
             current_channel = zarr.open_group(zarr_path,
                                               mode='a',
                                               path=round_name+'/'+tile_name+'/'+channel_id)
-            current_BDV_xform = current_channel.zeros('bdv_xform',
+            current_BDV_xform = current_channel.zeros('BDV_xform',
                                                       shape=(4,4),
                                                       compressor=compressor,
                                                       dtype=float)
-            current_BDV_xform[:] = transform_target
+            current_BDV_xform[:] = xform_target
 
-            # load data
-            group_path = 'setup'+str(current_BDV_tile_idx)+'/timepoint'+str(r_idx)+'/s0'
-            data_target = da.from_zarr(n5_data[group_path])
+            current_scaled_xform = current_channel.zeros('scaled_xform',
+                                                    shape=(4,4),
+                                                    compressor=compressor,
+                                                    dtype=float)
+            current_scaled_xform[:] = scaled_xform_target
 
-            # warp this tile to match r_idx = 0 tile
-            data_warped = apply_relative_affine_transform(data_target,
-                                                          transform_reference,
-                                                          transform_target,
-                                                          pixel_size)
+            # load 4x downsampled tile for current r_idx
+            group_path = 'setup'+str(tile_idx)+'/timepoint'+str(r_idx)+'/s0'
+            data_target = da.from_zarr(n5_data[group_path]).compute()
+            scaled_data_target = downscale_local_mean(data_target,factors=(4,4,4),cval=0).astype(np.float32)
             del data_target
-            
-            # downsample tile for this r_idx
-            data_warped_downsampled = downscale_local_mean(data=data_warped,
-                                                           factors=(4,4,4),
-                                                           cval=0)
-            del data_warped
             gc.collect()
 
+            # warp this r_idx tile to match r_idx = 0 tile
+            scaled_data_warped = apply_relative_affine_transform(scaled_data_target,
+                                                                scaled_xform_ref,
+                                                                scaled_xform_target,
+                                                                pixel_size).astype(np.float32)
+            del scaled_data_target
+            gc.collect()
+            
             # run optical flow on this tile
-            optical_flow = compute_optical_flow(data_reference_downsampled,
-                                                data_warped_downsampled)
+            optical_flow = compute_optical_flow(scaled_data_reference.astype(np.float32),
+                                                scaled_data_warped.astype(np.float32))
 
             # save optical flow transformation to zarr
             current_OF_xform = current_channel.zeros('of_xform',
@@ -646,5 +682,5 @@ def perform_local_registration(BDV_N5_path: Path,
             current_OF_xform[:] = optical_flow
 
             del current_channel, current_BDV_xform, current_OF_xform
-            del data_warped_downsampled
+            del scaled_data_reference, scaled_data_warped
             gc.collect()
