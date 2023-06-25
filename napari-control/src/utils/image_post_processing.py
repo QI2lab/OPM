@@ -211,7 +211,7 @@ def lr_deconvolution(image,psf,iterations=5):
         lr_dask = partial(mv_lr_decon,psf=psf,num_iterations=iterations)
     elif DECON_LIBRARY=='clij':
         lib = getlib()
-        lr_dask = partial(clij_lr,psf=psf,num_iters=iterations,tau=0.0001,lib=lib)
+        lr_dask = partial(clij_lr,psf=psf,num_iters=iterations,tau=0.001,lib=lib)
 
     # create dask plan for overlapped blocks
     dask_decon = da.map_overlap(lr_dask,dask_raw,depth=overlap_depth,boundary='reflect',trim=True,meta=np.array((), dtype=np.uint16))

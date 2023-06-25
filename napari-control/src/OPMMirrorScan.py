@@ -350,7 +350,7 @@ class OPMMirrorScan(MagicTemplate):
 
         # set circular buffer to be large
         self.mmc.clearCircularBuffer()
-        circ_buffer_mb = 32000
+        circ_buffer_mb = 90000
         self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
         # run hardware triggered acquisition
@@ -364,7 +364,7 @@ class OPMMirrorScan(MagicTemplate):
                     for c in range(self.n_active_channels):
                         while self.mmc.getRemainingImageCount()==0:
                             pass
-                        opm_data[t, c, z, :, :]  = self.mmc.popNextImage()
+                        opm_data[t, c, z, :, :]  = self.mmc.popNextImage() # DPS to do: Pop full "chunk" into memory then use dask.array to write in parallel
             self.mmc.stopSequenceAcquisition()
             self.opmdaq.stop_waveform_playback()
             self.DAQ_running = False
