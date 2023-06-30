@@ -340,7 +340,7 @@ def main(argv):
     #                         current_voxel_size = current_channel.zeros('voxel_size',shape=(3),compressor=compressor,dtype=float)
     #                         current_theta = current_channel.zeros('theta',shape=(1),compressor=compressor,dtype=float)
     #                         current_wvls = current_channel.zeros('wavelengths',shape=(2),compressor=compressor,dtype=float)
-    #                         #current_corner_crop = current_channel.zeros('corner_crop',shape=(1),compressor=compressor,dtype=float)
+    #                         current_corner_crop = current_channel.zeros('corner_crop',shape=(1),compressor=compressor,dtype=float)
     #                         current_raw_data = current_channel.zeros('raw_data',
     #                                                             shape=(raw_data.shape[0],raw_data.shape[1],raw_data.shape[2]),
     #                                                             chunks=(1,raw_data.shape[1],raw_data.shape[2]),
@@ -501,30 +501,30 @@ def main(argv):
     # run BigStitcher translation registration
     # split into steps to make sure that memory is released from Fiji
     # TO DO: load Fiji related paths from .json
-    print(data_io.time_stamp(),'Starting BigStitcher registration and poly-dT fusion (can take >12 hours).')
-    fiji_path = Path(r'C:\Fiji.app\ImageJ-win64.exe')
+    # print(data_io.time_stamp(),'Starting BigStitcher registration and poly-dT fusion (can take >12 hours).')
+    # fiji_path = Path(r'C:\Fiji.app\ImageJ-win64.exe')
 
-    print(data_io.time_stamp(),'Calculate and filter initial rigid registrations.')
-    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\rigid_registration.ijm')
-    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    # print(data_io.time_stamp(),'Calculate and filter initial rigid registrations.')
+    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\rigid_registration.ijm')
+    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
-    print(data_io.time_stamp(),'Calculate interest point registrations.')
-    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\ip_registration.ijm')
-    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    # print(data_io.time_stamp(),'Calculate interest point registrations.')
+    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\ip_registration.ijm')
+    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
-    print(data_io.time_stamp(),'Optimize global alignment of all tiles and rounds.')    
-    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\align.ijm')
-    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    # print(data_io.time_stamp(),'Optimize global alignment of all tiles and rounds.')    
+    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\align.ijm')
+    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
-    print(data_io.time_stamp(),'Calculate affine registration for each aligned tile across rounds.')    
-    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\affine.ijm')
-    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    # print(data_io.time_stamp(),'Calculate affine registration for each aligned tile across rounds.')    
+    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\affine.ijm')
+    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
     
-    print(data_io.time_stamp(),'Generate 4x downsampled fusion of first round poly-dT.')    
-    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\fusion.ijm')
-    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    # print(data_io.time_stamp(),'Generate 4x downsampled fusion of first round poly-dT.')    
+    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\fusion.ijm')
+    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
-    print(data_io.time_stamp(),'Finished BigStitcher registration and poly-dT fusion.')
+    # print(data_io.time_stamp(),'Finished BigStitcher registration and poly-dT fusion.')
 
 
     # run affine local registration across rounds.
