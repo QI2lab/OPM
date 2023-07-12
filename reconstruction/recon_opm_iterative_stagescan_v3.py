@@ -4,13 +4,18 @@ QI2lab OPM suite
 Reconstruction suite v3
 
 Stage scanning iterative OPM post-processing.
-- Rewrites raw data in compressed Zarr
+- Rewrites raw data into QI2lab structured Zarr (compressed)
 - Places deskewed fiducial tiles in actual stage positions and iterative rounds into the time axis of BDV N5 for alignment
 - Calls BigStitcher to generate translation-only global tile alignment
-- Performs fine registration for each tile across iterative rounds using optical flow
+- Performs local deformable registration for each tile across iterative rounds using optical flow
 - Orthgonal interpolation method adapted from Vincent Maioli (http://doi.org/10.25560/68022)
 
+TO DO: 1. investigate BigStream local deformable registration as alternate to DEEDS
+       2. fix memory leak in DEEDS c-wrapper
+
 Change log:
+Shepherd 07/23 - split into NDTIFF and Zarr workflows. Allows regeneration of BDV N5 file from already processed
+                 Zarr format.
 Shepherd 06/23 - breaking changes for v3.0 acquisition
                  add `tile_idx` to zarr file to remove need for ambiguous conversion from xyz tile to BDV tile.
                  automate bigstitcher translation stitching after dataset creation
@@ -43,7 +48,7 @@ def main(argv):
 
     # parse directory name from command line argument
     # parse command line arguments
-    parser = argparse.ArgumentParser(description="Prepare raw OPM MERFISH data for analysis.")
+    parser = argparse.ArgumentParser(description="Prepare raw NDTIFF OPM MERFISH data for analysis.")
     parser.add_argument("-i", "--ipath", type=str, help="supply the directory to be processed")
     parser.add_argument("-o", "--opath", type=str, default="default", help="supply output directory (DEFAULT is input directory)")
     parser.add_argument("-d", "--decon", type=int, default=0, help="0: no deconvolution (DEFAULT), 1: perform deconvolution")
@@ -125,411 +130,404 @@ def main(argv):
     zarr_output_path = zarr_output_dir_path / Path(root_name + '.zarr')                    
     compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
 
-    # if ch_fiducial_idx == 8:
-    #     # create directory for data type
-    #     bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
-    #     bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
-    #     bdv_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
+    if ch_fiducial_idx == 8:
+        # create directory for data type
+        bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
+        bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
+        bdv_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
 
-    #     # https://github.com/nvladimus/npy2bdv
-    #     # create BDV H5 file with sub-sampling for BigStitcher
-    #     bdv_output_path = bdv_output_dir_path / Path(root_name+'.n5')
-    #     nchannels = n_active_channels
-    #     bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
-    #                                     nchannels=nchannels,
-    #                                     ntiles=num_x*num_y*num_z,
-    #                                     subsamp=((1,1,1),(4,4,4),(8,8,8),(16,16,16)),
-    #                                     blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
-    #                                     compression='blosc')
+        # https://github.com/nvladimus/npy2bdv
+        # create BDV H5 file with sub-sampling for BigStitcher
+        bdv_output_path = bdv_output_dir_path / Path(root_name+'.n5')
+        nchannels = n_active_channels
+        bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
+                                        nchannels=nchannels,
+                                        ntiles=num_x*num_y*num_z,
+                                        subsamp=((1,1,1),(4,4,4),(8,8,8),(16,16,16)),
+                                        blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
+                                        compression='blosc')
 
-    # elif not(ch_fiducial_idx == 9):
-    #     # create directory for data type
-    #     bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
-    #     bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
-    #     bdv_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
+    elif not(ch_fiducial_idx == 9):
+        # create directory for data type
+        bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
+        bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
+        bdv_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
 
-    #     # https://github.com/nvladimus/npy2bdv
-    #     # create BDV H5 file with sub-sampling for BigStitcher
-    #     bdv_output_path = bdv_output_dir_path / Path(root_name+'.n5')
-    #     if nuclei_round:
-    #         nchannels = 2
-    #     else:
-    #         nchannels = 1
-    #     bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
-    #                                     nchannels=nchannels,
-    #                                     ntiles=num_x*num_y*num_z,
-    #                                     subsamp=((1,1,1),(4,4,4),(8,8,8),(16,16,16)),
-    #                                     blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
-    #                                     compression='blosc')
+        # https://github.com/nvladimus/npy2bdv
+        # create BDV H5 file with sub-sampling for BigStitcher
+        bdv_output_path = bdv_output_dir_path / Path(root_name+'.n5')
+        if nuclei_round:
+            nchannels = 2
+        else:
+            nchannels = 1
+        bdv_writer = npy2bdv.BdvWriter(str(bdv_output_path),
+                                        nchannels=nchannels,
+                                        ntiles=num_x*num_y*num_z,
+                                        subsamp=((1,1,1),(4,4,4),(8,8,8),(16,16,16)),
+                                        blockdim=((64,64,64),(64,64,64),(64,64,64),(64,64,64)),
+                                        compression='blosc')
 
-    # # create blank affine transformation to use for stage translation
-    # unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
-    #                         (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
-    #                         (0.0, 0.0, 1.0, 0.0))) # change the 4. value for z_translation (px)
+    # create blank affine transformation to use for stage translation
+    unit_matrix = np.array(((1.0, 0.0, 0.0, 0.0), # change the 4. value for x_translation (px)
+                            (0.0, 1.0, 0.0, 0.0), # change the 4. value for y_translation (px)
+                            (0.0, 0.0, 1.0, 0.0))) # change the 4. value for z_translation (px)
 
-    # # create directory for data type
-    # zarr_output_dir_path = output_dir_path / Path('raw_zarr')
-    # zarr_output_dir_path.mkdir(parents=True, exist_ok=True)
+    # create directory for data type
+    zarr_output_dir_path = output_dir_path / Path('raw_zarr')
+    zarr_output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # # create name for zarr directory
-    # zarr_output_path = zarr_output_dir_path / Path(root_name + '.zarr')                    
-    # compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
-    # root = zarr.open(str(zarr_output_path), mode="a")
+    # create name for zarr directory
+    zarr_output_path = zarr_output_dir_path / Path(root_name + '.zarr')                    
+    compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
+    root = zarr.open(str(zarr_output_path), mode="a")
                      
-    # # if retrospective flatfield is requested, import GPU flatfield code
-    # if flatfield_flag==1:
-    #     from _imageprocessing import generate_flatfield, apply_flatfield, numba_mean
-    # # if decon is requested, import GPU deconvolution code
-    # if decon_flag==1:
-    #     from _imageprocessing import lr_deconvolution
+    # if retrospective flatfield is requested, import GPU flatfield code
+    if flatfield_flag==1:
+        from _imageprocessing import generate_flatfield, apply_flatfield
+    # if decon is requested, import GPU deconvolution code
+    if decon_flag==1:
+        from _imageprocessing import lr_deconvolution
 
-    # # initialize tile counter and channel information
-    # ex_wavelengths=[.405,.488,.561,.635,.730]
-    # em_wavelengths=[.420,.520,.580,.670,.780]
+    # initialize tile counter and channel information
+    ex_wavelengths=[.405,.488,.561,.635,.730]
+    em_wavelengths=[.420,.520,.580,.670,.780]
 
-    # tile_idx=0
-
-    # channel_idxs = [0,1,2,3,4]
-    # channel_ids = ['ch405','ch488','ch561','ch635','ch730']
-    # corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
+    # channel information for BDV and NDTIFF
+    channel_idxs = [0,1,2,3,4]
+    channel_ids = ['ch405','ch488','ch561','ch635','ch730']
+    #corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
     
-    # # loop over all rounds.
-    # for r_idx in range(num_r):
+    # loop over all rounds.
+    for r_idx in range(num_r):
 
-    #     # create group for this round in Zarr
-    #     round_name = 'r'+str(r_idx).zfill(3)
-    #     try:
-    #         current_round = root.create_group(round_name)
-    #     except:
-    #         current_round = zarr.open_group(zarr_output_path,mode='a',path=round_name)
+        # create group for this round in Zarr
+        round_name = 'r'+str(r_idx).zfill(3)
+        try:
+            current_round = root.create_group(round_name)
+        except:
+            current_round = zarr.open_group(zarr_output_path,mode='a',path=round_name)
 
-    #     # keep track of tile index for BDV use
-    #     tile_idx = 0
+        # keep track of tile index for BDV use
+        tile_idx = 0
 
-    #     for (x_idx,y_idx,z_idx) in product(range(num_x),range(num_y),range(num_z)):
-    #         # open stage positions file
-    #         if acquisition_v1:
-    #             stage_position_filename = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
-    #         else:
-    #             stage_position_filename = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_x'+str(x_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
+        for (x_idx,y_idx,z_idx) in product(range(num_x),range(num_y),range(num_z)):
+            # open stage positions file
+            if acquisition_v1:
+                stage_position_filename = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
+            else:
+                stage_position_filename = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_x'+str(x_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_stage_positions.csv')
             
-    #         stage_position_path = input_dir_path / stage_position_filename
+            stage_position_path = input_dir_path / stage_position_filename
 
-    #         read_metadata = False
-    #         skip_tile = False
-    #         # check if this is the first tile. If so, wait longer for fluidics
-    #         while(not(read_metadata)):
-    #             try:
-    #                 df_stage_positions = data_io.read_metadata(stage_position_path)
-    #             except:
-    #                 if real_time:
-    #                     read_metadata = False
-    #                     print(data_io.time_stamp(), "Stage position not found. Wait 5 minutes and try again.")
-    #                     time.sleep(60*5)
-    #                 else:
-    #                     read_metadata = True
-    #                     skip_tile = True
-    #                     print(data_io.time_stamp(), "Stage position not found.")
-    #             else:
-    #                 read_metadata = True
+            read_metadata = False
+            skip_tile = False
+            # check if this is the first tile. If so, wait longer for fluidics
+            while(not(read_metadata)):
+                try:
+                    df_stage_positions = data_io.read_metadata(stage_position_path)
+                except:
+                    if real_time:
+                        read_metadata = False
+                        print(data_io.time_stamp(), "Stage position not found. Wait 5 minutes and try again.")
+                        time.sleep(60*5)
+                    else:
+                        read_metadata = True
+                        skip_tile = True
+                        print(data_io.time_stamp(), "Stage position not found.")
+                else:
+                    read_metadata = True
 
-    #         if not(skip_tile):
+            if not(skip_tile):
 
-    #             # grab recorded stage positions
-    #             stage_x = np.round(float(df_stage_positions['stage_x']),2)
-    #             stage_y = np.round(float(df_stage_positions['stage_y']),2)
-    #             stage_z = np.round(float(df_stage_positions['stage_z']),2)
+                # grab recorded stage positions
+                stage_x = np.round(float(df_stage_positions['stage_x']),2)
+                stage_y = np.round(float(df_stage_positions['stage_y']),2)
+                stage_z = np.round(float(df_stage_positions['stage_z']),2)
 
-    #             # grab channels in this tile
-    #             # acquisitions older than v2.1 do no contain this data in metadata. 
-    #             # hacky way to account for those right way. Fix once migrated.
-    #             try:
-    #                 chan_405_active_tile = df_stage_positions['405_active']
-    #                 chan_488_active_tile = df_stage_positions['488_active']
-    #                 chan_561_active_tile = df_stage_positions['561_active']
-    #                 chan_635_active_tile = df_stage_positions['635_active']
-    #                 chan_730_active_tile = df_stage_positions['730_active']
-    #             except:
-    #                 if r_idx < (num_r-1):
-    #                     chan_405_active_tile = False
-    #                     chan_488_active_tile = True
-    #                     chan_561_active_tile = True
-    #                     chan_635_active_tile = True
-    #                     chan_730_active_tile = False
-    #                 elif r_idx == (num_r-1) and nuclei_round:
-    #                     chan_405_active_tile = True
-    #                     chan_488_active_tile = True
-    #                     chan_561_active_tile = False
-    #                     chan_635_active_tile = False
-    #                     chan_730_active_tile = False
-    #                 else:
-    #                     chan_405_active_tile = False
-    #                     chan_488_active_tile = True
-    #                     chan_561_active_tile = True
-    #                     chan_635_active_tile = True
-    #                     chan_730_active_tile = False
-    #             finally:
-    #                 active_channels_tile = [chan_405_active_tile,chan_488_active_tile,chan_561_active_tile,chan_635_active_tile,chan_730_active_tile]
-    #                 channels_idxs_in_data_tile = list(compress(channel_idxs, active_channels_tile))
-    #                 channels_ids_in_data_tile = list(compress(channel_ids, active_channels_tile))
+                # grab channels in this tile
+                # acquisitions older than v2.1 do no contain this data in metadata. 
+                # hacky way to account for those right way. Fix once migrated.
+                try:
+                    chan_405_active_tile = df_stage_positions['405_active']
+                    chan_488_active_tile = df_stage_positions['488_active']
+                    chan_561_active_tile = df_stage_positions['561_active']
+                    chan_635_active_tile = df_stage_positions['635_active']
+                    chan_730_active_tile = df_stage_positions['730_active']
+                except:
+                    if r_idx < (num_r-1):
+                        chan_405_active_tile = False
+                        chan_488_active_tile = True
+                        chan_561_active_tile = True
+                        chan_635_active_tile = True
+                        chan_730_active_tile = False
+                    elif r_idx == (num_r-1) and nuclei_round:
+                        chan_405_active_tile = True
+                        chan_488_active_tile = True
+                        chan_561_active_tile = False
+                        chan_635_active_tile = False
+                        chan_730_active_tile = False
+                    else:
+                        chan_405_active_tile = False
+                        chan_488_active_tile = True
+                        chan_561_active_tile = True
+                        chan_635_active_tile = True
+                        chan_730_active_tile = False
+                finally:
+                    active_channels_tile = [chan_405_active_tile,chan_488_active_tile,chan_561_active_tile,chan_635_active_tile,chan_730_active_tile]
+                    channels_idxs_in_data_tile = list(compress(channel_idxs, active_channels_tile))
+                    channels_ids_in_data_tile = list(compress(channel_ids, active_channels_tile))
 
-    #             # construct directory name
-    #             if acquisition_v1:
-    #                 current_tile_dir_path = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
-    #             else:
-    #                 current_tile_dir_path = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_x'+str(x_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
-    #             tile_dir_path_to_load = input_dir_path / current_tile_dir_path
+                # construct directory name
+                if acquisition_v1:
+                    current_tile_dir_path = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
+                else:
+                    current_tile_dir_path = Path(root_name+'_r'+str(r_idx+1).zfill(4)+'_x'+str(x_idx).zfill(4)+'_y'+str(y_idx).zfill(4)+'_z'+str(z_idx).zfill(4)+'_1')
+                tile_dir_path_to_load = input_dir_path / current_tile_dir_path
 
-    #             file_load = False
-    #             # open dataset directory using NDTIFF
-    #             try:
-    #                 dataset = Dataset(str(tile_dir_path_to_load))
-    #             except:
-    #                 file_load = False
-    #                 print('Dataset load error. Skipping this stage position.')
-    #             else:
-    #                 file_load = True
+                file_load = False
+                # open dataset directory using NDTIFF
+                try:
+                    dataset = Dataset(str(tile_dir_path_to_load))
+                except:
+                    file_load = False
+                    print('Dataset load error. Skipping this stage position.')
+                else:
+                    file_load = True
 
-    #             if file_load:
+                if file_load:
 
-    #                 # create tile name in zarr
-    #                 if acquisition_v1:
-    #                     tile_name = 'y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
-    #                 else:    
-    #                     tile_name = 'x'+str(x_idx).zfill(3)+'_y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
-    #                 try:
-    #                     current_tile = current_round.create_group(tile_name)
-    #                 except:
-    #                     current_tile = zarr.open_group(zarr_output_path,mode='a',path=round_name+'/'+tile_name)
+                    # create tile name in zarr
+                    if acquisition_v1:
+                        tile_name = 'y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
+                    else:    
+                        tile_name = 'x'+str(x_idx).zfill(3)+'_y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
+                    try:
+                        current_tile = current_round.create_group(tile_name)
+                    except:
+                        current_tile = zarr.open_group(zarr_output_path,mode='a',path=round_name+'/'+tile_name)
                     
-    #                 # loop over all channels in this round/tile
-    #                 for channel_id, ch_idx in zip(channels_ids_in_data_tile,channels_idxs_in_data_tile):
+                    # loop over all channels in this round/tile
+                    for channel_id, ch_idx in zip(channels_ids_in_data_tile,channels_idxs_in_data_tile):
 
-    #                     print(data_io.time_stamp(), 'round '+str(r_idx+1)+' of '+str(num_r)+'; x tile '+str(x_idx+1)+' of '+str(num_x)+'; y tile '+str(y_idx+1)+' of '+str(num_y)+'; z tile '+str(z_idx+1)+' of '+str(num_z)+'; channel '+channel_id)
-    #                     print(data_io.time_stamp(), 'Stage location (um): x='+str(stage_x)+', y='+str(stage_y)+', z='+str(stage_z)+'.')
+                        print(data_io.time_stamp(), 'round '+str(r_idx+1)+' of '+str(num_r)+'; x tile '+str(x_idx+1)+' of '+str(num_x)+'; y tile '+str(y_idx+1)+' of '+str(num_y)+'; z tile '+str(z_idx+1)+' of '+str(num_z)+'; channel '+channel_id)
+                        print(data_io.time_stamp(), 'Stage location (um): x='+str(stage_x)+', y='+str(stage_y)+', z='+str(stage_z)+'.')
 
-    #                     # load raw data into memory via Dask
-    #                     raw_data_success = False
-    #                     do_not_delete = False
-    #                     try:
-    #                         raw_data = data_io.return_data_dask(dataset,excess_images,channel_id)
-    #                     except:
-    #                         raw_data_success = False
-    #                         do_not_delete = True
-    #                         print('Internal NDTIFF error. Skipping this tile/channel combination.')
-    #                     else:
-    #                         raw_data_success = True
-    #                         do_not_delete = False
+                        # load raw data into memory via Dask
+                        raw_data_success = False
+                        do_not_delete = False
+                        try:
+                            raw_data = data_io.return_data_dask(dataset,excess_images,channel_id)
+                        except:
+                            raw_data_success = False
+                            do_not_delete = True
+                            print('Internal NDTIFF error. Skipping this tile/channel combination.')
+                        else:
+                            raw_data_success = True
+                            do_not_delete = False
                         
-    #                     if raw_data_success:
+                        if raw_data_success:
                         
-    #                         # load psf into memory
-    #                         em_wvl = em_wavelengths[ch_idx]
-    #                         channel_opm_psf = np.flip(data_io.return_opm_psf(em_wvl,z_idx),axis=1)
+                            # load psf into memory
+                            em_wvl = em_wavelengths[ch_idx]
+                            channel_opm_psf = np.flip(data_io.return_opm_psf(em_wvl,z_idx),axis=1)
                             
-    #                         # rewrite raw data and important metadata into Zarr store with compression
-    #                         print(data_io.time_stamp(), 'Convert raw data into compressed zarr.')
+                            # rewrite raw data and important metadata into Zarr store with compression
+                            print(data_io.time_stamp(), 'Convert raw data into compressed zarr.')
 
-    #                         # create or open zarr group and arrays
-    #                         try:
-    #                             current_channel = current_tile.create_group(channel_id)
-    #                         except:
-    #                             current_channel = zarr.open_group(zarr_output_path,mode='a',path=round_name+'/'+tile_name+'/'+channel_id)
+                            # create or open zarr group and arrays
+                            try:
+                                current_channel = current_tile.create_group(channel_id)
+                            except:
+                                current_channel = zarr.open_group(zarr_output_path,mode='a',path=round_name+'/'+tile_name+'/'+channel_id)
 
-    #                         current_stage_pos = current_channel.zeros('stage_position',shape=(3),compressor=compressor,dtype=float)
-    #                         current_voxel_size = current_channel.zeros('voxel_size',shape=(3),compressor=compressor,dtype=float)
-    #                         current_theta = current_channel.zeros('theta',shape=(1),compressor=compressor,dtype=float)
-    #                         current_wvls = current_channel.zeros('wavelengths',shape=(2),compressor=compressor,dtype=float)
-    #                         current_corner_crop = current_channel.zeros('corner_crop',shape=(1),compressor=compressor,dtype=float)
-    #                         current_raw_data = current_channel.zeros('raw_data',
-    #                                                             shape=(raw_data.shape[0],raw_data.shape[1],raw_data.shape[2]),
-    #                                                             chunks=(1,raw_data.shape[1],raw_data.shape[2]),
-    #                                                             compressor=compressor,
-    #                                                             dtype=np.uint16)
-    #                         current_opm_psf = current_channel.zeros('raw_psf',
-    #                                                             shape=(channel_opm_psf.shape[0],channel_opm_psf.shape[1],channel_opm_psf.shape[2]),
-    #                                                             chunks=(1,channel_opm_psf.shape[1],channel_opm_psf.shape[2]),
-    #                                                             compressor=compressor,
-    #                                                             dtype=np.uint16)
+                            current_stage_pos = current_channel.zeros('stage_position',shape=(3),compressor=compressor,dtype=float)
+                            current_voxel_size = current_channel.zeros('voxel_size',shape=(3),compressor=compressor,dtype=float)
+                            current_theta = current_channel.zeros('theta',shape=(1),compressor=compressor,dtype=float)
+                            current_wvls = current_channel.zeros('wavelengths',shape=(2),compressor=compressor,dtype=float)
+                            current_corner_crop = current_channel.zeros('corner_crop',shape=(1),compressor=compressor,dtype=float)
+                            current_raw_data = current_channel.zeros('raw_data',
+                                                                shape=(raw_data.shape[0],raw_data.shape[1],raw_data.shape[2]),
+                                                                chunks=(1,raw_data.shape[1],raw_data.shape[2]),
+                                                                compressor=compressor,
+                                                                dtype=np.uint16)
+                            current_opm_psf = current_channel.zeros('raw_psf',
+                                                                shape=(channel_opm_psf.shape[0],channel_opm_psf.shape[1],channel_opm_psf.shape[2]),
+                                                                chunks=(1,channel_opm_psf.shape[1],channel_opm_psf.shape[2]),
+                                                                compressor=compressor,
+                                                                dtype=np.uint16)
 
-    #                         # write zarr arrays
-    #                         raw_data_dask = da.from_array(raw_data,chunks=(1,raw_data.shape[1],raw_data.shape[2]))
-    #                         da.to_zarr(raw_data_dask,current_raw_data,compressor=compressor) 
-    #                         current_stage_pos[:] = np.asarray([float(stage_x), float(stage_y), float(stage_z)])
-    #                         current_voxel_size[:] = np.asarray([float(scan_step),float(pixel_size),float(pixel_size)])
-    #                         current_theta[:] = float(theta)
-    #                         current_wvls[:] = np.asarray([float(ex_wavelengths[ch_idx]),float(ex_wavelengths[ch_idx])])
-    #                         #current_corner_crop[:] = corner_crop
-    #                         current_opm_psf[:] = channel_opm_psf
+                            # write zarr arrays
+                            raw_data_dask = da.from_array(raw_data,chunks=(1,raw_data.shape[1],raw_data.shape[2]))
+                            da.to_zarr(raw_data_dask,current_raw_data,compressor=compressor) 
+                            current_stage_pos[:] = np.asarray([float(stage_x), float(stage_y), float(stage_z)])
+                            current_voxel_size[:] = np.asarray([float(scan_step),float(pixel_size),float(pixel_size)])
+                            current_theta[:] = float(theta)
+                            current_wvls[:] = np.asarray([float(ex_wavelengths[ch_idx]),float(ex_wavelengths[ch_idx])])
+                            #current_corner_crop[:] = corner_crop
+                            current_opm_psf[:] = channel_opm_psf
         
-    #                         del raw_data_dask
-    #                         gc.collect()
+                            del raw_data_dask
+                            gc.collect()
 
-    #                         # write into BDV if requested
-    #                         if ((ch_idx == ch_fiducial_idx) or (ch_fiducial_idx == 8) or (ch_idx==0)) and not(ch_fiducial_idx==9):
-    #                             # check if user flagged for further on-the-fly processing before BDV
-    #                             # run deconvolution on skewed image
-    #                             if decon_flag == 1:
-    #                                 print(data_io.time_stamp(), 'Deconvolve.')
-    #                                 decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=100)
-    #                             else:
-    #                                 decon = raw_data
-    #                             del raw_data
-    #                             gc.collect()
+                            # write into BDV if requested
+                            if ((ch_idx == ch_fiducial_idx) or (ch_fiducial_idx == 8) or (ch_idx==0)) and not(ch_fiducial_idx==9):
+                                # check if user flagged for further on-the-fly processing before BDV
+                                # run deconvolution on skewed image
+                                if decon_flag == 1:
+                                    print(data_io.time_stamp(), 'Deconvolve.')
+                                    decon = lr_deconvolution(image=raw_data,psf=channel_opm_psf,iterations=100)
+                                else:
+                                    decon = raw_data
+                                del raw_data
+                                gc.collect()
 
-    #                             # perform flat-fielding using random draw of images from the stack
-    #                             if flatfield_flag == 1:
-    #                                 print(data_io.time_stamp(), 'Flatfield.')
-    #                                 n_flatfield_images = 500
-    #                                 rand_draw_success = False
-    #                                 while not(rand_draw_success):
-    #                                     try:
-    #                                         mean_brightness = numba_mean(decon)
-    #                                         sorted_mean_brightness_idx = np.argsort(mean_brightness)
-    #                                         mean_brightness_idx = sorted_mean_brightness_idx[-n_flatfield_images:-1]
-    #                                         #rand_idx = np.random.randint(0,decon.shape[0],n_flatfield_images)
-    #                                     except:
-    #                                         rand_draw_success = False
-    #                                         n_flatfield_images = n_flatfield_images - (n_flatfield_images // 10)
-    #                                     else:
-    #                                         rand_draw_success = True
+                                # perform flat-fielding using random draw of images from the stack
+                                if flatfield_flag == 1:
+                                    print(data_io.time_stamp(), 'Flatfield.')
+                                    img_data_mean = np.mean(decon,axis=(1,2)) # might need to randomly sample for bigger data
+                                    top_brightness_idx = np.argsort(img_data_mean)
+                                    brightest_flatfield_data = decon[top_brightness_idx[-500:-1],:]
+                                    del img_data_mean, top_brightness_idx
+                                    gc.collect()
 
-    #                                 flatfield, darkfield = generate_flatfield(decon[mean_brightness_idx,:])
-    #                                 corrected_stack = apply_flatfield(decon,flatfield,darkfield)
-    #                                 current_flatfield = current_channel.zeros('flatfield',
-    #                                                                           shape=(flatfield.shape[0],flatfield.shape[1]),
-    #                                                                           chunks=(flatfield.shape[0],flatfield.shape[1]),
-    #                                                                           compressor=compressor,
-    #                                                                           dtype=np.float32)
-    #                                 current_flatfield[:] = flatfield.astype(np.float32)
-    #                                 current_darkfield = current_channel.zeros('darkfield',
-    #                                                                           shape=(darkfield.shape[0],darkfield.shape[1]),
-    #                                                                           chunks=(darkfield.shape[0],darkfield.shape[1]),
-    #                                                                           compressor=compressor,
-    #                                                                           dtype=np.float32)
-    #                                 current_darkfield[:] = darkfield.astype(np.float32)
-    #                                 del flatfield, darkfield
-    #                             else:
-    #                                 corrected_stack = decon
-    #                             del decon
-    #                             gc.collect()
+                                    flatfield, darkfield = generate_flatfield(brightest_flatfield_data)
+                                    del brightest_flatfield_data
+                                    gc.collect()
 
-    #                             # deskew
-    #                             print(data_io.time_stamp(), 'Deskew.')
-    #                             deskewed = deskew(data=corrected_stack,
-    #                                               pixel_size=pixel_size,
-    #                                               scan_step=scan_step,
-    #                                               theta=theta)
-    #                             del corrected_stack
-    #                             gc.collect()
+                                    corrected_stack = apply_flatfield(decon,flatfield,darkfield)
+                                    current_flatfield = current_channel.zeros('flatfield',
+                                                                              shape=(flatfield.shape[0],flatfield.shape[1]),
+                                                                              chunks=(flatfield.shape[0],flatfield.shape[1]),
+                                                                              compressor=compressor,
+                                                                              dtype=np.float32)
+                                    current_flatfield[:] = flatfield.astype(np.float32)
+                                    current_darkfield = current_channel.zeros('darkfield',
+                                                                              shape=(darkfield.shape[0],darkfield.shape[1]),
+                                                                              chunks=(darkfield.shape[0],darkfield.shape[1]),
+                                                                              compressor=compressor,
+                                                                              dtype=np.float32)
+                                    current_darkfield[:] = darkfield.astype(np.float32)
+                                    del flatfield, darkfield
+                                else:
+                                    corrected_stack = decon
+                                del decon
+                                gc.collect()
 
-    #                             # determine index in BDV file
-    #                             if channel_id == 'ch488':
-    #                                 ch_BDV_idx = 0
-    #                             elif channel_id == 'ch561':
-    #                                 ch_BDV_idx = 1
-    #                             elif channel_id == 'ch635':
-    #                                 ch_BDV_idx = 2
-    #                             elif channel_id == 'ch405':
-    #                                 ch_BDV_idx = 1
+                                # deskew
+                                print(data_io.time_stamp(), 'Deskew.')
+                                deskewed = deskew(data=corrected_stack,
+                                                  pixel_size=pixel_size,
+                                                  scan_step=scan_step,
+                                                  theta=theta)
+                                del corrected_stack
+                                gc.collect()
+
+                                # determine index in BDV file
+                                if channel_id == 'ch488':
+                                    ch_BDV_idx = 0
+                                elif channel_id == 'ch561':
+                                    ch_BDV_idx = 1
+                                elif channel_id == 'ch635':
+                                    ch_BDV_idx = 2
+                                elif channel_id == 'ch405':
+                                    ch_BDV_idx = 1
                                 
-    #                             # create affine transformation for stage translation
-    #                             # swap x & y from instrument to BDV
-    #                             affine_matrix = unit_matrix
-    #                             affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # BDV x-translation (tile axis)
-    #                             if interleaved:
-    #                                 affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)-((scan_step/1000)/deskewed_x_pixel)/(num_ch)*ch_BDV_idx  # BDV y-translation (scan axis)
-    #                             else:
-    #                                 affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # BDV y-translation (scan axis)
-    #                             affine_matrix[2,3] = (-1*stage_z) / (deskewed_z_pixel)  # BDV z-translation (height axis)
+                                # create affine transformation for stage translation
+                                # swap x & y from instrument to BDV
+                                affine_matrix = unit_matrix
+                                affine_matrix[0,3] = (stage_y)/(deskewed_y_pixel)  # BDV x-translation (tile axis)
+                                if interleaved:
+                                    affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)-((scan_step/1000)/deskewed_x_pixel)/(num_ch)*ch_BDV_idx  # BDV y-translation (scan axis)
+                                else:
+                                    affine_matrix[1,3] = (stage_x)/(deskewed_x_pixel)  # BDV y-translation (scan axis)
+                                affine_matrix[2,3] = (-1*stage_z) / (deskewed_z_pixel)  # BDV z-translation (height axis)
 
-    #                             # save tile in BDV H5 with actual stage positions
-    #                             print(data_io.time_stamp(), 'Write deskewed data into BDV N5.')
-    #                             if ch_fiducial_idx == 8:
-    #                                 bdv_writer.append_view(deskewed, time=r_idx, channel=ch_BDV_idx,
-    #                                                         tile=tile_idx,
-    #                                                         voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
-    #                                                         voxel_units='um',
-    #                                                         calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
-    #                                                         m_affine=affine_matrix,
-    #                                                         name_affine = 'tile '+str(tile_idx)+' translation')
-    #                                 bdv_writer.write_xml()
-    #                             elif not(ch_fiducial_idx == 9):
-    #                                 bdv_writer.append_view(deskewed, time=r_idx, channel=ch_BDV_idx,
-    #                                                         tile=tile_idx,
-    #                                                         voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
-    #                                                         voxel_units='um',
-    #                                                         calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
-    #                                                         m_affine=affine_matrix,
-    #                                                         name_affine = 'tile '+str(tile_idx)+' translation')
-    #                                 bdv_writer.write_xml()
-    #                             current_BDV_tile_idx = current_channel.zeros('BDV_tile_idx',shape=(1),compressor=compressor,dtype=float)
-    #                             current_BDV_tile_idx[:] = tile_idx
-    #                             # free up memory
-    #                             del deskewed
-    #                             gc.collect()
-    #                         else:
-    #                             del raw_data
-    #                             gc.collect()
+                                # save tile in BDV H5 with actual stage positions
+                                print(data_io.time_stamp(), 'Write deskewed data into BDV N5.')
+                                if ch_fiducial_idx == 8:
+                                    bdv_writer.append_view(deskewed, time=r_idx, channel=ch_BDV_idx,
+                                                            tile=tile_idx,
+                                                            voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
+                                                            voxel_units='um',
+                                                            calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
+                                                            m_affine=affine_matrix,
+                                                            name_affine = 'tile '+str(tile_idx)+' translation')
+                                    bdv_writer.write_xml()
+                                elif not(ch_fiducial_idx == 9):
+                                    bdv_writer.append_view(deskewed, time=r_idx, channel=ch_BDV_idx,
+                                                            tile=tile_idx,
+                                                            voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
+                                                            voxel_units='um',
+                                                            calibration=(1,1,deskewed_z_pixel/deskewed_y_pixel),
+                                                            m_affine=affine_matrix,
+                                                            name_affine = 'tile '+str(tile_idx)+' translation')
+                                    bdv_writer.write_xml()
+                                current_BDV_tile_idx = current_channel.zeros('BDV_tile_idx',shape=(1),compressor=compressor,dtype=float)
+                                current_BDV_tile_idx[:] = tile_idx
+                                # free up memory
+                                del deskewed
+                                gc.collect()
+                            else:
+                                del raw_data
+                                gc.collect()
                     
-    #                 dataset.close()
-    #                 del dataset
-    #                 gc.collect()
+                    dataset.close()
+                    del dataset
+                    gc.collect()
 
-    #                 do_not_delete = True
-    #                 # delete raw NDTIFF data
-    #                 if not(do_not_delete):
-    #                     print(data_io.time_stamp(), 'Delete NDTIFF directory.')
-    #                     try_again = True
-    #                     n_delete_trys = 0
-    #                     while try_again and n_delete_trys < 10:
-    #                         try:
-    #                             shutil.rmtree(tile_dir_path_to_load)
-    #                         except:
-    #                             try_again = True
-    #                             n_delete_trys = n_delete_trys +1
-    #                             print(data_io.time_stamp(), 'Could not delete. Wait and try again.')
-    #                             time.sleep(60)
-    #                         finally:
-    #                             try_again = False
-    #         tile_idx=tile_idx+1
+                    do_not_delete = True
+                    # delete raw NDTIFF data
+                    if not(do_not_delete):
+                        print(data_io.time_stamp(), 'Delete NDTIFF directory.')
+                        try_again = True
+                        n_delete_trys = 0
+                        while try_again and n_delete_trys < 10:
+                            try:
+                                shutil.rmtree(tile_dir_path_to_load)
+                            except:
+                                try_again = True
+                                n_delete_trys = n_delete_trys +1
+                                print(data_io.time_stamp(), 'Could not delete. Wait and try again.')
+                                time.sleep(60)
+                            finally:
+                                try_again = False
+            tile_idx=tile_idx+1
 
-    # # write BDV xml file
-    # if (ch_fiducial_idx == 8) or not(ch_fiducial_idx == 9):
-    #     bdv_writer.write_xml()
+    # write BDV xml file
+    if (ch_fiducial_idx == 8) or not(ch_fiducial_idx == 9):
+        bdv_writer.write_xml()
     
     # run BigStitcher translation registration
-    # split into steps to make sure that memory is released from Fiji
+    # Both the BigStitcher and local affine results are placed into raw data Zarr array for use in decoding.
     # TO DO: load Fiji related paths from .json
-    # print(data_io.time_stamp(),'Starting BigStitcher registration and poly-dT fusion (can take >12 hours).')
-    # fiji_path = Path(r'C:\Fiji.app\ImageJ-win64.exe')
+    print(data_io.time_stamp(),'Starting BigStitcher registration and poly-dT fusion (can take >12 hours).')
+    fiji_path = Path(r'C:\Fiji.app\ImageJ-win64.exe')
 
-    # print(data_io.time_stamp(),'Calculate and filter initial rigid registrations.')
-    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\rigid_registration.ijm')
-    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    print(data_io.time_stamp(),'Calculate and filter initial rigid registrations.')
+    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\rigid_registration.ijm')
+    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
     # print(data_io.time_stamp(),'Calculate interest point registrations.')
     # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\ip_registration.ijm')
     # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
-    # print(data_io.time_stamp(),'Optimize global alignment of all tiles and rounds.')    
-    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\align.ijm')
-    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    print(data_io.time_stamp(),'Optimize global alignment of all tiles and rounds.')    
+    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\align.ijm')
+    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
     # print(data_io.time_stamp(),'Calculate affine registration for each aligned tile across rounds.')    
     # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\affine.ijm')
     # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
     
-    # print(data_io.time_stamp(),'Generate 4x downsampled fusion of first round poly-dT.')    
-    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\fusion.ijm')
-    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    print(data_io.time_stamp(),'Generate 4x downsampled fusion of first round poly-dT.')    
+    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\fusion.ijm')
+    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
 
-    # print(data_io.time_stamp(),'Finished BigStitcher registration and poly-dT fusion.')
-
+    print(data_io.time_stamp(),'Finished BigStitcher registration and poly-dT fusion.')
 
     # run affine local registration across rounds.
     # Both the BigStitcher and local affine results are placed into raw data Zarr array for use in decoding.
-    print(data_io.time_stamp(), 'Starting DEEDS local affine translation (can take >12 hours).')
+    print(data_io.time_stamp(), 'Starting DEEDS local affine registration (can take >12 hours).')
     perform_local_registration(bdv_output_path,
                                bdv_xml_path,
                                zarr_output_path,
