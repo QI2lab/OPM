@@ -579,36 +579,98 @@ def perform_local_registration(BDV_N5_path: Path,
 
     # loop over all tiles
     tracking_tile_idx = -1
-    for (x_idx,y_idx,z_idx) in tqdm_product(range(num_x),range(num_y),range(num_z),
+    for (x_idx,y_idx,z_idx) in tqdm_product(range(num_x),range(1,num_y),range(num_z),
                                             desc='Tiles'):
         tracking_tile_idx = tracking_tile_idx + 1
-
-        # code to skip already processed tiles. Restarting due to page file memory issues.
-        if tracking_tile_idx >= 132:
       
-            # create composed transformation for r_idx = 0
-            round_name = 'r'+str(0).zfill(3)
+        # create composed transformation for r_idx = 0
+        round_name = 'r'+str(0).zfill(3)
+        tile_name = 'x'+str(x_idx).zfill(3)+'_y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
+        channel_id = 'ch488'
+        current_channel = zarr.open_group(zarr_path,mode='a',path=round_name+'/'+tile_name+'/'+channel_id)
+        try:
+            tile_idx = int(da.from_zarr(current_channel['BDV_tile_idx']).compute())
+        except:
+            BDV_tile_idx = current_channel.zeros('BDV_tile_idx',
+                                                shape=(1),
+                                                compressor=compressor,
+                                                dtype=int)
+            BDV_tile_idx[:] = tracking_tile_idx
+            tile_idx = tracking_tile_idx
+        xform_ref, scaled_xform_ref = make_composed_transformation(path_affine=BDV_XML_path,
+                                                                    tile_idx=tile_idx,
+                                                                    r_idx=0,
+                                                                    x_idx=x_idx,
+                                                                    y_idx=y_idx,
+                                                                    z_idx=z_idx,
+                                                                    pixel_size=pixel_size)
+
+        # save composed transformations to zarr
+        try:
+            current_BDV_xform = da.from_zarr(current_channel['BDV_xform']).compute().astype(np.float32)
+        except:
+            current_BDV_xform = current_channel.zeros('BDV_xform',
+                                                    shape=(4,4),
+                                                    compressor=compressor,
+                                                    dtype=float)
+            current_BDV_xform[:] = xform_ref
+        else:
+            da.to_zarr(da.from_array(xform_ref),
+                    current_channel['BDV_xform'],
+                    overwrite=True,
+                    compressor=compressor)
+
+        try:
+            current_scaled_xform = da.from_zarr(current_channel['scaled_xform']).compute().astype(np.float32)
+        except:
+            current_scaled_xform = current_channel.zeros('scaled_xform',
+                                                    shape=(4,4),
+                                                    compressor=compressor,
+                                                    dtype=float)
+            current_scaled_xform[:] = scaled_xform_ref
+        else:
+            da.to_zarr(da.from_array(scaled_xform_ref),
+                    current_channel['scaled_xform'],
+                    overwrite=True,
+                    compressor=compressor)
+
+        # load reference tile at r_idx = 0
+        group_path = 'setup'+str(tile_idx)+'/timepoint0/s1' 
+        scaled_data_reference = da.from_zarr(n5_data[group_path]).compute()
+        # voxel_size = da.from_zarr(current_channel['voxel_size']).compute().astype(np.float32)
+        # deskew_pixel_size = voxel_size[1]
+        # scan_step = voxel_size[0]
+        # theta = float(da.from_zarr(current_channel['theta']).compute())
+
+        # data_reference_raw = da.from_zarr(current_channel['raw_data']).compute().astype(np.uint16)
+        # data_reference_deskew = deskew(data_reference_raw,
+        #                                deskew_pixel_size,
+        #                                scan_step,
+        #                                theta)
+        # del data_reference_raw
+        # gc.collect()
+        # scaled_data_reference = downscale_local_mean(data_reference_deskew,factors=(4,4,4),cval=0).astype(np.float32)
+        # del data_reference_deskew
+        # gc.collect()
+
+        # loop over all rounds in BDV N5 file
+        for r_idx in tqdm(range(1,num_r),desc='Rounds',leave=False):
+            # create composed transformation for this r_idx
+            xform_target, scaled_xform_target = make_composed_transformation(path_affine=BDV_XML_path,
+                                                                            tile_idx=tile_idx,
+                                                                            r_idx=r_idx,
+                                                                            x_idx=x_idx,
+                                                                            y_idx=y_idx,
+                                                                            z_idx=z_idx,
+                                                                            pixel_size=pixel_size)
+
+            # save composed transformation to zarr
+            round_name = 'r'+str(r_idx).zfill(3)
             tile_name = 'x'+str(x_idx).zfill(3)+'_y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
             channel_id = 'ch488'
-            current_channel = zarr.open_group(zarr_path,mode='a',path=round_name+'/'+tile_name+'/'+channel_id)
-            try:
-                tile_idx = int(da.from_zarr(current_channel['BDV_tile_idx']).compute())
-            except:
-                BDV_tile_idx = current_channel.zeros('BDV_tile_idx',
-                                                    shape=(1),
-                                                    compressor=compressor,
-                                                    dtype=int)
-                BDV_tile_idx[:] = tracking_tile_idx
-                tile_idx = tracking_tile_idx
-            xform_ref, scaled_xform_ref = make_composed_transformation(path_affine=BDV_XML_path,
-                                                                        tile_idx=tile_idx,
-                                                                        r_idx=0,
-                                                                        x_idx=x_idx,
-                                                                        y_idx=y_idx,
-                                                                        z_idx=z_idx,
-                                                                        pixel_size=pixel_size)
-
-            # save composed transformations to zarr
+            current_channel = zarr.open_group(zarr_path,
+                                            mode='a',
+                                            path=round_name+'/'+tile_name+'/'+channel_id)
             try:
                 current_BDV_xform = da.from_zarr(current_channel['BDV_xform']).compute().astype(np.float32)
             except:
@@ -616,13 +678,13 @@ def perform_local_registration(BDV_N5_path: Path,
                                                         shape=(4,4),
                                                         compressor=compressor,
                                                         dtype=float)
-                current_BDV_xform[:] = xform_ref
+                current_BDV_xform[:] = xform_target
             else:
-                da.to_zarr(da.from_array(xform_ref),
+                da.to_zarr(da.from_array(xform_target),
                         current_channel['BDV_xform'],
                         overwrite=True,
                         compressor=compressor)
-
+            
             try:
                 current_scaled_xform = da.from_zarr(current_channel['scaled_xform']).compute().astype(np.float32)
             except:
@@ -630,123 +692,58 @@ def perform_local_registration(BDV_N5_path: Path,
                                                         shape=(4,4),
                                                         compressor=compressor,
                                                         dtype=float)
-                current_scaled_xform[:] = scaled_xform_ref
+                current_scaled_xform[:] = scaled_xform_target
             else:
-                da.to_zarr(da.from_array(scaled_xform_ref),
+                da.to_zarr(da.from_array(scaled_xform_target),
                         current_channel['scaled_xform'],
                         overwrite=True,
                         compressor=compressor)
 
-            # load reference tile at r_idx = 0
-            group_path = 'setup'+str(tile_idx)+'/timepoint0/s1' 
-            scaled_data_reference = da.from_zarr(n5_data[group_path]).compute()
-            # voxel_size = da.from_zarr(current_channel['voxel_size']).compute().astype(np.float32)
-            # deskew_pixel_size = voxel_size[1]
-            # scan_step = voxel_size[0]
-            # theta = float(da.from_zarr(current_channel['theta']).compute())
-
-            # data_reference_raw = da.from_zarr(current_channel['raw_data']).compute().astype(np.uint16)
-            # data_reference_deskew = deskew(data_reference_raw,
-            #                                deskew_pixel_size,
-            #                                scan_step,
-            #                                theta)
-            # del data_reference_raw
+            # load 4x downsampled tile for current r_idx
+            group_path = 'setup'+str(tile_idx)+'/timepoint'+str(r_idx)+'/s1'
+            scaled_data_target = da.from_zarr(n5_data[group_path]).compute()
+            # data_target_raw = da.from_zarr(current_channel['raw_data']).compute().astype(np.uint16)
+            # data_target_deskew = deskew(data_target_raw,
+            #                             deskew_pixel_size,
+            #                             scan_step,
+            #                             theta)
+            # del data_target_raw
             # gc.collect()
-            # scaled_data_reference = downscale_local_mean(data_reference_deskew,factors=(4,4,4),cval=0).astype(np.float32)
-            # del data_reference_deskew
-            # gc.collect()
-
-            # loop over all rounds in BDV N5 file
-            for r_idx in tqdm(range(1,num_r),desc='Rounds',leave=False):
-                # create composed transformation for this r_idx
-                xform_target, scaled_xform_target = make_composed_transformation(path_affine=BDV_XML_path,
-                                                                                tile_idx=tile_idx,
-                                                                                r_idx=r_idx,
-                                                                                x_idx=x_idx,
-                                                                                y_idx=y_idx,
-                                                                                z_idx=z_idx,
-                                                                                pixel_size=pixel_size)
-
-                # save composed transformation to zarr
-                round_name = 'r'+str(r_idx).zfill(3)
-                tile_name = 'x'+str(x_idx).zfill(3)+'_y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
-                channel_id = 'ch488'
-                current_channel = zarr.open_group(zarr_path,
-                                                mode='a',
-                                                path=round_name+'/'+tile_name+'/'+channel_id)
-                try:
-                    current_BDV_xform = da.from_zarr(current_channel['BDV_xform']).compute().astype(np.float32)
-                except:
-                    current_BDV_xform = current_channel.zeros('BDV_xform',
-                                                            shape=(4,4),
-                                                            compressor=compressor,
-                                                            dtype=float)
-                    current_BDV_xform[:] = xform_target
-                else:
-                    da.to_zarr(da.from_array(xform_target),
-                            current_channel['BDV_xform'],
-                            overwrite=True,
-                            compressor=compressor)
-                
-                try:
-                    current_scaled_xform = da.from_zarr(current_channel['scaled_xform']).compute().astype(np.float32)
-                except:
-                    current_scaled_xform = current_channel.zeros('scaled_xform',
-                                                            shape=(4,4),
-                                                            compressor=compressor,
-                                                            dtype=float)
-                    current_scaled_xform[:] = scaled_xform_target
-                else:
-                    da.to_zarr(da.from_array(scaled_xform_target),
-                            current_channel['scaled_xform'],
-                            overwrite=True,
-                            compressor=compressor)
-
-                # load 4x downsampled tile for current r_idx
-                group_path = 'setup'+str(tile_idx)+'/timepoint'+str(r_idx)+'/s1'
-                scaled_data_target = da.from_zarr(n5_data[group_path]).compute()
-                # data_target_raw = da.from_zarr(current_channel['raw_data']).compute().astype(np.uint16)
-                # data_target_deskew = deskew(data_target_raw,
-                #                             deskew_pixel_size,
-                #                             scan_step,
-                #                             theta)
-                # del data_target_raw
-                # gc.collect()
-                
-                # scaled_data_target = downscale_local_mean(data_target_deskew,factors=(4,4,4),cval=0).astype(np.float32)
-                # del data_target_deskew
-                # gc.collect()
-
-                # warp this r_idx tile to match r_idx = 0 tile
-                scaled_data_warped = apply_relative_affine_transform(scaled_data_target,
-                                                                    scaled_xform_ref,
-                                                                    scaled_xform_target,
-                                                                    pixel_size).astype(np.float32)
-                del scaled_data_target
-                gc.collect()
-                
-                # run optical flow on this tile
-                optical_flow = compute_optical_flow(scaled_data_reference.astype(np.float32),
-                                                    scaled_data_warped.astype(np.float32))
-
-                # save optical flow transformation to zarr
-                try:
-                    current_OF_xform = da.from_zarr(current_channel['of_xform']).compute().astype(np.float32)
-                except:
-                    current_OF_xform = current_channel.zeros('of_xform',
-                                                            shape=optical_flow.shape,
-                                                            compressor=compressor,
-                                                            dtype=float)
-                    current_OF_xform[:] = optical_flow
-                else:
-                    da.to_zarr(da.from_array(optical_flow),
-                            current_channel['of_xform'],
-                            overwrite=True,
-                            compressor=compressor)
-
-                del current_channel, current_BDV_xform, current_OF_xform
-                del scaled_data_warped, optical_flow
-                gc.collect()
             
-            del scaled_data_reference
+            # scaled_data_target = downscale_local_mean(data_target_deskew,factors=(4,4,4),cval=0).astype(np.float32)
+            # del data_target_deskew
+            # gc.collect()
+
+            # warp this r_idx tile to match r_idx = 0 tile
+            scaled_data_warped = apply_relative_affine_transform(scaled_data_target,
+                                                                scaled_xform_ref,
+                                                                scaled_xform_target,
+                                                                pixel_size).astype(np.float32)
+            del scaled_data_target
             gc.collect()
+            
+            # run optical flow on this tile
+            optical_flow = compute_optical_flow(scaled_data_reference.astype(np.float32),
+                                                scaled_data_warped.astype(np.float32))
+
+            # save optical flow transformation to zarr
+            try:
+                current_OF_xform = da.from_zarr(current_channel['of_xform']).compute().astype(np.float32)
+            except:
+                current_OF_xform = current_channel.zeros('of_xform',
+                                                        shape=optical_flow.shape,
+                                                        compressor=compressor,
+                                                        dtype=float)
+                current_OF_xform[:] = optical_flow
+            else:
+                da.to_zarr(da.from_array(optical_flow),
+                        current_channel['of_xform'],
+                        overwrite=True,
+                        compressor=compressor)
+
+            del current_channel, current_BDV_xform, current_OF_xform
+            del scaled_data_warped, optical_flow
+            gc.collect()
+        
+        del scaled_data_reference
+        gc.collect()
