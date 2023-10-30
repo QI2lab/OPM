@@ -107,8 +107,8 @@ def return_data_dask(dataset: Dataset,
 
     return np.squeeze(data)
 
-def return_affine_xform(zarr_output_path: Path,
-                        path_to_xml: Path,
+def return_affine_xform(path_to_xml: Path,
+                        tile_idx: int,
                         r_idx: int,
                         x_idx: int,
                         y_idx: int,
@@ -148,16 +148,11 @@ def return_affine_xform(zarr_output_path: Path,
     """ 
 
     # construct tile name
-    round_name = 'r'+str(r_idx).zfill(3)
-    tile_name = 'x'+str(x_idx).zfill(3)+'_y'+str(y_idx).zfill(3)+'_z'+str(z_idx).zfill(3)
-    channel_id = 'ch488'
-    current_channel = zarr.open_group(zarr_output_path,mode='r',path=round_name+'/'+tile_name+'/'+channel_id)
-    tile_idx = current_channel['current_BDV_tile_idx']
     if verbose > 0:
         print('r_idx:', r_idx, 'x_idx:', x_idx, 'y_idx:', y_idx, 'z_idx:', z_idx, 'tile_idx:', tile_idx)
 
     # open BDV XML
-    bdv_editor = BdvEditor(str(path_to_xml), skip_h5=True)
+    bdv_editor = BdvEditor(str(path_to_xml),skip_h5=True)
 
     affine_xforms = []
     read_affine_success = True
@@ -200,7 +195,7 @@ def return_opm_psf(wavelength_um: float,
 
     wavelength_nm = int(wavelength_um*100)
 
-    psf_path = Path('psfs') / Path('opm_psf_w'+str(wavelength_nm)+'.tiff')
+    psf_path = Path('psfs') / Path('opm_psf_w'+str(wavelength_nm).rstrip("0")+'_p0.tiff')
     opm_psf = tifffile.imread(psf_path)
 
     return np.flipud(opm_psf)

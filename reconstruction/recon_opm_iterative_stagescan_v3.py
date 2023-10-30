@@ -4,13 +4,18 @@ QI2lab OPM suite
 Reconstruction suite v3
 
 Stage scanning iterative OPM post-processing.
-- Rewrites raw data in compressed Zarr
+- Rewrites raw data into QI2lab structured Zarr (compressed)
 - Places deskewed fiducial tiles in actual stage positions and iterative rounds into the time axis of BDV N5 for alignment
 - Calls BigStitcher to generate translation-only global tile alignment
-- Performs fine registration for each tile across iterative rounds using optical flow
+- Performs local deformable registration for each tile across iterative rounds using optical flow
 - Orthgonal interpolation method adapted from Vincent Maioli (http://doi.org/10.25560/68022)
 
+TO DO: 1. investigate BigStream local deformable registration as alternate to DEEDS
+       2. fix memory leak in DEEDS c-wrapper
+
 Change log:
+Shepherd 07/23 - split into NDTIFF and Zarr workflows. Allows regeneration of BDV N5 file from already processed
+                 Zarr format.
 Shepherd 06/23 - breaking changes for v3.0 acquisition
                  add `tile_idx` to zarr file to remove need for ambiguous conversion from xyz tile to BDV tile.
                  automate bigstitcher translation stitching after dataset creation
@@ -29,7 +34,7 @@ import npy2bdv
 import sys
 import gc
 import argparse
-from _imageprocessing import deskew, run_bigstitcher, perform_local_registration, generate_flatfield, apply_flatfield
+from _imageprocessing import deskew, run_bigstitcher, perform_local_registration
 from itertools import compress, product
 import _dataio as data_io
 import zarr
@@ -43,7 +48,7 @@ def main(argv):
 
     # parse directory name from command line argument
     # parse command line arguments
-    parser = argparse.ArgumentParser(description="Prepare raw OPM MERFISH data for analysis.")
+    parser = argparse.ArgumentParser(description="Prepare raw NDTIFF OPM MERFISH data for analysis.")
     parser.add_argument("-i", "--ipath", type=str, help="supply the directory to be processed")
     parser.add_argument("-o", "--opath", type=str, default="default", help="supply output directory (DEFAULT is input directory)")
     parser.add_argument("-d", "--decon", type=int, default=0, help="0: no deconvolution (DEFAULT), 1: perform deconvolution")
@@ -114,8 +119,16 @@ def main(argv):
         output_dir_path_base = Path(output_dir_string)
 
     output_dir_path = output_dir_path_base / 'processed'
-    output_dir_path.mkdir(parents=True, exist_ok=True)
+    #output_dir_path.mkdir(parents=True, exist_ok=True)
 
+    bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
+    #bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
+    bdv_xml_path = bdv_output_dir_path / Path(root_name+'.xml')
+    bdv_output_path = bdv_output_dir_path / Path(root_name+'.n5')
+
+    zarr_output_dir_path = output_dir_path / Path('raw_zarr')
+    zarr_output_path = zarr_output_dir_path / Path(root_name + '.zarr')                    
+    compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
 
     if ch_fiducial_idx == 8:
         # create directory for data type
@@ -138,7 +151,7 @@ def main(argv):
         # create directory for data type
         bdv_output_dir_path = output_dir_path / Path('deskewed_bdv')
         bdv_output_dir_path.mkdir(parents=True, exist_ok=True)
-        BDV_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
+        bdv_xml_path = bdv_output_path = bdv_output_dir_path / Path(root_name+'.xml')
 
         # https://github.com/nvladimus/npy2bdv
         # create BDV H5 file with sub-sampling for BigStitcher
@@ -179,11 +192,10 @@ def main(argv):
     ex_wavelengths=[.405,.488,.561,.635,.730]
     em_wavelengths=[.420,.520,.580,.670,.780]
 
-    tile_idx=0
-
+    # channel information for BDV and NDTIFF
     channel_idxs = [0,1,2,3,4]
     channel_ids = ['ch405','ch488','ch561','ch635','ch730']
-    corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
+    #corner_crop = 475 # amount to trim to remove parallelogram at corners of deskewed data
     
     # loop over all rounds.
     for r_idx in range(num_r):
@@ -351,7 +363,7 @@ def main(argv):
                             current_voxel_size[:] = np.asarray([float(scan_step),float(pixel_size),float(pixel_size)])
                             current_theta[:] = float(theta)
                             current_wvls[:] = np.asarray([float(ex_wavelengths[ch_idx]),float(ex_wavelengths[ch_idx])])
-                            current_corner_crop[:] = corner_crop
+                            #current_corner_crop[:] = corner_crop
                             current_opm_psf[:] = channel_opm_psf
         
                             del raw_data_dask
@@ -370,35 +382,43 @@ def main(argv):
                                 gc.collect()
 
                                 # perform flat-fielding using random draw of images from the stack
-                                if flatfield_flag == 0:
+                                if flatfield_flag == 1:
                                     print(data_io.time_stamp(), 'Flatfield.')
-                                    n_flatfield_images = 1000
-                                    rand_draw_success = False
-                                    while not(rand_draw_success):
-                                        try:
-                                            rand_idx = np.random.randint(0,decon.shape[0],n_flatfield_images)
-                                        except:
-                                            rand_draw_success = False
-                                            n_flatfield_images = n_flatfield_images // 2
-                                        else:
-                                            rand_draw_success = True
+                                    img_data_mean = np.mean(decon,axis=(1,2)) # might need to randomly sample for bigger data
+                                    top_brightness_idx = np.argsort(img_data_mean)
+                                    brightest_flatfield_data = decon[top_brightness_idx[-500:-1],:]
+                                    del img_data_mean, top_brightness_idx
+                                    gc.collect()
 
-                                    flatfield = generate_flatfield(decon[rand_idx,:])
-                                    corrected_stack = apply_flatfield(decon,flatfield)
+                                    flatfield, darkfield = generate_flatfield(brightest_flatfield_data)
+                                    del brightest_flatfield_data
+                                    gc.collect()
+
+                                    corrected_stack = apply_flatfield(decon,flatfield,darkfield)
                                     current_flatfield = current_channel.zeros('flatfield',
                                                                               shape=(flatfield.shape[0],flatfield.shape[1]),
                                                                               chunks=(flatfield.shape[0],flatfield.shape[1]),
                                                                               compressor=compressor,
                                                                               dtype=np.float32)
                                     current_flatfield[:] = flatfield.astype(np.float32)
+                                    current_darkfield = current_channel.zeros('darkfield',
+                                                                              shape=(darkfield.shape[0],darkfield.shape[1]),
+                                                                              chunks=(darkfield.shape[0],darkfield.shape[1]),
+                                                                              compressor=compressor,
+                                                                              dtype=np.float32)
+                                    current_darkfield[:] = darkfield.astype(np.float32)
+                                    del flatfield, darkfield
                                 else:
                                     corrected_stack = decon
-                                del decon, flatfield
+                                del decon
                                 gc.collect()
 
                                 # deskew
                                 print(data_io.time_stamp(), 'Deskew.')
-                                deskewed = deskew(data=corrected_stack,theta=theta,distance=scan_step,pixel_size=pixel_size)
+                                deskewed = deskew(data=corrected_stack,
+                                                  pixel_size=pixel_size,
+                                                  scan_step=scan_step,
+                                                  theta=theta)
                                 del corrected_stack
                                 gc.collect()
 
@@ -425,7 +445,7 @@ def main(argv):
                                 # save tile in BDV H5 with actual stage positions
                                 print(data_io.time_stamp(), 'Write deskewed data into BDV N5.')
                                 if ch_fiducial_idx == 8:
-                                    bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=r_idx, channel=ch_BDV_idx,
+                                    bdv_writer.append_view(deskewed, time=r_idx, channel=ch_BDV_idx,
                                                             tile=tile_idx,
                                                             voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
                                                             voxel_units='um',
@@ -434,7 +454,7 @@ def main(argv):
                                                             name_affine = 'tile '+str(tile_idx)+' translation')
                                     bdv_writer.write_xml()
                                 elif not(ch_fiducial_idx == 9):
-                                    bdv_writer.append_view(deskewed[:,corner_crop:-corner_crop,:], time=r_idx, channel=ch_BDV_idx,
+                                    bdv_writer.append_view(deskewed, time=r_idx, channel=ch_BDV_idx,
                                                             tile=tile_idx,
                                                             voxel_size_xyz=(deskewed_x_pixel, deskewed_y_pixel, deskewed_z_pixel),
                                                             voxel_units='um',
@@ -455,6 +475,7 @@ def main(argv):
                     del dataset
                     gc.collect()
 
+                    do_not_delete = True
                     # delete raw NDTIFF data
                     if not(do_not_delete):
                         print(data_io.time_stamp(), 'Delete NDTIFF directory.')
@@ -475,31 +496,51 @@ def main(argv):
     # write BDV xml file
     if (ch_fiducial_idx == 8) or not(ch_fiducial_idx == 9):
         bdv_writer.write_xml()
-
+    
     # run BigStitcher translation registration
+    # Both the BigStitcher and local affine results are placed into raw data Zarr array for use in decoding.
     # TO DO: load Fiji related paths from .json
-    print(data_io.time_stamp(),'Starting BigStitcher registration and poly-dT fusion (can take >8 hours).')
-    fiji_path = Path(r'c:/Fiji.app/ImageJ-win64.exe')
-    macro_path = Path(r'c:/Fiji.app/OPM_stitch.ijm')
-    run_bigstitcher(BDV_xml_path,fiji_path,macro_path)
+    print(data_io.time_stamp(),'Starting BigStitcher registration and poly-dT fusion (can take >12 hours).')
+    fiji_path = Path(r'C:\Fiji.app\ImageJ-win64.exe')
+
+    print(data_io.time_stamp(),'Calculate and filter initial rigid registrations.')
+    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\rigid_registration.ijm')
+    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+
+    # print(data_io.time_stamp(),'Calculate interest point registrations.')
+    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\ip_registration.ijm')
+    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+
+    print(data_io.time_stamp(),'Optimize global alignment of all tiles and rounds.')    
+    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\align.ijm')
+    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+
+    # print(data_io.time_stamp(),'Calculate affine registration for each aligned tile across rounds.')    
+    # macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\affine.ijm')
+    # run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+    
+    print(data_io.time_stamp(),'Generate 4x downsampled fusion of first round poly-dT.')    
+    macro_path = Path(r'C:\Users\qi2lab\Documents\GitHub\OPM\reconstruction\fusion.ijm')
+    run_bigstitcher(output_dir_path,fiji_path,macro_path,bdv_xml_path)
+
     print(data_io.time_stamp(),'Finished BigStitcher registration and poly-dT fusion.')
 
     # run affine local registration across rounds.
-    # Both the BigStitcher and local affine results are placed 
-    # into raw data Zarr array for use in decoding.
-    print(data_io.time_stamp(), 'Local affine translation.')
+    # Both the BigStitcher and local affine results are placed into raw data Zarr array for use in decoding.
+    print(data_io.time_stamp(), 'Starting DEEDS local affine registration (can take >12 hours).')
     perform_local_registration(bdv_output_path,
                                bdv_xml_path,
                                zarr_output_path,
                                num_r,
                                num_x,
                                num_y,
-                               num_x,
+                               num_z,
                                deskewed_x_pixel,
                                compressor)
+    print(data_io.time_stamp(), 'Finished local affine translations.')
 
     # exit
-    print('Finished.')
+    print(data_io.time_stamp(), 'Finished processing dataset.')
     sys.exit()
 
 # run
