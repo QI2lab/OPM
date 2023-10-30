@@ -10,3 +10,4 @@ reconstruction/microvolution.lic
 *.tiff
 conversion/multscale_omezarr.py
 conversion/zarr_2_omezarr.py
+test_data.py
