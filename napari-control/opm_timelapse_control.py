@@ -15,12 +15,7 @@ from src.OPMMirrorScan import OPMMirrorScan
 import napari
 from pymmcore_widgets import StageWidget
 from pathlib import Path
-import sys
 
-# need to add MM path to load some dlls
-#sys.path.append(r"C:\Program Files\Micro-Manager-2.0gamma")
-
-# def main(path_to_mm_config=Path('C:/Program Files/Micro-Manager-2.0gamma/opm_new.cfg')):
 def main(path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_configs\OPM_20230320.cfg')):
 
     instrument_control_widget = OPMMirrorScan()
@@ -50,10 +45,12 @@ def main(path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_config
 
     viewer.window.add_dock_widget(instrument_control_widget,name='Instrument control')
     
-    stage_03 = StageWidget('MCL NanoDrive Z Stage')
+    stage_03 = StageWidget('MCL NanoDrive Z Stage',step=.1)
     viewer.window.add_dock_widget(stage_03,name='O3 Zstage')
-    stage_01 = StageWidget('ZStage:M:37')
+    stage_01 = StageWidget('ZStage:M:37',step=10)
     viewer.window.add_dock_widget(stage_01,name='O1 Zstage')
+    stage_xy = StageWidget('XYStage:XY:31',step=100)
+    viewer.window.add_dock_widget(stage_xy,name='XYstage')
 
     # start Napari
     napari.run()

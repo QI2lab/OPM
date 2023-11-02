@@ -29,7 +29,7 @@ class OPMMirrorScan(MagicTemplate):
         self.channel_states=[False,False,False,False,False]
         self.exposure_ms = 10.0                 # unit: ms
         self.scan_axis_step_um = 0.4            # unit: um
-        self.scan_axis_calibration = 0.03925    # unit: V / um
+        self.scan_axis_calibration = 0.043      # unit: V / um updated 2023.10.30
         self.galvo_neutral_volt = 0.            # unit: V
         self.scan_mirror_footprint_um = 50.0    # unit: um
         self.camera_pixel_size_um = .115        # unit: um
@@ -37,10 +37,12 @@ class OPMMirrorScan(MagicTemplate):
 
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
-        self.ROI_uleft_corner_x = int(168)  # unit: camera pixels
-        self.ROI_uleft_corner_y = int(928)  # unit: camera pixels
+        self.ROI_center_x = int(1123)
+        self.ROI_center_y = int(1172)-128
         self.ROI_width_x = int(1900)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
+        self.ROI_corner_x = int(self.ROI_center_x -  self.ROI_width_x//2)
+        self.ROI_corner_y = int(self.ROI_center_y -  self.ROI_width_y//2)
 
         # O3 piezo stage name
         self.O3_stage_name='MCL NanoDrive Z Stage'
@@ -53,6 +55,7 @@ class OPMMirrorScan(MagicTemplate):
 
         self.channel_labels = ["405", "488", "561", "635", "730"]
         self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
+        self.laser_blanking_value = False
 
         self.debug=False
 
@@ -62,10 +65,16 @@ class OPMMirrorScan(MagicTemplate):
         self.ROI_changed = True
         self.exposure_changed = True
         self.footprint_changed = True
+        self.scan_step_changed = True
         self.DAQ_running = False
         self.save_path_setup = False
+        self.timelapse_setup = False
 
         self.mmc = CMMCorePlus.instance()
+
+        self.mmc.clearCircularBuffer()
+        circ_buffer_mb = 16000
+        self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
     # set 2D acquistion thread worker
     def _set_worker_2d(self,worker_2d):
@@ -158,12 +167,13 @@ class OPMMirrorScan(MagicTemplate):
                 self._set_mmc_laser_power()
                 self.powers_changed = False
 
-            if self.channels_changed:
+            if self.channels_changed or self.scan_step_changed:
                 if self.DAQ_running:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
                     self.opmdaq.reset_scan_mirror()
-                self.opmdaq.set_scan_type('stage')
+                self.opmdaq.set_laser_blanking(False)
+                self.opmdaq.set_scan_type('2D')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
                 self.opmdaq.generate_waveforms()
@@ -190,6 +200,7 @@ class OPMMirrorScan(MagicTemplate):
                 raw_image_2d = self.mmc.getImage()
                 time.sleep(.05)
                 yield c, raw_image_2d
+
 
     @thread_worker
     def _acquire_3d_data(self):
@@ -223,10 +234,11 @@ class OPMMirrorScan(MagicTemplate):
                 self._set_mmc_laser_power()
                 self.powers_changed = False
             
-            if self.channels_changed or self.footprint_changed or not(self.DAQ_running):
+            if self.channels_changed or self.footprint_changed or not(self.DAQ_running) or self.scan_step_changed:
                 if self.DAQ_running:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
+                self.opmdaq.set_laser_blanking(False)
                 self.opmdaq.set_scan_type('mirror')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
@@ -272,7 +284,8 @@ class OPMMirrorScan(MagicTemplate):
             deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
 
             for c in active_channel_indices:
-                deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)  
+                #deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)  
+                deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)  
                 yield c, deskewed_image
 
             del raw_image_stack
@@ -310,10 +323,11 @@ class OPMMirrorScan(MagicTemplate):
             self._set_mmc_laser_power()
             self.powers_changed = False
         
-        if self.channels_changed or self.footprint_changed or not(self.DAQ_running):
+        if self.channels_changed or self.footprint_changed or not(self.DAQ_running) or self.scan_step_changed:
             if self.DAQ_running:
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
+            self.opmdaq.set_laser_blanking(False)
             self.opmdaq.set_scan_type('mirror')
             self.opmdaq.set_channels_to_use(self.channel_states)
             self.opmdaq.set_interleave_mode(True)
@@ -331,7 +345,7 @@ class OPMMirrorScan(MagicTemplate):
         zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
 
         # create and open zarr file
-        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, 1, 1, self.ROI_width_y, self.ROI_width_x),compressor=None, dtype=np.uint16)
+        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x),compressor=None, dtype=np.uint16)
 
         # construct metadata and save
         self._save_metadata()
@@ -349,12 +363,15 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.setProperty(exp_zstage_name,'MotorOnOff','Off')
 
         # set circular buffer to be large
-        self.mmc.clearCircularBuffer()
-        circ_buffer_mb = 90000
-        self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+        # self.mmc.clearCircularBuffer()
+        # circ_buffer_mb = 16000
+        # self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
+        turned_off = False
+        image_counter = 0
         # run hardware triggered acquisition
         if self.wait_time == 0:
+            temp_data = np.zeros((self.n_active_channels, self.scan_steps,self.ROI_width_y, self.ROI_width_x),dtype=np.uint16)
             self.mmc.setExposure(self.exposure_ms)
             self.opmdaq.start_waveform_playback()
             self.DAQ_running = True
@@ -364,10 +381,18 @@ class OPMMirrorScan(MagicTemplate):
                     for c in range(self.n_active_channels):
                         while self.mmc.getRemainingImageCount()==0:
                             pass
-                        opm_data[t, c, z, :, :]  = self.mmc.popNextImage() # DPS to do: Pop full "chunk" into memory then use dask.array to write in parallel
+                        temp_data[c,z,:] = self.mmc.popNextImage()
+                        image_counter +=1 
+                        #print(self.mmc.getRemainingImageCount() + image_counter,int(self.n_timepoints*self.n_active_channels*self.scan_steps))
+                        if (self.mmc.getRemainingImageCount() + image_counter) >= int(self.n_timepoints*self.n_active_channels*self.scan_steps) and not(turned_off):
+                            self.opmdaq.stop_waveform_playback()
+                            self.DAQ_running = False
+                            turned_off = True
+                opm_data[t, :]  = temp_data
             self.mmc.stopSequenceAcquisition()
-            self.opmdaq.stop_waveform_playback()
-            self.DAQ_running = False
+            if not(turned_off):
+                self.opmdaq.stop_waveform_playback()
+                self.DAQ_running = False
         else:
             af_counter = 0
             self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
@@ -407,9 +432,11 @@ class OPMMirrorScan(MagicTemplate):
         #------------------------------------------------------------------------------------------------------------------------------------
 
         # set circular buffer to be small 
-        self.mmc.clearCircularBuffer()
-        circ_buffer_mb = 4000
-        self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+        #self.mmc.clearCircularBuffer()
+        #circ_buffer_mb = 000
+        #self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+        # self.channel_powers=[0,0,0,0,0]
+        # self._set_mmc_laser_power()
 
     def _crop_camera(self):
         """
@@ -422,7 +449,11 @@ class OPMMirrorScan(MagicTemplate):
         if not(current_ROI[2]==2304) or not(current_ROI[3]==2304):
             self.mmc.clearROI()
             self.mmc.waitForDevice(self.camera_name)
-        self.mmc.setROI(int(self.ROI_uleft_corner_x),int(self.ROI_uleft_corner_y),int(self.ROI_width_x),int(self.ROI_width_y))
+        
+        self.mmc.setROI(int(self.ROI_corner_x),
+                        int(self.ROI_corner_y),
+                        int(self.ROI_width_x),
+                        int(self.ROI_width_y))
         self.mmc.waitForDevice(self.camera_name)
 
     def _lasers_to_hardware(self):
@@ -557,6 +588,7 @@ class OPMMirrorScan(MagicTemplate):
         self.opmdaq = OPMNIDAQ()
         # reset scan mirror position to neutral
         self.opmdaq.reset_scan_mirror()
+        self.opmdaq.set_laser_blanking(self.laser_blanking)
 
         # connect to Picard shutter
         self.shutter_controller = PicardShutter(shutter_id=self.shutter_id,verbose=False)
@@ -581,11 +613,12 @@ class OPMMirrorScan(MagicTemplate):
             self.opmdaq.stop_waveform_playback()
         self.opmdaq.reset_scan_mirror()
 
+
         self.shutter_controller.shutDown()
 
     @magicgui(
         auto_call=False,
-        exposure_ms={"widget_type": "FloatSpinBox", "min": 1, "max": 500,'label': 'Camera exposure (ms)'},
+        exposure_ms={"widget_type": "FloatSpinBox", "min": 0.1, "max": 500,'label': 'Camera exposure (ms)'},
         layout='horizontal',
         call_button='Update exposure'
     )
@@ -606,14 +639,12 @@ class OPMMirrorScan(MagicTemplate):
 
     @magicgui(
         auto_call=False,
-        uleft_corner_x={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI center (non-tilt)'},
-        uleft_corner_y={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI center (tilt)'},
         width_x={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI width (non-tilt)'},
-        width_y={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI height (tilt)'},
+        width_y={"widget_type": "SpinBox", "min": 0, "max": 1024,'label': 'ROI height (tilt)'},
         layout='vertical', 
         call_button="Update crop"
     )
-    def set_ROI(self, uleft_corner_x=168,uleft_corner_y=928,width_x=1900,width_y=512):
+    def set_ROI(self, width_x=1900,width_y=512):
         """
         Magicgui element to get camera ROI
 
@@ -627,15 +658,37 @@ class OPMMirrorScan(MagicTemplate):
             ROI height in pixels = TILTED DIRECTION
         :return None:
         """
-        
-        if not(int(uleft_corner_x)==self.ROI_uleft_corner_x) or not(int(uleft_corner_y)==self.ROI_uleft_corner_y) or not(int(width_x)==self.ROI_width_x) or not(int(width_y)==self.ROI_width_y):
-            self.ROI_uleft_corner_x=int(uleft_corner_x)
-            self.ROI_uleft_corner_y=int(uleft_corner_y)
+       
+        if not(int(width_x)==self.ROI_width_x) or not(int(width_y)==self.ROI_width_y):
+            self.ROI_corner_x=int(self.ROI_center_x-width_x//2)
+            self.ROI_corner_y=int(self.ROI_center_y-width_y//2)
             self.ROI_width_x=int(width_x)
             self.ROI_width_y=int(width_y)
             self.ROI_changed = True
         else:
             self.ROI_changed = False
+
+    @magicgui(
+        auto_call=False,
+        scan_step={"widget_type": "FloatSpinBox", "min": 0, "max": 2.0,'label': 'Scan step (um)'},
+        layout='vertical', 
+        call_button="Update scan step"
+    )
+    def set_scan_step(self, scan_step=0.4):
+        """
+        Magicgui element to setup scan step
+
+        :param scan_step: float
+            scan step size
+        :return None:
+        """
+
+       
+        if not(scan_step == self.scan_axis_step_um):
+            self.scan_axis_step_um = scan_step
+            self.scan_step_changed = True
+        else:
+            self.scan_step_changed = False
 
     @magicgui(
         auto_call=False,
@@ -707,6 +760,16 @@ class OPMMirrorScan(MagicTemplate):
             self.channels_changed = False
 
     @magicgui(
+        auto_call=True,
+        laser_blanking={"widget_type": "CheckBox", "label": 'Laser blanking'},
+        layout='horizontal'
+    )
+    def laser_blanking(self,laser_blanking = False):
+        if not(self.laser_blanking_value == laser_blanking):
+            self.laser_blanking_value = laser_blanking
+            self.opmdaq.set_laser_blanking(self.laser_blanking_value)
+
+    @magicgui(
         auto_call=False,
         scan_mirror_footprint_um={"widget_type": "FloatSpinBox", "min": 5, "max": 250, "label": 'Mirror sweep (um)'},
         layout='horizontal',
@@ -743,6 +806,8 @@ class OPMMirrorScan(MagicTemplate):
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running=False
                     self.worker_2d_running = False
+                    # self.channel_powers=[0,0,0,0,0]
+                    # self._set_mmc_laser_power()
                 else:
                     if not(self.worker_2d_started):
                         self.worker_2d_started = True

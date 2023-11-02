@@ -21,7 +21,7 @@ import numpy as np
 
 class OPMNIDAQ:
 
-    def __init__(self,scan_mirror_neutral=-0.15,scan_mirror_calibration=0.043):
+    def __init__(self,scan_mirror_neutral=0.0,scan_mirror_calibration=0.043):
 
         self.scan_type = 'mirror'
         self.interleave_lasers = True
@@ -43,7 +43,11 @@ class OPMNIDAQ:
 
         self.scan_mirror_neutral = scan_mirror_neutral
         self.scan_mirror_calibration = scan_mirror_calibration
+        self.laser_blanking=False
         
+    def set_laser_blanking(self,laser_blanking):
+        self.laser_blanking=laser_blanking
+    
     def set_scan_type(self,scan_type):
         self.scan_type = scan_type
 
@@ -51,6 +55,7 @@ class OPMNIDAQ:
         self.taskAO = daq.Task()
         self.taskAO.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
         self.taskAO.WriteAnalogScalarF64(True, -1, self.scan_mirror_neutral, None)
+        self.taskAO.StartTask()
         self.taskAO.StopTask()
         self.taskAO.ClearTask()
     
@@ -80,9 +85,14 @@ class OPMNIDAQ:
  
             # Generate values for DO
             dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
+        
             for ii, ind in enumerate(self.active_channel_indices):
-                dataDO[2*ii::2*self.n_active_channels, ind] = 1
-            dataDO[-1, :] = 0
+                if self.laser_blanking:
+                    dataDO[2*ii::2*self.n_active_channels, ind] = 1
+                else:
+                    dataDO[:,int(ind)] = 1
+            
+            # dataDO[-1, int(ind)] = 0
 
             # generate voltage steps
             max_volt = self.min_volt + self.scan_axis_range_volts  # 2
@@ -109,8 +119,36 @@ class OPMNIDAQ:
             # create DAQ pattern for laser strobing controlled via rolling shutter
             dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
             for ii, ind in enumerate(self.active_channel_indices):
-                dataDO[2*ii::2*int(self.n_active_channels), int(ind)] = 1
+                if self.laser_blanking:
+                    dataDO[2*ii::2*int(self.n_active_channels), int(ind)] = 1
+                else:
+                    dataDO[:,int(ind)] = 1
+
+            if self.laser_blanking:
+                dataDO[-1, :] = 0
             
+            self.dataDO = dataDO
+            self.waveform = None
+
+        elif self.scan_type == '2D':
+            # setup DAQ
+            nvoltage_steps = 1
+            # 2 time steps per frame, except for first frame plus one final frame to reset voltage
+            #samples_per_ch = (nvoltage_steps * 2 - 1) + 1
+            self.samples_per_ch = (nvoltage_steps * 2 * self.n_active_channels - 1) + 1
+ 
+            # Generate values for DO
+            dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
+        
+            for ii, ind in enumerate(self.active_channel_indices):
+                if self.laser_blanking:
+                    dataDO[2*ii::2*self.n_active_channels, ind] = 1
+                else:
+                    dataDO[:,int(ind)] = 1
+            
+            if self.laser_blanking:
+                dataDO[-1, :] = 0
+
             self.dataDO = dataDO
             self.waveform = None
 
@@ -187,6 +225,15 @@ class OPMNIDAQ:
             self.taskDO.ClearTask()
             if self.scan_type == 'mirror':
                 self.taskAO.ClearTask()
+
+            self.TaskDO = daq.Task()
+            self.TaskDO.CreateDOChan("/Dev1/port0/line0:7", "", daq.DAQmx_Val_ChanForAllLines)
+            array = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
+            self.TaskDO.WriteDigitalLines(1,1,10.0,daq.DAQmx_Val_GroupByChannel,array,None,None)
+            self.TaskDO.StopTask()
+            self.TaskDO.ClearTask()
+
+            self.reset_scan_mirror()
 
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)

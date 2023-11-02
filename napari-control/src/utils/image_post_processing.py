@@ -27,15 +27,11 @@ except:
 
 if CP_AVAILABLE:
     try:
-        import microvolution_py as mv_decon
-        DECON_LIBRARY = 'mv'
+        from clij2fft.richardson_lucy import richardson_lucy_nc
+        from clij2fft.richardson_lucy import getlib
+        DECON_LIBRARY = 'clij'
     except:
-        try:
-            from clij2fft.richardson_lucy import richardson_lucy_nc
-            from clij2fft.richardson_lucy import getlib
-            DECON_LIBRARY = 'clij'
-        except:
-            DECON_LIBRARY = None
+        DECON_LIBRARY = None
 else:
     DECON_LIBRARY = None
 
