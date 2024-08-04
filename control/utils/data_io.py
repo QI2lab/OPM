@@ -68,12 +68,12 @@ def read_fluidics_program(program_path):
         location of fluidics program
 
     :return df_fluidics: Dataframe
-        dataframe containing fluidics program 
+        dataframe containing fluidics program
     """
 
-    try:                
-        df_fluidics = pd.read_csv(program_path)            
-        df_fluidics = df_fluidics[["round", "source", "time", "pump"]]
+    try:
+        df_fluidics = pd.read_csv(program_path)
+        df_fluidics = df_fluidics[["round", "type", "pause", "source", "prime_buffer", "volume", "rate"]]
         df_fluidics.dropna(axis=0, how='any', inplace=True)
         df_fluidics["round"] = df_fluidics["round"].astype(int)
         df_fluidics["pump"] = df_fluidics["pump"].astype(int)
@@ -98,10 +98,10 @@ def return_data_numpy(dataset, time_axis, channel_axis, num_images, excess_image
     :param dataset: pycromanager dataset object
     :param channel_axis: integer channel index
     :param time_axis: integer time_axis
-    :param num_images: integer for number of images to return 
+    :param num_images: integer for number of images to return
     :param y_pixels: integer for y pixel size
     :param x_pixels: integer for x pixel size
-    
+
     :return data_numpy: 3D numpy array of requested data
     """
 
@@ -141,13 +141,13 @@ def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
         round index
     :param t_idx: integer
         time index
-    :param y_idx: integer 
+    :param y_idx: integer
         y tile index
-    :param z_idx: integer 
+    :param z_idx: integer
         z tile index
     :return data_numpy: NDarray
         4D numpy array of all affine transforms
-    """ 
+    """
 
     bdv_editor = BdvEditor(str(path_to_xml))
     tile_idx = (y_idx+z_idx)+(y_idx*(total_z_pos-1))

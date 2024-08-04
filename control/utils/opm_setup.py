@@ -17,7 +17,7 @@ def setup_asi_tiger(core,scan_axis_speed,scan_axis_start_mm,scan_axis_end_mm):
         starting point for stage scan in mm
     :param scan_axis_end_mm: float
         stopping point for stage scan in mm
-    
+
     :return None:
     """
 
@@ -28,7 +28,7 @@ def setup_asi_tiger(core,scan_axis_speed,scan_axis_start_mm,scan_axis_end_mm):
     propCellConfig = 'EditCellConfig'
     addrOutputBNC1 = 33 # BNC1 on the PLC front panel
     addrStageSync = 46  # TTL5 on Tiger backplane = stage sync signal
-    
+
     # connect stage sync signal to BNC output
     core.set_property(plcName, propPosition, addrOutputBNC1)
     core.set_property(plcName, propCellConfig, addrStageSync)
@@ -118,7 +118,7 @@ def setup_obis_laser_boxx(core,channel_powers,state):
         array of powers as percentage of max power
     :param state: str
         how laser boxx should expect input ('software' or 'digital')
-    
+
     :return None:
     """
 
@@ -166,6 +166,7 @@ def setup_obis_laser_boxx(core,channel_powers,state):
         core.set_config('Laser','AllOn')
         core.wait_for_config('Laser','AllOn')
 
+
 def camera_hook_fn(event):
     """
     Hook function to start stage controller once camera is activated in EXTERNAL/START mode
@@ -178,19 +179,20 @@ def camera_hook_fn(event):
         active pycromanager bridge between python and java
     :param event_queue: dict
         dictionary of pycromanager event queue
-    
+
     :return None:
     """
 
     core_trigger = Core()
     command='1SCAN'
     core_trigger.set_property('TigerCommHub','SerialCommand',command)
-    
+
     core_trigger = None
     del core_trigger
     gc.collect()
 
     return event
+
 
 def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     """
@@ -204,7 +206,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
         dictonary containing instrument setup information
     :param debug: boolean
         flag to bring debug information
-    
+
     :return df_MM_setup: dict
         dictonary containing scan configuration settings from MM GUI
     """
@@ -224,22 +226,22 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     channels = acq_settings.channels() # get active channels in MDA window
     for idx in range(channels.size()):
         channel = channels.get(idx) # pull channel information
-        if channel.config() == channel_labels[0]: 
+        if channel.config() == channel_labels[0]:
             channel_states[0]=True
-        if channel.config() == channel_labels[1]: 
+        if channel.config() == channel_labels[1]:
             channel_states[1]=True
-        elif channel.config() == channel_labels[2]: 
+        elif channel.config() == channel_labels[2]:
             channel_states[2]=True
-        elif channel.config() == channel_labels[3]: 
+        elif channel.config() == channel_labels[3]:
             channel_states[3]=True
-        elif channel.config() == channel_labels[4]: 
+        elif channel.config() == channel_labels[4]:
             channel_states[4]=True
-    do_ch_pins = [df_config['laser0_do_pin'], 
-                  df_config['laser1_do_pin'], 
-                  df_config['laser2_do_pin'], 
-                  df_config['laser3_do_pin'], 
+    do_ch_pins = [df_config['laser0_do_pin'],
+                  df_config['laser1_do_pin'],
+                  df_config['laser2_do_pin'],
+                  df_config['laser3_do_pin'],
                   df_config['laser4_do_pin']] # digital output line corresponding to each channel
-    
+
     # pull laser powers from main window
     channel_powers = [0.,0.,0.,0.,0.]
     channel_powers[0] = core.get_property('Coherent-Scientific Remote','Laser 405-100C - PowerSetpoint (%)')
@@ -260,7 +262,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     y_positions = np.empty(number_positions)
     z_positions = np.empty(number_positions)
 
-    # iterate through position list to extract XY positions    
+    # iterate through position list to extract XY positions
     for idx in range(number_positions):
         pos = position_list.get_position(idx)
         for ipos in range(pos.size()):
@@ -283,7 +285,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     height_axis_end_um = np.round(z_positions.max(),0)
 
     # set pixel size
-    pixel_size_um = float(df_config['pixel_size']) # unit: um 
+    pixel_size_um = float(df_config['pixel_size']) # unit: um
 
     # get exposure time from main window
     exposure_ms = core.get_exposure()
@@ -297,7 +299,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     core.wait_for_config('Camera-Setup','ScanMode3')
 
     if debug: print(f'Exposure time: {exposure_ms}.')
-    
+
     # enforce exposure time
     core.set_exposure(exposure_ms)
 
@@ -311,7 +313,7 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
     if debug: print(f'Full readout time: {actual_readout_ms}.')
 
     # scan axis setup
-    scan_axis_step_um = float(df_config['scan_axis_step_um'])  # unit: um 
+    scan_axis_step_um = float(df_config['scan_axis_step_um'])  # unit: um
     scan_axis_step_mm = scan_axis_step_um / 1000. #unit: mm
     scan_axis_start_mm = scan_axis_start_um / 1000. #unit: mm
     scan_axis_end_mm = scan_axis_end_um / 1000. #unit: mm
@@ -346,11 +348,11 @@ def retrieve_setup_from_MM(core,studio,df_config,debug=False):
             height_strategy = 'track'
     # the bug is back, here is a dirty patch
     height_strategy = 'tile'
-    
+
     if height_strategy == str('tile'):
         height_axis_overlap=0.1 #unit: percentage
         height_axis_range_mm = height_axis_range_um / 1000 #unit: mm
-        height_axis_ROI = y_pixels*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um 
+        height_axis_ROI = y_pixels*pixel_size_um*np.sin(30.*np.pi/180.) #unit: um
         height_axis_step_um = np.round((height_axis_ROI)*(1-height_axis_overlap),2) #unit: um
         height_axis_step_mm = height_axis_step_um / 1000  #unit: mm
         height_axis_positions = np.rint(height_axis_range_mm / height_axis_step_mm).astype(int)+1 #unit: number of positions
