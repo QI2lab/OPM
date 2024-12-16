@@ -19,8 +19,7 @@ from .data_io import time_stamp
 from .autofocus_remote_unit import manage_O3_focus
 
 
-def run_fluidic_program(r_idx,
-                        df_program,
+def run_fluidic_program(df_program,
                         flow_controller):
 
     """
@@ -109,7 +108,5 @@ def run_fluidic_program(r_idx,
 
         else:
             print(f"No valid fluidics program selected (round={r_idx}, index={index}); moving to next line")
-
-
 
     return True

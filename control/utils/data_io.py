@@ -8,6 +8,16 @@ from datetime import datetime
 import os
 import pathlib
 from pycromanager import Dataset
+import sys
+
+# Define exception for missing keys in fluidics program
+class MissingMuxKey(Exception):
+    """Custom exception for invalid MUX values."""
+    def __init__(self, value, mux_name):
+        super().__init__(f"Fluidics program source '{value}' is not a valid key in {mux_name} configuration.")
+        self.value = value
+        self.mux_name = mux_name
+
 
 def read_metadata(fname):
     """
@@ -60,29 +70,68 @@ def read_config_file(config_path):
 
     return dict_from_csv
 
-def read_fluidics_program(program_path):
+def read_fluidics_program(program_path: str = None,
+                          flow_controller=None,
+                          verbose: bool = False):
     """
-    Read fluidics program from CSV file as pandas dataframe
+    Load fluidics program saved as work book (.xlsx)
+    Each 'sheet' or 'tab' corresponds to a round.
 
-    :param program_path: Path
-        location of fluidics program
-
-    :return df_fluidics: Dataframe
-        dataframe containing fluidics program
+    Args:
+        program_path (str): Path to the fluidics .xlsx program file. Defaults to None.
+        flow_controller (Class):
+        verbose (bool, optional): Print progress statements. Defaults to False
     """
-
     try:
-        df_fluidics = pd.read_csv(program_path)
-        df_fluidics = df_fluidics[["round", "type", "pause", "source", "prime_buffer", "volume", "rate"]]
-        df_fluidics.dropna(axis=0, how='any', inplace=True)
-        df_fluidics["round"] = df_fluidics["round"].astype(int)
-        df_fluidics["pump"] = df_fluidics["pump"].astype(int)
-
-        print("Fluidics program loaded")
+        # Load the Excel file
+        excel_data = pd.ExcelFile(program_path)
     except Exception as e:
-        raise Exception("Error in loading fluidics file:\n", e)
+        print(f"Error loading program workbook, path:{program_path}\n", f"Exception: {e}")
+        sys.exit()
 
-    return df_fluidics
+    # Function to check if key is in either mux1 or mux2
+    def check_mux_key(key, mux1_config, mux2_config):
+        if key is not None and key not in mux1_config and key not in mux2_config:
+            raise MissingMuxKey(key, 'mux1 or mux2')
+
+    # Create a list to store each sheet as a DataFrame
+    program_list = []
+
+    # Iterate through each sheet name and read it into a DataFrame, then append to the list
+    for sheet_name in excel_data.sheet_names:
+        df = pd.read_excel(program_path, sheet_name=sheet_name, engine='openpyxl')
+
+        df = df[["round", "type", "pause", "source", "prime_buffer", "volume", "rate"]]
+        df.dropna(axis=0, how='any', inplace=True)
+        df["round"] = df["round"].astype(int)
+        df["type"] = df["type"].astype(str)
+        df["source"] = df["source"].astype(str).replace('none', None)
+        df["prime_buffer"] = df["prime_buffer"].astype(str).replace('none', None)
+        df["volume"] = df["volume"].astype(float)
+        df["rate"] = df["rate"].astype(float)
+        df["pause"] = df["pause"].astype(float)
+
+        # Verify program source and prime_buffer exist in the ElveFlow MUX config keys
+        try:
+            # Check 'source' column
+            df["source"].apply(lambda x: check_mux_key(x, flow_controller.config["mux1"], flow_controller.config["mux2"]))
+
+            # Check 'prime_buffer' column
+            df["prime_buffer"].apply(lambda x: check_mux_key(x, flow_controller.config["mux1"], flow_controller.config["mux2"]))
+
+        except MissingMuxKey as e:
+            print(f"{e}\n", f"Error occurred loading round {df['round'].iloc[0]}, go back and set up ElveFlow Configuration")
+            sys.exit()
+
+        program_list.append(df)
+
+    if verbose:
+        # Now program_list contains each sheet as a DataFrame with validated MUX values
+        for i, sheet in enumerate(program_list):
+            print(f"{excel_data.sheet_names[i]}")
+            print(sheet.head())  # Print the first few rows of each sheet
+
+    return program_list
 
 def write_metadata(data_dict, save_path):
     """
