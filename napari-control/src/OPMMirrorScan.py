@@ -20,6 +20,7 @@ from datetime import datetime
 # OPM control UI element            
 @magicclass(labels=False)
 class OPMMirrorScan(MagicTemplate):
+    """MagicTemplate class to control OPM mirror scan."""
 
     # initialize
     def __init__(self):
@@ -38,7 +39,7 @@ class OPMMirrorScan(MagicTemplate):
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
         self.ROI_center_x = int(1123)
-        self.ROI_center_y = int(1172)-128
+        self.ROI_center_y = int(1172)-128   # the (-128) is to offset the area of best focus from known alignment point
         self.ROI_width_x = int(1900)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
         self.ROI_corner_x = int(self.ROI_center_x -  self.ROI_width_x//2)
@@ -70,39 +71,79 @@ class OPMMirrorScan(MagicTemplate):
         self.save_path_setup = False
         self.timelapse_setup = False
 
+        # create mmcore singleton
         self.mmc = CMMCorePlus.instance()
 
+        # set mmcore circular buffer
         self.mmc.clearCircularBuffer()
         circ_buffer_mb = 16000
         self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
     # set 2D acquistion thread worker
     def _set_worker_2d(self,worker_2d):
+        """Set 2D live-mode thread worker.
+        
+        Parameters
+        ----------
+        worker_2d: thread_worker
+            Thread worker for 2D live-mode acquisition.
+        """
+
         self.worker_2d = worker_2d
         self.worker_2d_started = False
         self.worker_2d_running = False
         
     # set 3D acquistion thread worker
     def _set_worker_3d(self,worker_3d):
+        """Set 3D live-mode thread worker.
+        
+        Parameters
+        ----------
+        worker_3d: thread_worker
+            Thread worker for 3D live-mode acquisition.
+        """
+
         self.worker_3d = worker_3d
         self.worker_3d_started = False
         self.worker_3d_running = False
 
     def _create_3d_t_worker(self):
+        """Create 3D timelapse acquistion thread worker.
+        
+        This thread is only created when user requests a timelapse acq.
+        """
+
         worker_3d_t = self._acquire_3d_t_data()
         self._set_worker_3d_t(worker_3d_t)
 
     # set 3D timelapse acquistion thread worker
     def _set_worker_3d_t(self,worker_3d_t):
+        """Set 3D timelapse acquistion thread worker.
+        
+        Parameters
+        ----------
+        worker_3d_t: thread_worker
+            Thread worker for 3D timelapse acquisition.
+        """
+
         self.worker_3d_t = worker_3d_t
         self.worker_3d_t_running = False
 
     # set viewer
     def _set_viewer(self,viewer):
+        """Set napari viewer.
+        
+        Parameters
+        ----------
+        viewer: napari.viewer.Viewer
+            The napari viewer instance.
+        """
         self.viewer = viewer
 
     # create and save metadata
     def _save_metadata(self):
+        """Save metadata to CSV file."""
+
         scan_param_data = [{'root_name': str("OPM_data"),
                             'scan_type': 'galvo',
                             'theta': self.opm_tilt, 
@@ -135,6 +176,14 @@ class OPMMirrorScan(MagicTemplate):
 
     # update viewer layers
     def _update_layers(self,values):
+        """Update napari viewer.
+        
+        Parameters
+        ----------
+        values: list
+            Channels and images to update in the viewer.
+        """
+        
         current_channel = values[0]
         new_image = values[1]
         channel_names = ['405nm','488nm','561nm','635nm','730nm']
@@ -149,6 +198,8 @@ class OPMMirrorScan(MagicTemplate):
 
     @thread_worker
     def _acquire_2d_data(self):
+        """Live-mode: 2D acquisition without deskewing."""
+
         while True:
 
             # parse which channels are active
@@ -204,6 +255,7 @@ class OPMMirrorScan(MagicTemplate):
 
     @thread_worker
     def _acquire_3d_data(self):
+        """Live-mode: 3D acquisition and deskewing."""
 
         while True:
             #------------------------------------------------------------------------------------------------------------------------------------
@@ -296,6 +348,7 @@ class OPMMirrorScan(MagicTemplate):
 
     @thread_worker
     def _acquire_3d_t_data(self):
+        """Acquisition-mode: 3D + time acquisition to disk with no deskewing."""
 
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -449,11 +502,7 @@ class OPMMirrorScan(MagicTemplate):
         # self._set_mmc_laser_power()
 
     def _crop_camera(self):
-        """
-        Crop camera to GUI values
-
-        :return None:
-        """
+        """Crop camera to GUI values."""
 
         current_ROI = self.mmc.getROI()
         if not(current_ROI[2]==2304) or not(current_ROI[3]==2304):
@@ -467,11 +516,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.waitForDevice(self.camera_name)
 
     def _lasers_to_hardware(self):
-        """
-        Change lasers to hardware control
-
-        :return None:
-        """
+        """Change lasers to hardware control. """
 
         # turn all lasers off
         self.mmc.setConfig('Laser','Off')
@@ -494,11 +539,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.waitForConfig('Laser','AllOn')
 
     def _lasers_to_software(self):
-        """
-        Change lasers to software control
-
-        :return None:
-        """
+        """Change lasers to software control."""
 
         # turn all lasers off
         self.mmc.setConfig('Laser','Off')
@@ -517,11 +558,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.waitForConfig('Modulation-730','CW (constant power)')
 
     def _set_mmc_laser_power(self):
-        """
-        Change laser power
-
-        :return None:
-        """
+        """Change laser power."""
         
         self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 405-100C - PowerSetpoint (%)',float(self.channel_powers[0]))
         self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 488-150C - PowerSetpoint (%)',float(self.channel_powers[1]))
@@ -530,11 +567,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 730-30C - PowerSetpoint (%)',float(self.channel_powers[4]))
 
     def _setup_camera(self):
-        """
-        Setup camera readout and triggering for OPM
-
-        :return None:
-        """
+        """Setup camera readout and triggering for OPM."""
 
         # give camera time to change modes if necessary
         self.mmc.setConfig('Camera-Setup','ScanMode3')
@@ -559,11 +592,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
     def _enforce_DCAM_internal_trigger(self):
-        """
-        Enforce camera being in trigger = INTERNAL mode
-
-        :return None:
-        """
+        """Enforce camera being in trigger = INTERNAL mode."""
 
         # set camera to START mode upon input trigger
         self.mmc.setConfig('Camera-TriggerSource','INTERNAL')
@@ -579,11 +608,7 @@ class OPMMirrorScan(MagicTemplate):
 
             
     def _startup(self):
-        """
-        Startup OPM instrument in neutral state for all hardware
-
-        :return None:
-        """
+        """Startup OPM instrument in neutral state for all hardware."""
 
         # set lasers to 0% power and hardware control
         self._set_mmc_laser_power()
@@ -608,11 +633,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.setProperty(self.mmc.getFocusDevice(),'MotorOnOff','On')
 
     def _shutdown(self):
-        """
-        Shutdown OPM instrument in neutral state for all hardware
-
-        :return None:
-        """
+        """Shutdown OPM instrument in neutral state for all hardware."""
         
         # set lasers to 0% power and software control
         self._set_mmc_laser_power()
@@ -623,7 +644,6 @@ class OPMMirrorScan(MagicTemplate):
             self.opmdaq.stop_waveform_playback()
         self.opmdaq.reset_scan_mirror()
 
-
         self.shutter_controller.shutDown()
 
     @magicgui(
@@ -633,12 +653,12 @@ class OPMMirrorScan(MagicTemplate):
         call_button='Update exposure'
     )
     def set_exposure(self, exposure_ms=10.0):
-        """
-        Magicgui element to get camera exposure time
+        """Magicgui element to set camera exposure time.
 
-        :param exposure_ms: float
+        Parameters
+        ----------
+        exposure_ms: float
             camera exposure time
-        :return None:
         """
 
         if not(exposure_ms == self.exposure_ms):
@@ -655,18 +675,18 @@ class OPMMirrorScan(MagicTemplate):
         call_button="Update crop"
     )
     def set_ROI(self, width_x=1900,width_y=512):
-        """
-        Magicgui element to get camera ROI
+        """Magicgui element to set camera ROI.
 
-        :param uleft_corner_x: int
+        Parameters
+        ----------
+        uleft_corner_x: int
             upper left ROI x pixel
-        :param uleft_corner_y: int
+        uleft_corner_y: int
             upper left ROI y pixel
-        :param width_x: int
+        width_x: int
             ROI width in pixels
-        :param width_y: int
+        width_y: int
             ROI height in pixels = TILTED DIRECTION
-        :return None:
         """
        
         if not(int(width_x)==self.ROI_width_x) or not(int(width_y)==self.ROI_width_y):
@@ -685,15 +705,14 @@ class OPMMirrorScan(MagicTemplate):
         call_button="Update scan step"
     )
     def set_scan_step(self, scan_step=0.4):
-        """
-        Magicgui element to setup scan step
+        """Magicgui element to set scan step
 
-        :param scan_step: float
-            scan step size
-        :return None:
+        Parameters
+        ----------
+        scan_step: float
+            scan step size in microns
         """
 
-       
         if not(scan_step == self.scan_axis_step_um):
             self.scan_axis_step_um = scan_step
             self.scan_step_changed = True
@@ -711,20 +730,20 @@ class OPMMirrorScan(MagicTemplate):
         call_button='Update powers'
     )
     def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=0.0, power_730=0.0):
-        """
-        Magicgui element to get laser powers (0-100%)
+        """Magicgui element to set relative laser powers (0-100%).
 
-        :param power_405: float
+        Parameters
+        ----------
+        power_405: float
             405 nm laser power
-        :param power_488: float
+        power_488: float
             488 nm laser power
-        :param power_561: float
+        power_561: float
             561 nm laser power
-        :param power_635: float
+        power_635: float
             635 nm laser power
-        :param power_730: float
+        power_730: float
             730 nm laser power
-        :return None:
         """
 
         channel_powers = [power_405,power_488,power_561,power_635,power_730]
@@ -740,12 +759,12 @@ class OPMMirrorScan(MagicTemplate):
         active_channels = {"widget_type": "Select", "choices": ["Off","405","488","561","635","730"], "allow_multiple": True, "label": "Active channels"}
     )
     def set_active_channel(self, active_channels):
-        """
-        Magicgui element to set active lasers
+        """Magicgui element to set active lasers.
 
-        :param active_channels: list
+        Parameters
+        ----------
+        active_channels: list
             list of booleans, one for each laser channel
-        :return None:
         """
 
         states = [False,False,False,False,False]
@@ -775,6 +794,14 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal'
     )
     def laser_blanking(self,laser_blanking = True):
+        """Magicguic element to laser blanking state.
+        
+        Parameters
+        ----------
+        laser_blanking: bool, default True
+            True = blanking, False = no blanking
+        """
+
         if not(self.laser_blanking_value == laser_blanking):
             self.laser_blanking_value = laser_blanking
             self.opmdaq.set_laser_blanking(self.laser_blanking_value)
@@ -786,12 +813,12 @@ class OPMMirrorScan(MagicTemplate):
         call_button='Update scan range'
     )
     def set_galvo_sweep(self, scan_mirror_footprint_um=25.0):
-        """
-        Magicgui element to set scan footprint
+        """Magicgui element to set scan footprint.
 
-        :param scan_mirror_footprint_um: float
-            size of scan mirror sweep in microns
-        :return None:
+        Parameters
+        ----------
+        scan_mirror_footprint_um: float, default 25.0
+            size of the scan mirror footprint in microns
         """
 
         if not(scan_mirror_footprint_um==self.scan_mirror_footprint_um):
@@ -807,6 +834,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal'
     )
     def live_mode_2D(self,live_mode_2D=False):
+        """Magicgui element to control live 2D imaging."""
 
         if (np.any(self.channel_states)):
             if not(self.worker_3d_running) and not(self.worker_3d_t_running):
@@ -844,6 +872,11 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal'
     )
     def live_mode_3D(self,live_mode_3D):
+        """Magicgui element to start/stop live-mode 3D imaging.
+        
+        This function has to wait for an image to be yielded before it can stop the thread. 
+        It can be slow to respond if you are taking a large galvo sweep with multiple colors.
+        """
 
         if (np.any(self.channel_states)):
             if not(self.worker_2d_running) and not(self.worker_3d_t_running):
@@ -884,6 +917,15 @@ class OPMMirrorScan(MagicTemplate):
         self.n_timepoints = n_timepoints
         self.wait_time = wait_time
         self.timelapse_setup = True
+        """Set timelapse parameters.
+        
+        Parameters
+        ----------
+        n_timepoints: int, default 400
+            number of timepoints to acquire
+        wait_time: float, default 0
+            time delay between timepoints in seconds. 0 is continuous imaging.
+        """
 
     # set filepath for saving data
     @magicgui(
@@ -892,9 +934,16 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal', 
         call_button="Set"
     )
-    def set_save_path(self, save_path=''):
+    def set_save_path(self, save_path=""):
         self.save_path = Path(save_path)
         self.save_path_setup = True
+        """Magicgui element to set the filepath for saving data.
+        
+        Parameters
+        ----------
+        save_path: str, default ""
+            path to save data
+        """
 
     # control timelapse 3D volume (hardware triggering)
     @magicgui(
@@ -903,6 +952,13 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal'
     )
     def timelapse_mode_3D(self,timelapse_mode_3D):
+        """Magicui element to start 3D timelapse acquisition.
+        
+        
+        This function currently cannot be stopped once started.
+        """
+
+
         if not(self.worker_2d_running) and not(self.worker_3d_running):
             if (self.save_path_setup and self.timelapse_setup):
                 self.worker_3d_t.start()
@@ -919,6 +975,13 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal'
     )
     def shutter_change(self,shutter_change):
+        """Magicgui element to toggle the alignment laser shutter.
+        
+        Parameters
+        ----------
+        shutter_change: bool
+            True = on, False = off
+        """
             if self.shutter_state == 0:
                 self.shutter_controller.openShutter()
                 self.shutter_state = 1
@@ -931,6 +994,13 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal'
     )
     def autofocus_O2O3(self,autofocus_O2O3):
+        """Magicgui element to autofocus the O2-O3 stage.
+        
+        Parameters
+        ----------
+        autofocus_O2O3: bool
+            True = run autofocus, False = do not run autofocus
+        """
         if not(self.worker_2d_running) and not(self.worker_3d_running) and not(self.worker_3d_t_running):
             if self.DAQ_running:
                 self.opmdaq.stop_waveform_playback()
