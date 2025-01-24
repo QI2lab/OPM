@@ -41,6 +41,10 @@ def main(path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_config
     worker_3d.yielded.connect(instrument_control_widget._update_layers)
     instrument_control_widget._set_worker_3d(worker_3d)
 
+    ao_worker_3d = instrument_control_widget._optimize_AO_3d()
+    ao_worker_3d.yielded.connect(instrument_control_widget._update_layers)
+    instrument_control_widget._set_ao_worker_3d(ao_worker_3d)
+
     instrument_control_widget._create_3d_t_worker()
 
     viewer.window.add_dock_widget(instrument_control_widget,name='Instrument control')

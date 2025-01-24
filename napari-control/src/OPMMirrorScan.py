@@ -79,7 +79,6 @@ class OPMMirrorScan(MagicTemplate):
         circ_buffer_mb = 16000
         self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
-    # set 2D acquistion thread worker
     def _set_worker_2d(self,worker_2d):
         """Set 2D live-mode thread worker.
         
@@ -93,7 +92,6 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_2d_started = False
         self.worker_2d_running = False
         
-    # set 3D acquistion thread worker
     def _set_worker_3d(self,worker_3d):
         """Set 3D live-mode thread worker.
         
@@ -107,6 +105,19 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_3d_started = False
         self.worker_3d_running = False
 
+    def _set_ao_worker_3d(self,ao_worker_3d):
+        """Set 3D adaptive optics optimization thread worker.
+        
+        Parameters
+        ----------
+        ao_worker_3d: thread_worker
+            Thread worker for 3D live-mode acquisition.
+        """
+
+        self.ao_worker_3d = ao_worker_3d
+        self.ao_worker_3d_started = False
+        self.ao_worker_3d_running = False
+
     def _create_3d_t_worker(self):
         """Create 3D timelapse acquistion thread worker.
         
@@ -116,7 +127,6 @@ class OPMMirrorScan(MagicTemplate):
         worker_3d_t = self._acquire_3d_t_data()
         self._set_worker_3d_t(worker_3d_t)
 
-    # set 3D timelapse acquistion thread worker
     def _set_worker_3d_t(self,worker_3d_t):
         """Set 3D timelapse acquistion thread worker.
         
@@ -129,7 +139,6 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_3d_t = worker_3d_t
         self.worker_3d_t_running = False
 
-    # set viewer
     def _set_viewer(self,viewer):
         """Set napari viewer.
         
@@ -140,7 +149,6 @@ class OPMMirrorScan(MagicTemplate):
         """
         self.viewer = viewer
 
-    # create and save metadata
     def _save_metadata(self):
         """Save metadata to CSV file."""
 
@@ -174,7 +182,6 @@ class OPMMirrorScan(MagicTemplate):
         
         write_metadata(scan_param_data[0], self.output_dir_path / Path('scan_metadata.csv'))
 
-    # update viewer layers
     def _update_layers(self,values):
         """Update napari viewer.
         
@@ -183,7 +190,7 @@ class OPMMirrorScan(MagicTemplate):
         values: list
             Channels and images to update in the viewer.
         """
-        
+
         current_channel = values[0]
         new_image = values[1]
         channel_names = ['405nm','488nm','561nm','635nm','730nm']
@@ -252,82 +259,94 @@ class OPMMirrorScan(MagicTemplate):
                 time.sleep(.05)
                 yield c, raw_image_2d
 
+    
+    def _execute_3d_sweep(self):
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+        # parse which channels are active
+        active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
+        n_active_channels = len(active_channel_indices)
+            
+        if self.debug:
+            print("%d active channels: " % n_active_channels, end="")
+            for ind in active_channel_indices:
+                print("%s " % self.channel_labels[ind], end="")
+            print("")
+
+        n_timepoints = 1
+
+        if self.ROI_changed:
+            self._crop_camera()
+            self.ROI_changed = False
+
+        # set exposure time
+        if self.exposure_changed:
+            self.mmc.setExposure(self.exposure_ms)
+            self.exposure_changed = False
+
+        if self.powers_changed:
+            self._set_mmc_laser_power()
+            self.powers_changed = False
+        
+        if self.channels_changed or self.footprint_changed or not(self.DAQ_running) or self.scan_step_changed:
+            if self.DAQ_running:
+                self.opmdaq.stop_waveform_playback()
+                self.DAQ_running = False
+            self.opmdaq.set_laser_blanking(self.laser_blanking_value)
+            self.opmdaq.set_scan_type('mirror')
+            self.opmdaq.set_channels_to_use(self.channel_states)
+            self.opmdaq.set_interleave_mode(True)
+            scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
+            self.opmdaq.generate_waveforms()
+            self.channels_changed = False
+            self.footprint_changed = False
+
+        raw_image_stack = np.zeros([self.do_ind[-1],scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
+        
+        if self.debug:
+            # output experiment info
+            print("Scan axis range: %.1f um, Scan axis step: %.1f nm, Number of galvo positions: %d" % 
+                (self.scan_mirror_footprint_um,  self.scan_axis_step_um * 1000, scan_steps))
+            print('Time points:  ' + str(n_timepoints))
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------End setup of scan parameters----------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------------Start acquisition---------------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+        self.opmdaq.start_waveform_playback()
+        self.DAQ_running = True
+        # run hardware triggered acquisition
+        self.mmc.startSequenceAcquisition(int(n_active_channels*scan_steps),0,True)
+        for z in range(scan_steps):
+            for c in active_channel_indices:
+                while self.mmc.getRemainingImageCount()==0:
+                    pass
+                raw_image_stack[c,z,:] = self.mmc.popNextImage()
+        self.mmc.stopSequenceAcquisition()
+        self.opmdaq.stop_waveform_playback()
+        self.DAQ_running = False
+
+        return active_channel_indices, raw_image_stack
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #-----------------------------------------------------End acquisition----------------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
 
     @thread_worker
     def _acquire_3d_data(self):
         """Live-mode: 3D acquisition and deskewing."""
 
         while True:
-            #------------------------------------------------------------------------------------------------------------------------------------
-            #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
-            #------------------------------------------------------------------------------------------------------------------------------------
-            # parse which channels are active
-            active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
-            n_active_channels = len(active_channel_indices)
-                
-            if self.debug:
-                print("%d active channels: " % n_active_channels, end="")
-                for ind in active_channel_indices:
-                    print("%s " % self.channel_labels[ind], end="")
-                print("")
 
-            n_timepoints = 1
-
-            if self.ROI_changed:
-                self._crop_camera()
-                self.ROI_changed = False
-
-            # set exposure time
-            if self.exposure_changed:
-                self.mmc.setExposure(self.exposure_ms)
-                self.exposure_changed = False
-
-            if self.powers_changed:
-                self._set_mmc_laser_power()
-                self.powers_changed = False
-            
-            if self.channels_changed or self.footprint_changed or not(self.DAQ_running) or self.scan_step_changed:
-                if self.DAQ_running:
-                    self.opmdaq.stop_waveform_playback()
-                    self.DAQ_running = False
-                self.opmdaq.set_laser_blanking(self.laser_blanking_value)
-                self.opmdaq.set_scan_type('mirror')
-                self.opmdaq.set_channels_to_use(self.channel_states)
-                self.opmdaq.set_interleave_mode(True)
-                scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
-                self.opmdaq.generate_waveforms()
-                self.channels_changed = False
-                self.footprint_changed = False
-
-            raw_image_stack = np.zeros([self.do_ind[-1],scan_steps,self.ROI_width_y,self.ROI_width_x]).astype(np.uint16)
-            
-            if self.debug:
-                # output experiment info
-                print("Scan axis range: %.1f um, Scan axis step: %.1f nm, Number of galvo positions: %d" % 
-                    (self.scan_mirror_footprint_um,  self.scan_axis_step_um * 1000, scan_steps))
-                print('Time points:  ' + str(n_timepoints))
-
-            #------------------------------------------------------------------------------------------------------------------------------------
-            #----------------------------------------------End setup of scan parameters----------------------------------------------------------
-            #------------------------------------------------------------------------------------------------------------------------------------
-
-
-            #------------------------------------------------------------------------------------------------------------------------------------
-            #----------------------------------------------Start acquisition and deskew----------------------------------------------------------
-            #------------------------------------------------------------------------------------------------------------------------------------
-
-            self.opmdaq.start_waveform_playback()
-            self.DAQ_running = True
-            # run hardware triggered acquisition
-            self.mmc.startSequenceAcquisition(int(n_active_channels*scan_steps),0,True)
-            for z in range(scan_steps):
-                for c in active_channel_indices:
-                    while self.mmc.getRemainingImageCount()==0:
-                        pass
-                    raw_image_stack[c,z,:] = self.mmc.popNextImage()
-            self.mmc.stopSequenceAcquisition()
-            self.opmdaq.stop_waveform_playback()
-            self.DAQ_running = False
+            # execute sweep and return data
+            active_channel_indices, raw_image_stack = self._execute_3d_sweep()
 
             # deskew parameters
             deskew_parameters = np.empty([3])
@@ -336,15 +355,73 @@ class OPMMirrorScan(MagicTemplate):
             deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
 
             for c in active_channel_indices:
-                #deskewed_image = deskew(np.flipud(raw_image_stack[c,:]),*deskew_parameters).astype(np.uint16)  
                 deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)  
                 yield c, deskewed_image
 
             del raw_image_stack
 
-            #------------------------------------------------------------------------------------------------------------------------------------
-            #-----------------------------------------------End acquisition and deskew-----------------------------------------------------------
-            #------------------------------------------------------------------------------------------------------------------------------------
+    @thread_worker
+    def _optimize_AO_3d(self):
+        """Live-mode: optimize AO."""
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------Begin setup of AO opt parameters------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+        """Setup AO parameters here."""
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #-----------------------------------------------End setup of AO opt parameters-------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #----------------------------------------------------Begin AO optimization-----------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
+
+        """Setup loops for sensorless AO optimizaiton."""
+
+        """perturb mirror for given mode and delta"""
+
+        """acquire 3D data and max project"""
+        # execute sweep and return data
+        active_channel_indices, raw_image_stack = self._execute_3d_sweep()
+
+        # deskew data
+        # deskew parameters
+        deskew_parameters = np.empty([3])
+        deskew_parameters[0] = self.opm_tilt                 # (degrees)
+        deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
+        deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
+
+        max_z_deskewed_images = []
+        for c in active_channel_indices:
+            deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
+            max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
+
+            yield c, deskewed_image
+
+        del raw_image_stack
+        max_z_deskewed_images = np.asarray(max_z_deskewed_images)
+
+        """STEVEN: The max_z_deskewed_images contains all of the channels requested. To start, I think you should only optimize on one channel, 
+        so you can squeeze the channel dimension and go from there...
+        
+        `max_z_deskewed_image = np.squeeze(max_z_deskewed_images)`
+        """
+    
+        """Calculate metric."""
+
+
+        """After looping through all mirror pertubations for this mode, decide if mirror is updated"""
+
+        """Loop back to top and do the next mode until all modes are done"""
+
+        """Loop back to top and do the next iteration"""
+
+        #------------------------------------------------------------------------------------------------------------------------------------
+        #---------------------------------------------------End AO optimization--------------------------------------------------------------
+        #------------------------------------------------------------------------------------------------------------------------------------
 
     @thread_worker
     def _acquire_3d_t_data(self):
@@ -827,7 +904,6 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.footprint_changed = False
 
-    # control continuous 2D imaging (software triggering)
     @magicgui(
         auto_call=True,
         live_mode_2D={"widget_type": "PushButton", "label": 'Start/Stop Live (2D)'},
@@ -864,8 +940,6 @@ class OPMMirrorScan(MagicTemplate):
         else:
             raise Exception('Set at least one active channel before starting.')
     
-
-    # control continuous 3D volume (hardware triggering)
     @magicgui(
         auto_call=True,
         live_mode_3D={"widget_type": "PushButton", "label": 'Start/Stop live (3D)'},
@@ -906,7 +980,50 @@ class OPMMirrorScan(MagicTemplate):
         else:
             raise Exception('Set at least one active channel before starting.')
 
-    # set timelapse parameters
+
+    @magicgui(
+        auto_call=True,
+        ao_opt_3D={"widget_type": "PushButton", "label": 'Start AO opt. (3D)'},
+        layout='horizontal'
+    )
+    def ao_opt_3D(self,ao_opt_3D):
+        """Magicgui element to start/stop AO optimization.
+        
+        This function has to wait for an image to be yielded before it can stop the thread. 
+        It can be slow to respond if you are taking a large galvo sweep with multiple colors.
+        """
+
+        if (np.any(self.channel_states)):
+            if not(self.worker_2d_running) and not (self.worker_3d_running) and not(self.worker_3d_t_running):
+                self.galvo_scan = True
+                if self.ao_worker_3d_running:
+                    self.ao_worker_3d.pause()
+                    self.ao_worker_3d_running = False
+                    if self.DAQ_running:
+                        self.opmdaq.stop_waveform_playback()
+                        self.DAQ_running = False
+                    self.opmdaq.reset_scan_mirror()
+                else:
+                    if not(self.ao_worker_3d_started):
+                        self.ao_worker_3d.start()
+                        self.ao_worker_3d_started = True
+                        self.ao_worker_3d_running = True
+                    else:
+                        self.ao_worker_3d.resume()
+                        self.ao_worker_3d_running = True
+            else:
+                if self.worker_2d_running:
+                    raise Exception('Stop live 2D acquisition first.')
+                elif self.worker_3d_running:
+                    raise Exception('Stop live 3D acquisition first.')
+                elif self.worker_3d_t_running:
+                    raise Exception('Iterative acquisition in process.')
+                else:
+                    raise Exception('Unknown error.')
+        else:
+            raise Exception('Set at least one active channel before starting.')
+
+
     @magicgui(
         auto_call=True,
         n_timepoints={"widget_type": "SpinBox", "min": 0, "max": 10000, "label": 'Timepoints to acquire'},
@@ -945,7 +1062,6 @@ class OPMMirrorScan(MagicTemplate):
             path to save data
         """
 
-    # control timelapse 3D volume (hardware triggering)
     @magicgui(
         auto_call=True,
         timelapse_mode_3D={"widget_type": "PushButton", "label": 'Start acquistion'},
@@ -957,7 +1073,6 @@ class OPMMirrorScan(MagicTemplate):
         
         This function currently cannot be stopped once started.
         """
-
 
         if not(self.worker_2d_running) and not(self.worker_3d_running):
             if (self.save_path_setup and self.timelapse_setup):
