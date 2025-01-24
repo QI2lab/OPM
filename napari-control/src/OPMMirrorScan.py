@@ -1,3 +1,10 @@
+#!/usr/bin/python
+"""MagicTemplate class to control OPM mirror scan.
+
+Last updated: 2025.01.24 by Douglas Shepherd
+"""
+
+
 from pymmcore_plus import CMMCorePlus
 from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
@@ -45,10 +52,10 @@ class OPMMirrorScan(MagicTemplate):
         self.ROI_corner_x = int(self.ROI_center_x -  self.ROI_width_x//2)
         self.ROI_corner_y = int(self.ROI_center_y -  self.ROI_width_y//2)
 
-        # O3 piezo stage name
+        # O3 piezo stage name. Needs to match the name in MM config.
         self.O3_stage_name='MCL NanoDrive Z Stage'
 
-        # shutter ID
+        # shutter ID. Obtained from Picard software.
         self.shutter_id = 712
 
         # default save path
