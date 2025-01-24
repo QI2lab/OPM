@@ -12,7 +12,6 @@ douglas.shepherd@asu.edu
 '''
 
 import re
-from npy2bdv import BdvEditor
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -93,56 +92,6 @@ def write_metadata(data_dict, save_path):
     """
 
     pd.DataFrame([data_dict]).to_csv(save_path)
-
-def return_affine_xform(path_to_xml,r_idx,y_idx,z_idx,total_z_pos):
-
-    """
-    :param path_to_xml: Path
-        path to BDV XML. BDV H5 must be present for loading
-    :param r_idx: integer
-        round index
-    :param t_idx: integer
-        time index
-    :param y_idx: integer 
-        y tile index
-    :param z_idx: integer 
-        z tile index
-    :return data_numpy: NDarray
-        4D numpy array of all affine transforms
-    """ 
-
-    bdv_editor = BdvEditor(str(path_to_xml))
-    tile_idx = (y_idx+z_idx)+(y_idx*(total_z_pos-1))
-
-    affine_xforms = []
-    read_affine_success = True
-    affine_idx = 0
-    while read_affine_success:
-        try:
-            affine_xform = bdv_editor.read_affine(time=r_idx,illumination=0,channel=0,tile=tile_idx,angle=0,index=affine_idx)
-        except:
-            read_affine_success = False
-        else:
-            affine_xforms.append(affine_xform)
-            affine_idx = affine_idx + 1
-            read_affine_success = True
-
-    return affine_xforms
-
-def stitch_data(path_to_xml,iterative_flag):
-
-    """
-    :param path_to_xml: Path
-        path to BDV XML. BDV H5 must be present for loading
-    :param iterative_flag: Bool
-        flag if multiple rounds need to be aligned
-    """
-
-
-    # TO DO: 1. write either pyimagej bridge + macro OR call FIJI/BigStitcher in headless mode.
-    #        2. fix flipped x-axis between Python and FIJI. Easier to flip data in Python than deal with
-    #           annoying affine that flips data.
-
 
 def return_data_from_zarr_to_numpy(dataset, time_idx, channel_idx, num_images, y_pixels,x_pixels):
     """

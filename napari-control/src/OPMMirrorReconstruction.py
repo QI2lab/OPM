@@ -56,6 +56,10 @@ class OPMMirrorReconstruction(MagicTemplate):
         self._create_batch_processing_worker()
         self._create_tiff_conversion_worker()
         self.z_downsample = 1
+        
+        self.background = 100
+        self.ADU_to_e = .24
+        self.QE = [.75,.9,.95,.85,.65]
 
     # set viewer
     def _set_viewer(self,viewer):
@@ -73,8 +77,7 @@ class OPMMirrorReconstruction(MagicTemplate):
         scan_step = df_metadata['scan_step']
         pixel_size = df_metadata['pixel_size']
         num_t = df_metadata['num_t']
-        num_y = df_metadata['num_y']
-        num_z  = df_metadata['num_z']
+        time_delay_s = df_metadata['time_delay']
         num_ch = df_metadata['num_ch']
         num_images = df_metadata['scan_axis_positions']
         y_pixels = df_metadata['y_pixels']
@@ -139,16 +142,13 @@ class OPMMirrorReconstruction(MagicTemplate):
         blosc.set_nthreads(20)
         opm_data = zarr.open(str(zarr_output_path), 
                              mode="w", 
-                             shape=(num_t, num_ch, nz, ny, nx), 
-                             chunks=(1, num_ch, int(nz), int(ny), int(nx)), 
+                             shape=(num_t, num_ch, nz//z_down_sample, ny, nx), 
+                             chunks=(1, 1, int(nz//z_down_sample), int(ny), int(nx)//4), 
                              dimension_separator='/',
                              compressor = compressor,
                              dtype=np.uint16)
-        opm_data_np = np.zeros((num_t, num_ch, nz, ny, nx),dtype=np.uint16)
         
-        # if decon is requested, try to import microvolution wrapper or clij2-fft library
         if self.decon:
-            #from src.utils.opm_psf import generate_skewed_psf
             from src.utils.image_post_processing import lr_deconvolution
 
             skewed_psf = []
@@ -158,33 +158,36 @@ class OPMMirrorReconstruction(MagicTemplate):
 
         if self.match_histograms:
             reference_images = np.zeros((num_ch, nz, ny, nx), dtype=np.uint16)
-
-        full_data = np.array(dataset_zarr)
         
         for t_idx in trange(num_t,desc='t',position=0):
             for ch_idx in trange(n_active_channels,desc='c',position=1, leave=False):
 
-                raw_data = full_data[t_idx,ch_idx,0:num_images,:]
+                raw_data = np.array(dataset_zarr[t_idx,ch_idx,0:num_images,:]).astype(np.float32)
+                raw_data = raw_data - self.background
+                raw_data[raw_data<0.]=0
+                raw_data = ((raw_data * self.ADU_to_e) / self.QE[ch_idx]) .astype(np.uint16)
 
                 # pull data stack into memory
                 if self.debug:
                     print('Process timepoint '+str(t_idx)+'; channel '+str(ch_idx) +'.')
-                #raw_data = return_data_from_zarr_to_numpy(dataset_zarr, t_idx, ch_idx, num_images, y_pixels,x_pixels)
 
                 # run deconvolution on deskewed image
                 if self.decon:
                     if self.debug:
                         print('Deconvolve.')
-                    decon = lr_deconvolution(raw_data,skewed_psf[ch_idx],iterations=10)
+                    psf = np.asarray(skewed_psf[ch_idx],dtype=np.float32).copy()
+                    stride = int(np.round(scan_step/.4,0))
+                    psf_strided = psf[::stride,:,:]
+                    psf_strided = psf_strided / np.sum(psf_strided,axis=(0,1,2))
+                    decon = lr_deconvolution(raw_data,psf_strided,iterations=100)
+                    del psf, psf_strided
                 else:
                     decon = raw_data
-                    pass
                 del raw_data
 
                 # deskew
                 if self.debug:
                     print('Deskew.')
-                #deskewed = deskew(np.flipud(decon),*deskew_parameters)
                 deskewed = deskew(decon,*deskew_parameters)
                 del decon
 
@@ -219,13 +222,14 @@ class OPMMirrorReconstruction(MagicTemplate):
                 else:
                     deskewed_matched = deskewed_downsample
                 del deskewed_downsample
-
-                opm_data_np[t_idx,ch_idx,:] = deskewed_matched.astype(np.uint16)
+                
+                opm_data[t_idx,ch_idx,:] = deskewed_matched.astype(np.uint16)
 
                 opm_data.attrs['dx_um'] = deskewed_x_pixel
                 opm_data.attrs['dy_um'] = deskewed_y_pixel
-                opm_data.attrs['dz_um'] = deskewed_z_pixel
+                opm_data.attrs['dz_um'] = deskewed_z_pixel * z_down_sample
                 opm_data.attrs['volume_time_ms'] = np.round(num_images * exposure_ms,3)
+                opm_data.attrs['volume_interval_s'] = time_delay_s
                 opm_data.attrs['405_state'] = chan_405_active
                 opm_data.attrs['488_state'] = chan_488_active
                 opm_data.attrs['561_state'] = chan_561_active
@@ -241,17 +245,22 @@ class OPMMirrorReconstruction(MagicTemplate):
 
         # exit
         self.dataset_zarr = zarr_output_path
-        self.scale = [1,deskewed_z_pixel,deskewed_y_pixel,deskewed_x_pixel]
-        opm_data[:] = opm_data_np[:]
+        self.scale = [1,deskewed_z_pixel* z_down_sample,deskewed_y_pixel,deskewed_x_pixel]
 
     @thread_worker
     def _batch_process_data(self):
 
         for path in Path(self.root_path).iterdir():
-            if path.is_dir():
-                print(time_stamp(),'Processing path: '+str(path.name))
-                self.data_path = path
+            for sub_path in Path(path).iterdir():
+                test_metadata_path = sub_path / Path('scan_metadata.csv')
 
+                if test_metadata_path.exists():
+                    self.data_path = sub_path
+                else:
+                    self.data_path = path
+                    
+                print(time_stamp(),'Processing path: '+str(self.data_path.name))
+                
                 # create parameter array from scan parameters saved by acquisition code
                 df_metadata = read_metadata(self.data_path / Path('scan_metadata.csv'))
                 root_name = df_metadata['root_name']
@@ -261,8 +270,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                 pixel_size = df_metadata['pixel_size']
                 exposure_ms = df_metadata['exposure_ms']
                 num_t = df_metadata['num_t']
-                num_y = df_metadata['num_y']
-                num_z  = df_metadata['num_z']
+                time_delay_s = df_metadata['time_delay']
                 num_ch = df_metadata['num_ch']
                 num_images = df_metadata['scan_axis_positions']
                 y_pixels = df_metadata['y_pixels']
@@ -308,6 +316,9 @@ class OPMMirrorReconstruction(MagicTemplate):
 
                 # create name for zarr directory
                 zarr_output_path = output_dir_path / Path('OPM_processed.zarr')
+                
+                if zarr_output_path.exists():
+                    continue
 
                 # calculate size of one volume
                 # change step size from physical space (nm) to camera space (pixels)
@@ -322,17 +333,21 @@ class OPMMirrorReconstruction(MagicTemplate):
                 nx = np.int64(x_pixels)                                           # (pixels)
 
                 # create and open zarr file
-                compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
+                compressor = Blosc(cname='zstd', clevel=5, shuffle=Blosc.BITSHUFFLE)
                 blosc.use_threads=True
                 blosc.set_nthreads(20)
+                if z_down_sample==1:
+                    nz_on_disk = int(nz)
+                else:
+                    nz_on_disk = int(nz / int(z_down_sample))
+                
                 opm_data = zarr.open(str(zarr_output_path), 
                                     mode="w", 
-                                    shape=(num_t, num_ch, nz, ny, nx), 
-                                    chunks=(1, num_ch, int(nz), int(ny), int(nx)), 
+                                    shape=(num_t, num_ch, nz_on_disk, ny, nx), 
+                                    chunks=(1, 1, 1, int(ny), int(nx)), 
                                     dimension_separator='/',
                                     compressor = compressor,
                                     dtype=np.uint16)
-                opm_data_np = np.zeros((num_t, num_ch, nz, ny, nx),dtype=np.uint16)
                 
                 # if decon is requested, try to import microvolution wrapper or clij2-fft library
                 if self.decon:
@@ -346,13 +361,14 @@ class OPMMirrorReconstruction(MagicTemplate):
 
                 if self.match_histograms:
                     reference_images = np.zeros((num_ch, nz, ny, nx), dtype=np.uint16)
-
-                full_data = np.array(dataset_zarr)
                 
                 for t_idx in trange(num_t,desc='t',position=0):
                     for ch_idx in trange(n_active_channels,desc='c',position=1, leave=False):
 
-                        raw_data = full_data[t_idx,ch_idx,0:num_images,:]
+                        raw_data = np.asarray(dataset_zarr[t_idx,ch_idx,0:num_images,:]).astype(np.float32)
+                        raw_data = raw_data - self.background
+                        raw_data[raw_data<0.] = 0
+                        raw_data = ((raw_data * self.ADU_to_e)/self.QE[ch_idx]).astype(np.uint16)
 
                         # pull data stack into memory
                         if self.debug:
@@ -363,7 +379,11 @@ class OPMMirrorReconstruction(MagicTemplate):
                         if self.decon:
                             if self.debug:
                                 print('Deconvolve.')
-                            decon = lr_deconvolution(raw_data,skewed_psf[ch_idx],iterations=10)
+                            psf = np.asarray(skewed_psf[ch_idx],dtype=np.float32)
+                            stride = int(np.round(scan_step/.4,0))
+                            psf_strided = psf[::stride,:,:]
+                            psf_strided = psf_strided / np.sum(psf_strided,axis=(0,1,2))
+                            decon = lr_deconvolution(raw_data,psf_strided,iterations=100)
                         else:
                             decon = raw_data
                             pass
@@ -408,7 +428,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                             deskewed_matched = deskewed_downsample
                         del deskewed_downsample
 
-                        opm_data_np[t_idx,ch_idx,:] = deskewed_matched.astype(np.uint16)
+                        opm_data[t_idx,ch_idx,:] = deskewed_matched.astype(np.uint16)
                     
                         # free up memory
                         del deskewed_matched
@@ -418,22 +438,24 @@ class OPMMirrorReconstruction(MagicTemplate):
                             print('Write data into Zarr container')
 
                 # exit
-                self.dataset_zarr = zarr_output_path
-                self.scale = [1,deskewed_z_pixel,deskewed_y_pixel,deskewed_x_pixel]
-                opm_data[:] = opm_data_np[:]
+                self.scale = [1,deskewed_z_pixel* z_down_sample,deskewed_y_pixel,deskewed_x_pixel]
+               # opm_data[:] = opm_data_np[:]
 
-                opm_data.attrs['dx_um'] = deskewed_x_pixel
-                opm_data.attrs['dy_um'] = deskewed_y_pixel
-                opm_data.attrs['dz_um'] = deskewed_z_pixel
+                opm_data.attrs['dx_um'] = np.round(deskewed_x_pixel,3)
+                opm_data.attrs['dy_um'] = np.round(deskewed_y_pixel,3)
+                opm_data.attrs['dz_um'] = np.round(deskewed_z_pixel * z_down_sample,3)
+                opm_data.attrs['exp_ms'] = np.round(exposure_ms,2)
                 opm_data.attrs['volume_time_ms'] = np.round(num_images * exposure_ms,3)
+                opm_data.attrs['volume_interval_s'] = np.round(time_delay_s,2)
                 opm_data.attrs['405_state'] = chan_405_active
                 opm_data.attrs['488_state'] = chan_488_active
                 opm_data.attrs['561_state'] = chan_561_active
                 opm_data.attrs['635_state'] = chan_635_active
                 opm_data.attrs['730_state'] = chan_730_active
 
-                del opm_data, opm_data_np   
-                gc.collect()  
+                del opm_data   
+                gc.collect() 
+        print(time_stamp(),'Finished.') 
 
     @thread_worker
     def _tiff_convert_data(self):
@@ -452,31 +474,63 @@ class OPMMirrorReconstruction(MagicTemplate):
                 tiff_output_path = input_dir_path / Path('OPM_processed_tiff')
                 tiff_output_path.mkdir(parents=True, exist_ok=True)
 
-                filename = 'opm_data_'+str(path.name)+'.ome.tiff'
-                filename_path = tiff_output_path / Path(filename)
-                with TiffWriter(filename_path, bigtiff=True) as tif:
-                    metadata={'axes': 'TZCYX',
-                            'SignificantBits': 16,
-                            'TimeIncrement': data_zarr.attrs['volume_time_ms'],
-                            'TimeIncrementUnit': 'ms',
-                            'PhysicalSizeX': data_zarr.attrs['dx_um'],
-                            'PhysicalSizeXUnit': 'µm',
-                            'PhysicalSizeY': data_zarr.attrs['dy_um'],
-                            'PhysicalSizeYUnit': 'µm',
-                            'PhysicalSizeY': data_zarr.attrs['dz_um'],
-                            'PhysicalSizeYUnit': 'µm',
-                            }
-                    options = dict(compression='zlib',
-                                    compressionargs={'level': 8},
-                                    predictor=True,
-                                    photometric='minisblack',
-                                    resolutionunit='CENTIMETER',
-                                    )
-                    tif.write(np.swapaxes(np.array(data_zarr),1,2),
-                                resolution=(1e4 / data_zarr.attrs['dy_um'],
-                                            1e4 / data_zarr.attrs['dx_um']),
-                                **options,
-                                metadata=metadata)
+                max_tiff_output_path = tiff_output_path / Path('max_projections')
+                max_tiff_output_path.mkdir(parents=True, exist_ok=True)
+                
+                for t_idx in trange(data_zarr.shape[0],desc='t'):
+                    # filename = 'opm_data_'+str(path.name)+'_t'+str(t_idx).zfill(4)+'.ome.tiff'
+                    # filename_path = tiff_output_path / Path(filename)
+                    # if not(filename_path.exists()):
+                    #     with TiffWriter(filename_path, bigtiff=True) as tif:
+                    #         metadata={'axes': 'ZCYX',
+                    #                 'SignificantBits': 16,
+                    #                 #'TimeIncrement': data_zarr.attrs['volume_time_ms'],
+                    #                 #'TimeIncrementUnit': 'ms',
+                    #                 'PhysicalSizeX': data_zarr.attrs['dx_um'],
+                    #                 'PhysicalSizeXUnit': 'µm',
+                    #                 'PhysicalSizeY': data_zarr.attrs['dy_um'],
+                    #                 'PhysicalSizeYUnit': 'µm',
+                    #                 'PhysicalSizeZ': data_zarr.attrs['dz_um'],
+                    #                 'PhysicalSizeZUnit': 'µm',
+                    #                 }
+                    #         options = dict(compression='zlib',
+                    #                         compressionargs={'level': 8},
+                    #                         predictor=True,
+                    #                         photometric='minisblack',
+                    #                         resolutionunit='CENTIMETER',
+                    #                         tile=(64,64),
+                    #                         )
+                    #         tif.write(np.swapaxes(np.array(data_zarr[t_idx,:]),0,1),
+                    #                     resolution=(1e4 / data_zarr.attrs['dy_um'],
+                    #                                 1e4 / data_zarr.attrs['dx_um']),
+                    #                     **options,
+                    #                     metadata=metadata)
+                        
+                    max_filename = 'max_z_opm_data_'+str(path.name)+'_t'+str(t_idx).zfill(4)+'.ome.tiff'
+                    max_filename_path = max_tiff_output_path / Path(max_filename)
+                    if not(max_filename_path.exists()):
+                        with TiffWriter(max_filename_path, bigtiff=True) as tif:
+                            metadata={'axes': 'CYX',
+                                    'SignificantBits': 16,
+                                    #'TimeIncrement': data_zarr.attrs['volume_time_ms'],
+                                    #'TimeIncrementUnit': 'ms',
+                                    'PhysicalSizeX': data_zarr.attrs['dx_um'],
+                                    'PhysicalSizeXUnit': 'µm',
+                                    'PhysicalSizeY': data_zarr.attrs['dy_um'],
+                                    'PhysicalSizeYUnit': 'µm'
+                                    }
+                            options = dict(compression='zlib',
+                                            compressionargs={'level': 8},
+                                            predictor=True,
+                                            photometric='minisblack',
+                                            resolutionunit='CENTIMETER',
+                                            tile=(64,64),
+                                            )
+                            tif.write(np.max(np.swapaxes(np.array(data_zarr[t_idx,:]),0,1),0),
+                                        resolution=(1e4 / data_zarr.attrs['dy_um'],
+                                                    1e4 / data_zarr.attrs['dx_um']),
+                                        **options,
+                                        metadata=metadata)  
                             
     def _create_processing_worker(self):
         worker_processing = self._process_data()

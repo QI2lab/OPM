@@ -55,7 +55,7 @@ class OPMMirrorScan(MagicTemplate):
 
         self.channel_labels = ["405", "488", "561", "635", "730"]
         self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
-        self.laser_blanking_value = False
+        self.laser_blanking_value = True
 
         self.debug=False
 
@@ -172,7 +172,7 @@ class OPMMirrorScan(MagicTemplate):
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
                     self.opmdaq.reset_scan_mirror()
-                self.opmdaq.set_laser_blanking(False)
+                self.opmdaq.set_laser_blanking(self.laser_blanking_value)
                 self.opmdaq.set_scan_type('2D')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
@@ -238,7 +238,7 @@ class OPMMirrorScan(MagicTemplate):
                 if self.DAQ_running:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
-                self.opmdaq.set_laser_blanking(False)
+                self.opmdaq.set_laser_blanking(self.laser_blanking_value)
                 self.opmdaq.set_scan_type('mirror')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
@@ -327,7 +327,7 @@ class OPMMirrorScan(MagicTemplate):
             if self.DAQ_running:
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
-            self.opmdaq.set_laser_blanking(False)
+            self.opmdaq.set_laser_blanking(self.laser_blanking_value)
             self.opmdaq.set_scan_type('mirror')
             self.opmdaq.set_channels_to_use(self.channel_states)
             self.opmdaq.set_interleave_mode(True)
@@ -395,20 +395,30 @@ class OPMMirrorScan(MagicTemplate):
                 self.DAQ_running = False
         else:
             af_counter = 0
+            
             self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
             self.mmc.setExposure(self.exposure_ms)
+            temp_data = np.zeros((self.n_active_channels, self.scan_steps,self.ROI_width_y, self.ROI_width_x),dtype=np.uint16)
             for t in trange(self.n_timepoints,desc="t", position=0):
+                self.mmc.setExposure(self.exposure_ms)
                 self.opmdaq.start_waveform_playback()
                 self.DAQ_running = True
-                self.mmc.startSequenceAcquisition(int(self.n_active_channels*self.scan_steps),0,True)
+                self.mmc.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
                 for z in trange(self.scan_steps,desc="z", position=1, leave=False):
                     for c in range(self.n_active_channels):
                         while self.mmc.getRemainingImageCount()==0:
                             pass
-                        opm_data[t, c, z, :, :]  = self.mmc.popNextImage()
+                        temp_data[c,z,:] = self.mmc.popNextImage()
+                        image_counter +=1 
+                        if (self.mmc.getRemainingImageCount() + image_counter) >= int(self.n_timepoints*self.n_active_channels*self.scan_steps) and not(turned_off):
+                            self.opmdaq.stop_waveform_playback()
+                            self.DAQ_running = False
+                            turned_off = True
+                opm_data[t, :]  = temp_data
                 self.mmc.stopSequenceAcquisition()
-                self.opmdaq.stop_waveform_playback()
-                self.DAQ_running = False
+                if not(turned_off):
+                    self.opmdaq.stop_waveform_playback()
+                    self.DAQ_running = False
                 if af_counter == 0:
                     t_start = time.perf_counter()
                     self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
@@ -764,7 +774,7 @@ class OPMMirrorScan(MagicTemplate):
         laser_blanking={"widget_type": "CheckBox", "label": 'Laser blanking'},
         layout='horizontal'
     )
-    def laser_blanking(self,laser_blanking = False):
+    def laser_blanking(self,laser_blanking = True):
         if not(self.laser_blanking_value == laser_blanking):
             self.laser_blanking_value = laser_blanking
             self.opmdaq.set_laser_blanking(self.laser_blanking_value)

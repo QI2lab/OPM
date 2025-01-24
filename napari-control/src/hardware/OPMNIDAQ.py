@@ -43,7 +43,7 @@ class OPMNIDAQ:
 
         self.scan_mirror_neutral = scan_mirror_neutral
         self.scan_mirror_calibration = scan_mirror_calibration
-        self.laser_blanking=False
+        self.laser_blanking=True
         
     def set_laser_blanking(self,laser_blanking):
         self.laser_blanking=laser_blanking
@@ -92,7 +92,8 @@ class OPMNIDAQ:
                 else:
                     dataDO[:,int(ind)] = 1
             
-            # dataDO[-1, int(ind)] = 0
+            if self.laser_blanking:
+                dataDO[-1, :] = 0
 
             # generate voltage steps
             max_volt = self.min_volt + self.scan_axis_range_volts  # 2

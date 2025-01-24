@@ -64,7 +64,7 @@ def find_best_O3_focus_metric(mmc: CMMCorePlus,shutter_controller,O3_stage_name,
     # generate arrays
     n_O3_stage_steps=20.
     O3_stage_step_size = .25
-    O3_stage_positions = np.round(np.arange(O3_stage_pos_start-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_pos_start+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float)
+    O3_stage_positions = np.round(np.arange(O3_stage_pos_start-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_pos_start+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float64)
     focus_metrics = np.zeros(O3_stage_positions.shape[0])
     if verbose: print('Starting rough alignment.')
 
@@ -106,7 +106,7 @@ def find_best_O3_focus_metric(mmc: CMMCorePlus,shutter_controller,O3_stage_name,
     if perform_fine:
         n_O3_stage_steps=10.
         O3_stage_step_size = .1
-        O3_stage_positions = np.round(np.arange(rough_best_O3_stage_pos-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),rough_best_O3_stage_pos+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float)
+        O3_stage_positions = np.round(np.arange(rough_best_O3_stage_pos-(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),rough_best_O3_stage_pos+(O3_stage_step_size*np.round(n_O3_stage_steps/2,0)),O3_stage_step_size),2).astype(np.float64)
         focus_metrics = np.zeros(O3_stage_positions.shape[0])
         if verbose: print('Starting fine alignment.')
 

@@ -4,7 +4,7 @@ Reconstruction tools
 
 Image processing tools for OPM reconstruction
 
-Last updated: Shepherd 01/22 - changes to include map_blocks based dexp deconvolution and recent other changes.
+Last updated: Shepherd 03/30/24 - removed mv decon, updated dask block size
 '''
 
 #!/usr/bin/env python
@@ -25,14 +25,11 @@ try:
 except:
     CP_AVAILABLE = False
 
-if CP_AVAILABLE:
-    try:
-        from clij2fft.richardson_lucy import richardson_lucy_nc
-        from clij2fft.richardson_lucy import getlib
-        DECON_LIBRARY = 'clij'
-    except:
-        DECON_LIBRARY = None
-else:
+try:
+    from clij2fft.richardson_lucy import richardson_lucy_nc
+    from clij2fft.richardson_lucy import getlib
+    DECON_LIBRARY = 'clij'
+except:
     DECON_LIBRARY = None
 
 # http://numba.pydata.org/numba-doc/latest/user/parallel.html#numba-parallel
@@ -193,7 +190,7 @@ def lr_deconvolution(image,psf,iterations=5):
     """
 
     # create dask array and apodization window
-    scan_chunk_size = 128
+    scan_chunk_size = 256
     if image.shape[0]<scan_chunk_size:
         dask_raw = da.from_array(image,chunks=(image.shape[0],image.shape[1],image.shape[2]))
         overlap_depth = (0,0,0)
@@ -203,11 +200,9 @@ def lr_deconvolution(image,psf,iterations=5):
     del image
     gc.collect()
 
-    if DECON_LIBRARY=='mv':
-        lr_dask = partial(mv_lr_decon,psf=psf,num_iterations=iterations)
-    elif DECON_LIBRARY=='clij':
+    if DECON_LIBRARY=='clij':
         lib = getlib()
-        lr_dask = partial(clij_lr,psf=psf,num_iters=iterations,tau=0.001,lib=lib)
+        lr_dask = partial(clij_lr,psf=psf,num_iters=iterations,tau=1e-4,lib=lib)
 
     # create dask plan for overlapped blocks
     dask_decon = da.map_overlap(lr_dask,dask_raw,depth=overlap_depth,boundary='reflect',trim=True,meta=np.array((), dtype=np.uint16))
@@ -224,67 +219,6 @@ def lr_deconvolution(image,psf,iterations=5):
     cp._default_memory_pool.free_all_blocks()
 
     return decon_data.astype(np.uint16)
-
-def mv_lr_decon(image,psf,num_iterations):
-    '''
-    Lucy-Richardson deconvolution using commerical Microvolution library. 
-
-    :param image: ndarray
-        raw image
-    :param ch_idx: int
-        wavelength index
-    
-
-    :return image: ndarray
-        deconvolved image 
-    '''
-
-    params = mv_decon.DeconParameters()
-    params.generatePsf = False
-    params.nx = image.shape[2]
-    params.ny = image.shape[1]
-    params.nz = image.shape[0]
-    params.blind = False
-    params.psfNx = psf.shape[2]
-    params.psfNy = psf.shape[1]
-    params.psfNz = psf.shape[0]
-    params.dr = 115.0
-    params.dz = 400.0
-    params.psfDr = 115.0
-    params.psfDz = 400.0
-    params.iterations = num_iterations
-    params.background = 100
-    params.regularizationType=mv_decon.RegularizationType_TV
-    params.scaling = mv_decon.Scaling_U16
-
-    try:
-        launcher = mv_decon.DeconvolutionLauncher()
-        image = image.astype(np.float16)
-
-        launcher.SetParameters(params)
-        for z in range(params.nz):
-            launcher.SetImageSlice(z, image[z,:])
-
-        psf_image = psf.astype(np.float16)
-        for z in range(params.psfNz):
-            launcher.SetPsfSlice(z,psf_image[z,:])
-
-        new_image = np.zeros(image.shape,dtype=np.uint16)
-        del image
-
-        launcher.Run()
-
-        for z in range(params.nz):
-            launcher.RetrieveImageSlice(z, new_image[z,:])
-
-    except:
-        err = sys.exc_info()
-        print("Unexpected error:", err[0])
-        print(err[1])
-        print(err[2])
-        new_image = np.zeros(image.shape,dtype=np.uint16)
-
-    return new_image.astype(np.uint16)
 
 def clij_lr(image,psf,num_iters,tau,lib):
 

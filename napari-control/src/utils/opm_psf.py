@@ -1,6 +1,6 @@
 import psfmodels as psfm
 import numpy as np
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from scipy.interpolate import interp2d
 
 # ROI tools
@@ -97,7 +97,7 @@ def create_psf_silicone_100x(dxy, dz, nxy, nz, ex_NA,ex_wvl,em_wvl):
                                         psf_func=func)    
     return tot_psf
 
-def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
+def generate_skewed_psf(ex_NA,ex_wvl,em_wvl,dstage=0.4):
     """
     Create OPM PSF in skewed coordinates
     :param ex_NA: excitaton NA
@@ -109,13 +109,12 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
     dc = 0.115
     na = 1.35
     ni = 1.4
-    dstage = 0.4
     theta = 30 * np.pi/180
 
     xy_res = 1.6163399561827614 / np.pi * em_wvl / na
     z_res = 2.355*(np.sqrt(6) / np.pi * ni * em_wvl / na ** 2)
 
-    roi_skewed_size = get_skewed_roi_size([z_res * 5, xy_res * 5, xy_res * 5],
+    roi_skewed_size = get_skewed_roi_size([z_res * 9, xy_res * 9, xy_res * 9],
                                           theta, dc, dstage, ensure_odd=True)
     # make square
     roi_skewed_size[2]= roi_skewed_size[1]
@@ -126,6 +125,7 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
     dy = y[0, 1, 0] - y[0, 0, 0]
     dz = z[0, 1, 0] - z[0, 0, 0]
 
+
     z -= z.mean()
     x -= x.mean()
     y -= y.mean()
@@ -133,6 +133,7 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
     # get on grid of coordinates
     dxy = 0.5 * np.min([dx, dy])
     dz = 0.5 * dz
+    print(dxy,dz)
     
     nxy = np.max([int(2 * ((x.max() - x.min()) // dxy) + 1),
                   int(2 * ((y.max() - y.min()) // dxy) + 1)])
@@ -142,13 +143,13 @@ def generate_skewed_psf(ex_NA,ex_wvl,em_wvl):
     xg -= xg.mean()
     yg = np.arange(nxy) * dxy
     yg -= yg.mean()
+    print(xg[1]-xg[0])
 
-    psf_grid = create_psf_silicone_100x(dxy, dz, nxy, nz, na,ex_wvl,em_wvl)
-    psf_grid = psf_grid / np.max(psf_grid[nz//2])
+    psf_grid = create_psf_silicone_100x(dxy, dz, nxy, nz, ex_NA,ex_wvl,em_wvl)
 
     # get value from interpolation
     skewed_psf = np.zeros(roi_skewed_size)
     for ii in range(nz):
         skewed_psf[:, ii, :] = interp2d(xg, yg, psf_grid[ii], kind="linear")(x.ravel(), y[:, ii].ravel())
 
-    return skewed_psf
+    return skewed_psf / np.sum(skewed_psf,axis=(0,1,2))
