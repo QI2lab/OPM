@@ -79,5 +79,5 @@ def main(path_to_mm_config: Path):
     instrument_control_widget._shutdown()
 
 if __name__ == "__main__":
-    path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_configs\OPM_20230320.cfg')
+    path_to_mm_config=Path(r'C:\Users\qi2lab\Documents\micro-manager_configs\OPM_20250124.cfg')
     main(path_to_mm_config)
