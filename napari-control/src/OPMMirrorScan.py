@@ -440,11 +440,10 @@ class OPMMirrorScan(MagicTemplate):
                 deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
                 max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
 
-                yield c, deskewed_image
-
             del raw_image_stack
             max_z_deskewed_images = np.asarray(max_z_deskewed_images)
             max_z_deskewed_image = np.squeeze(max_z_deskewed_images)
+            yiel c, max_z_deskewed_image
             
             # Calculate the starting metric, future pertubations must improve from here.
             if metric_type=="brightness":
