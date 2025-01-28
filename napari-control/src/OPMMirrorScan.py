@@ -17,8 +17,13 @@ import numpy as np
 import time
 import zarr
 
+from src.hardware.AOMirror import AOMirror
 from src.hardware.OPMNIDAQ import OPMNIDAQ
 from src.hardware.PicardShutter import PicardShutter
+from src.utils.sensorless_ao import (metric_brightness,
+                                     metric_gauss2d,
+                                     metric_shannon_dct,
+                                     quadratic_fit)
 from src.utils.autofocus_remote_unit import manage_O3_focus
 from src.utils.data_io import write_metadata
 from src.utils.image_post_processing import deskew
@@ -37,7 +42,7 @@ class OPMMirrorScan(MagicTemplate):
         self.channel_states=[False,False,False,False,False]
         self.exposure_ms = 10.0                 # unit: ms
         self.scan_axis_step_um = 0.4            # unit: um
-        self.scan_axis_calibration = 0.043      # unit: V / um updated 2023.10.30
+        self.scan_axis_calibration = 0.0433      # unit: V / um updated 2025.01.24
         self.galvo_neutral_volt = 0.            # unit: V
         self.scan_mirror_footprint_um = 50.0    # unit: um
         self.camera_pixel_size_um = .115        # unit: um
@@ -45,8 +50,8 @@ class OPMMirrorScan(MagicTemplate):
 
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
-        self.ROI_center_x = int(1123)
-        self.ROI_center_y = int(1172)-128   # the (-128) is to offset the area of best focus from known alignment point
+        self.ROI_center_x = int(1178)
+        self.ROI_center_y = int(1046)# -128   # the (-128) is to offset the area of best focus from known alignment point
         self.ROI_width_x = int(1900)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
         self.ROI_corner_x = int(self.ROI_center_x -  self.ROI_width_x//2)
@@ -56,11 +61,28 @@ class OPMMirrorScan(MagicTemplate):
         self.O3_stage_name='MCL NanoDrive Z Stage'
 
         # shutter ID. Obtained from Picard software.
-        self.shutter_id = 712
+        self.shutter_id = 712 # verified 2025.01.24
 
+        # ao mirror setup
+        wfc_config_file_path = Path(r"C:\Users\qi2lab\Documents\github\opm_ao\Configuration Files\WaveFrontCorrector_mirao52-e_0329.dat")
+        wfc_correction_file_path = Path(r"C:\Users\qi2lab\Documents\github\opm_ao\OUT_FILES\correction_data_backup_starter.aoc")
+        haso_config_file_path = Path(r"C:\Users\qi2lab\Documents\github\opm_ao\Configuration Files\WFS_HASO4_VIS_7635.dat")
+        wfc_flat_file_path = Path(r"C:\Users\qi2lab\Documents\github\opm_ao\OUT_FILES\20250122_tilted_gauss2d_laser_actuator_positions.wcs")
+
+        # Adaptive optics parameters
+        # ao_mirror puts the mirror in the flat_position state to start.
+        self.ao_mirror = AOMirror(wfc_config_file_path = wfc_config_file_path,
+                                  haso_config_file_path = haso_config_file_path,
+                                  interaction_matrix_file_path = wfc_correction_file_path,
+                                  flat_positions_file_path = wfc_flat_file_path,
+                                  coeff_file_path = None,
+                                  n_modes = 32,
+                                  modes_to_ignore = [])
+    
         # default save path
         self.save_path = Path('D:/')
 
+        # Channel and laser setup
         self.channel_labels = ["405", "488", "561", "635", "730"]
         self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
         self.laser_blanking_value = True
@@ -207,7 +229,7 @@ class OPMMirrorScan(MagicTemplate):
         colormap = colormaps[current_channel]
         try:
             self.viewer.layers[channel_name].data = new_image
-        except:
+        except Exception:
             self.viewer.add_image(new_image, name=channel_name, blending='additive', colormap=colormap,contrast_limits=[110,.9*np.max(new_image)])
 
     @thread_worker
@@ -266,7 +288,6 @@ class OPMMirrorScan(MagicTemplate):
                 time.sleep(.05)
                 yield c, raw_image_2d
 
-    
     def _execute_3d_sweep(self):
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -345,7 +366,6 @@ class OPMMirrorScan(MagicTemplate):
         #-----------------------------------------------------End acquisition----------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
 
-
     @thread_worker
     def _acquire_3d_data(self):
         """Live-mode: 3D acquisition and deskewing."""
@@ -374,58 +394,233 @@ class OPMMirrorScan(MagicTemplate):
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of AO opt parameters------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
-
-        """Setup AO parameters here."""
-
+        initial_coeffs = self.ao_mirror.current_coeffs.copy() # coeff before optmization
+        test_coeffs = initial_coeffs.copy() # modified coeffs to be applied to mirror
+        optimized_coeffs = initial_coeffs.copy() # final coeffs after running iterations
+        delta_range = 0.2
+        metric_type = "shannon_dct"
+        psf_radius_px = 2
+        modes_to_optimize=[7,14,23,3,4,5,6,8,9,10,11,12,13,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31]
+        n_iter=3
+        n_steps=3
+        init_range=.4
+        alpha=.8
+        verbose=True
+        # n_zernike_modes = max(modes_to_optimize)+1    
+        
         #------------------------------------------------------------------------------------------------------------------------------------
         #-----------------------------------------------End setup of AO opt parameters-------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
-
 
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------------Begin AO optimization-----------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
 
         """Setup loops for sensorless AO optimizaiton."""
+        delta_range=init_range
+        if verbose:
+            print(f"Starting A.O. optimization using {metric_type} metric")
+        for k in range(n_iter): 
+            if verbose:
+                print(f"  AO iteration: {k+1} / {n_iter}")
+            # measure the starting metric for this iteration...
+            """acquire 3D data and max project"""
+            # execute sweep and return data
+            active_channel_indices, raw_image_stack = self._execute_3d_sweep()
 
-        """perturb mirror for given mode and delta"""
+            # deskew data
+            # deskew parameters
+            deskew_parameters = np.empty([3])
+            deskew_parameters[0] = self.opm_tilt                 # (degrees)
+            deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
+            deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
 
-        """acquire 3D data and max project"""
-        # execute sweep and return data
-        active_channel_indices, raw_image_stack = self._execute_3d_sweep()
+            max_z_deskewed_images = []
+            for c in active_channel_indices:
+                deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
+                max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
 
-        # deskew data
-        # deskew parameters
-        deskew_parameters = np.empty([3])
-        deskew_parameters[0] = self.opm_tilt                 # (degrees)
-        deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
-        deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
+                yield c, deskewed_image
 
-        max_z_deskewed_images = []
-        for c in active_channel_indices:
-            deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
-            max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
+            del raw_image_stack
+            max_z_deskewed_images = np.asarray(max_z_deskewed_images)
+            max_z_deskewed_image = np.squeeze(max_z_deskewed_images)
+            
+            # Calculate the starting metric, future pertubations must improve from here.
+            if metric_type=="brightness":
+                zero_metric = metric_brightness(image=max_z_deskewed_image)
+            elif metric_type=="gauss2d":
+                zero_metric = metric_gauss2d(image=max_z_deskewed_image)
+            elif metric_type=="shannon_dct":
+                zero_metric = metric_shannon_dct(image=max_z_deskewed_image,
+                                                 psf_radius_px=psf_radius_px,
+                                                 crop_size=501)
+            
+            if k==0:
+                opt_metric = zero_metric        
+                   
+            for mode in modes_to_optimize:
+                if verbose:
+                    print(f"    Perturbing mirror mode: {mode}")
+                """perturb mirror for given mode and delta"""
+                 # Grab the current starting modes for this iteration
+                current_mode_coeffs = self.ao_mirror.current_coeffs.copy()
+                deltas = np.linspace(-delta_range, delta_range, n_steps)
+                metrics = []
+                for delta in deltas:
+                    test_coeffs = current_mode_coeffs.copy()
+                    test_coeffs[mode] += delta
+                    success = self.ao_mirror.set_modal_coefficients(test_coeffs)
+                    if not(success):
+                        print("Setting mirror coefficients failed!")
+                        metric = 0
+                        max_z_deskewed_image = np.zeros_like(max_z_deskewed_image)
+                    else:
+                        """acquire 3D data and max project"""
+                        # execute sweep and return data
+                        active_channel_indices, raw_image_stack = self._execute_3d_sweep()
 
-            yield c, deskewed_image
+                        # deskew data
+                        # deskew parameters
+                        deskew_parameters = np.empty([3])
+                        deskew_parameters[0] = self.opm_tilt                 # (degrees)
+                        deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
+                        deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
 
-        del raw_image_stack
-        max_z_deskewed_images = np.asarray(max_z_deskewed_images)
+                        max_z_deskewed_images = []
+                        for c in active_channel_indices:
+                            deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
+                            max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
 
-        """STEVEN: The max_z_deskewed_images contains all of the channels requested. To start, I think you should only optimize on one channel, 
-        so you can squeeze the channel dimension and go from there...
+                            yield c, deskewed_image
+
+                        del raw_image_stack
+                        max_z_deskewed_images = np.asarray(max_z_deskewed_images)
+                        max_z_deskewed_image = np.squeeze(max_z_deskewed_images)
+                        
+                        """Calculate metric."""
+                        if metric_type=="brightness":
+                            metric = metric_brightness(image=max_z_deskewed_image)
+                        elif metric_type=="gauss2d":
+                            metric = metric_gauss2d(image=max_z_deskewed_image)
+                        elif metric_type=="shannon_dct":
+                            metric = metric_shannon_dct(image=max_z_deskewed_image,
+                                                        psf_radius_px=psf_radius_px)
+                            
+                        if metric==np.nan:
+                            print("Metric is NAN, setting to 0")
+                            metric = float(np.nan_to_num(metric))
+                            
+                    metrics.append(metric)
+                """After looping through all mirror pertubations for this mode, decide if mirror is updated"""
+                # Quadratic fit to determine optimal delta
+                try:
+                    popt = quadratic_fit(deltas, metrics)
+                    a, b, c = popt
+                    if a >=0 or np.abs(a) < 10.0:
+                        print(f"    Fit values rejected, a={a:.4f}")
+                        raise Exception
+                    optimal_delta = -b / (2 * a)
+                    if verbose:
+                        print(f"    Quadratic fit for optimal delta: {optimal_delta:.4f}")
+                        
+                    # if the delta is outside of the sample range, set metric to 0
+                    if (optimal_delta>delta_range) or (optimal_delta<-delta_range):
+                        optimal_delta = 0
+                        if verbose:
+                            print(f"      Optimal delta is outside of delta_range: {-b / (2 * a):.3f}")
+                            
+                except Exception:
+                    optimal_delta = 0
+                    if verbose:
+                        print(f"    Exception in fit occurred: {optimal_delta:.4f}")
+                        print(f"    a value: {a:.3f}")
+                        print(f"    b value: {b:.3f}")
         
-        `max_z_deskewed_image = np.squeeze(max_z_deskewed_images)`
-        """
+                coeff_opt = current_mode_coeffs[mode] + optimal_delta
+                
+                # test the new coeff to make sure it improves the overall metric.
+                test_coeffs[mode] = coeff_opt
+
+                # verify mirror successfully loads requested state
+                success = self.ao_mirror.set_modal_coefficients(test_coeffs)
+                if not(success):
+                    if verbose:
+                        print("    Setting mirror coefficients failed, using current mode coefficient.")
+                    coeff_to_keep = current_mode_coeffs[mode]
+                else:
+                    # Measure the metric using the coeff to keep mirror state
+                    """acquire 3D data and max project"""
+                    # execute sweep and return data
+                    active_channel_indices, raw_image_stack = self._execute_3d_sweep()
+
+                    # deskew data
+                    # deskew parameters
+                    deskew_parameters = np.empty([3])
+                    deskew_parameters[0] = self.opm_tilt                 # (degrees)
+                    deskew_parameters[1] = self.scan_axis_step_um*100    # (nm)
+                    deskew_parameters[2] = self.camera_pixel_size_um*100 # (nm)
+
+                    max_z_deskewed_images = []
+                    for c in active_channel_indices:
+                        deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
+                        max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
+
+                        yield c, deskewed_image
+
+                    del raw_image_stack
+                    max_z_deskewed_images = np.asarray(max_z_deskewed_images)
+                    max_z_deskewed_image = np.squeeze(max_z_deskewed_images)
+                    
+                    """Calculate metric."""
+                    if metric_type=="brightness":
+                        metric = metric_brightness(image=max_z_deskewed_image)
+                    elif metric_type=="gauss2d":
+                        metric = metric_gauss2d(image=max_z_deskewed_image)
+                    elif metric_type=="shannon_dct":
+                        metric = metric_shannon_dct(image=max_z_deskewed_image,
+                                                    psf_radius_px=psf_radius_px)
+                        
+                    if metric==np.nan:
+                        print("    Metric is NAN, setting to 0")
+                        metric = float(np.nan_to_num(metric))
+                    
+                    if metric>opt_metric:
+                        coeff_to_keep = coeff_opt
+                        opt_metric = metric
+                        if verbose:
+                            print(f"      Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
+                    else:
+                        # if not keep the current mode coeff
+                        if verbose:
+                            print("      Metric not improved using current mode coefficient.")
+                        coeff_to_keep = current_mode_coeffs[mode]
+                
+                # update mirror with the coeff to keep
+                test_coeffs[mode] = coeff_to_keep
+                _ = self.ao_mirror.set_modal_coefficients(test_coeffs)
+                """Loop back to top and do the next mode until all modes are done"""
+          
+            # Update the current_mode_coeffs
+            current_mode_coeffs = self.ao_mirror.current_coeffs.copy()
+            if verbose:
+                print(f"  current_mode_coeffs at end of iteration:\n{current_mode_coeffs}")
+                
+            # Reduce the sweep range for finer sampling around new optimal coefficient amplitude
+            delta_range *= alpha
+            if verbose:
+                print(f"  Reduced sweep range to {delta_range:.4f}",
+                    f"\n  Current metric: {metric:.4f}")
+            """Loop back to top and do the next iteration"""
     
-        """Calculate metric."""
-
-
-        """After looping through all mirror pertubations for this mode, decide if mirror is updated"""
-
-        """Loop back to top and do the next mode until all modes are done"""
-
-        """Loop back to top and do the next iteration"""
-
+        optimized_coeffs = self.ao_mirror.current_coeffs.copy()
+        if verbose:
+            print(f"Starting coefficients:\n{initial_coeffs}",
+                f"\nFinal optimized coefficients:\n{optimized_coeffs}")
+        
+        # apply new coefficeints to the mirror
+        _ = self.ao_mirror.set_modal_coefficients(optimized_coeffs)
+        
         #------------------------------------------------------------------------------------------------------------------------------------
         #---------------------------------------------------End AO optimization--------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
@@ -1104,12 +1299,13 @@ class OPMMirrorScan(MagicTemplate):
         shutter_change: bool
             True = on, False = off
         """
-            if self.shutter_state == 0:
-                self.shutter_controller.openShutter()
-                self.shutter_state = 1
-            else:
-                self.shutter_controller.closeShutter()
-                self.shutter_state = 0
+        if self.shutter_state == 0:
+            self.shutter_controller.openShutter()
+            self.shutter_state = 1
+        else:
+            self.shutter_controller.closeShutter()
+            self.shutter_state = 0
+    
     @magicgui(
         auto_call=True,
         autofocus_O2O3={"widget_type": "PushButton", "label": 'Autofocus O2-O3'},
