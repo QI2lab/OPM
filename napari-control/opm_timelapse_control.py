@@ -16,6 +16,7 @@ from src.OPMMirrorScan import OPMMirrorScan
 import napari
 from pymmcore_widgets import StageWidget
 from pathlib import Path
+from PyQt5.QtWidgets import QDockWidget
 
 def main(path_to_mm_config: Path):
     """Start the OPM timelapse acquisition GUI
@@ -61,12 +62,19 @@ def main(path_to_mm_config: Path):
     
     stage_03 = StageWidget('MCL NanoDrive Z Stage',step=.1)
     viewer.window.add_dock_widget(stage_03,name='O3 Zstage')
+    dock_widget_03 = viewer.window._qt_window.findChild(QDockWidget, 'O3 Zstage')
+    dock_widget_03.setFloating(True)
+
     stage_01 = StageWidget('ZStage:M:37',step=10)
     viewer.window.add_dock_widget(stage_01,name='O1 Zstage')
+    dock_widget_01 = viewer.window._qt_window.findChild(QDockWidget, 'O1 Zstage')
+    dock_widget_01.setFloating(True)
+    
     stage_xy = StageWidget('XYStage:XY:31',step=100)
     viewer.window.add_dock_widget(stage_xy,name='XYstage')
-
-    # start Napari
+    dock_widget_xy = viewer.window._qt_window.findChild(QDockWidget, 'XYstage')
+    dock_widget_xy.setFloating(True)
+    
     napari.run()
 
     # shutdown acquistion threads

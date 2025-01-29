@@ -11,7 +11,8 @@ from magicgui import magicgui
 from magicgui.tqdm import trange
 from napari.qt.threading import thread_worker
 #from superqt.utils import ensure_main_thread
-
+from tifffile import imwrite
+            
 from pathlib import Path
 import numpy as np
 import time
@@ -397,16 +398,23 @@ class OPMMirrorScan(MagicTemplate):
         initial_coeffs = self.ao_mirror.current_coeffs.copy() # coeff before optmization
         test_coeffs = initial_coeffs.copy() # modified coeffs to be applied to mirror
         optimized_coeffs = initial_coeffs.copy() # final coeffs after running iterations
-        delta_range = 0.2
         metric_type = "shannon_dct"
-        psf_radius_px = 2
+        psf_radius_px = 1.5
         modes_to_optimize=[7,14,23,3,4,5,6,8,9,10,11,12,13,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31]
         n_iter=3
         n_steps=3
-        init_range=.4
-        alpha=.8
+        init_range=.150
+        alpha=.5
         verbose=True
-        # n_zernike_modes = max(modes_to_optimize)+1    
+        save_results = True
+        display_images = True
+        crop_size = None
+        compare_to_zero_delta = True
+        if save_results:
+            mode_images = []
+            iteration_images = []
+            metrics_to_save = []
+            coeffs_to_save = []
         
         #------------------------------------------------------------------------------------------------------------------------------------
         #-----------------------------------------------End setup of AO opt parameters-------------------------------------------------------
@@ -422,7 +430,7 @@ class OPMMirrorScan(MagicTemplate):
             print(f"Starting A.O. optimization using {metric_type} metric")
         for k in range(n_iter): 
             if verbose:
-                print(f"  AO iteration: {k+1} / {n_iter}")
+                print(f"AO iteration: {k+1} / {n_iter}")
             # measure the starting metric for this iteration...
             """acquire 3D data and max project"""
             # execute sweep and return data
@@ -443,7 +451,7 @@ class OPMMirrorScan(MagicTemplate):
             del raw_image_stack
             max_z_deskewed_images = np.asarray(max_z_deskewed_images)
             max_z_deskewed_image = np.squeeze(max_z_deskewed_images)
-            yiel c, max_z_deskewed_image
+            yield c, max_z_deskewed_image
             
             # Calculate the starting metric, future pertubations must improve from here.
             if metric_type=="brightness":
@@ -453,14 +461,17 @@ class OPMMirrorScan(MagicTemplate):
             elif metric_type=="shannon_dct":
                 zero_metric = metric_shannon_dct(image=max_z_deskewed_image,
                                                  psf_radius_px=psf_radius_px,
-                                                 crop_size=501)
+                                                 crop_size=crop_size)
             
             if k==0:
                 opt_metric = zero_metric        
-                   
+                if save_results:
+                    iteration_images.append(max_z_deskewed_image)
+                    
             for mode in modes_to_optimize:
                 if verbose:
-                    print(f"    Perturbing mirror mode: {mode}")
+                    print(f"AO iteration: {k+1} / {n_iter}")
+                    print(f"  Perturbing mirror mode: {mode+1} / {modes_to_optimize[-1]}")
                 """perturb mirror for given mode and delta"""
                  # Grab the current starting modes for this iteration
                 current_mode_coeffs = self.ao_mirror.current_coeffs.copy()
@@ -474,6 +485,12 @@ class OPMMirrorScan(MagicTemplate):
                         print("Setting mirror coefficients failed!")
                         metric = 0
                         max_z_deskewed_image = np.zeros_like(max_z_deskewed_image)
+                        
+                        if display_images:
+                            yield c, max_z_deskewed_image
+                        if save_results:
+                            mode_images.append(max_z_deskewed_image)
+                            
                     else:
                         """acquire 3D data and max project"""
                         # execute sweep and return data
@@ -491,12 +508,15 @@ class OPMMirrorScan(MagicTemplate):
                             deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
                             max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
 
-                            yield c, deskewed_image
-
                         del raw_image_stack
                         max_z_deskewed_images = np.asarray(max_z_deskewed_images)
                         max_z_deskewed_image = np.squeeze(max_z_deskewed_images)
                         
+                        if display_images:
+                            yield c, max_z_deskewed_image
+                        if save_results:
+                            mode_images.append(max_z_deskewed_image)
+                            
                         """Calculate metric."""
                         if metric_type=="brightness":
                             metric = metric_brightness(image=max_z_deskewed_image)
@@ -504,24 +524,32 @@ class OPMMirrorScan(MagicTemplate):
                             metric = metric_gauss2d(image=max_z_deskewed_image)
                         elif metric_type=="shannon_dct":
                             metric = metric_shannon_dct(image=max_z_deskewed_image,
-                                                        psf_radius_px=psf_radius_px)
+                                                        psf_radius_px=psf_radius_px,
+                                                        crop_size=crop_size)
                             
                         if metric==np.nan:
                             print("Metric is NAN, setting to 0")
                             metric = float(np.nan_to_num(metric))
-                            
+                        if verbose:
+                            print(f"      Metric = {metric:.4f}")
+                        
                     metrics.append(metric)
+                
                 """After looping through all mirror pertubations for this mode, decide if mirror is updated"""
                 # Quadratic fit to determine optimal delta
                 try:
                     popt = quadratic_fit(deltas, metrics)
                     a, b, c = popt
-                    if a >=0 or np.abs(a) < 10.0:
-                        print(f"    Fit values rejected, a={a:.4f}")
+                    
+                    # reduced the rejected amplitude of a.
+                    is_increasing = all(x < y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
+                    is_decreasing = all(x > y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
+                    if a >=0 or is_increasing or is_decreasing: # np.abs(a) < 0.1
+                        print(f"      Fit values rejected, a={a:.4f}, b={b:.4f}, c={c:.4f}")
                         raise Exception
                     optimal_delta = -b / (2 * a)
                     if verbose:
-                        print(f"    Quadratic fit for optimal delta: {optimal_delta:.4f}")
+                        print(f"    Quadratic fit result for optimal delta: {optimal_delta:.4f}")
                         
                     # if the delta is outside of the sample range, set metric to 0
                     if (optimal_delta>delta_range) or (optimal_delta<-delta_range):
@@ -532,9 +560,7 @@ class OPMMirrorScan(MagicTemplate):
                 except Exception:
                     optimal_delta = 0
                     if verbose:
-                        print(f"    Exception in fit occurred: {optimal_delta:.4f}")
-                        print(f"    a value: {a:.3f}")
-                        print(f"    b value: {b:.3f}")
+                        print(f"        Exception in fit occurred, optimal delta = {optimal_delta:.4f}")
         
                 coeff_opt = current_mode_coeffs[mode] + optimal_delta
                 
@@ -565,12 +591,13 @@ class OPMMirrorScan(MagicTemplate):
                         deskewed_image = deskew(raw_image_stack[c,:],*deskew_parameters).astype(np.uint16)
                         max_z_deskewed_images.append(np.max(deskewed_image,axis=0))
 
-                        yield c, deskewed_image
-
                     del raw_image_stack
                     max_z_deskewed_images = np.asarray(max_z_deskewed_images)
                     max_z_deskewed_image = np.squeeze(max_z_deskewed_images)
                     
+                    if display_images:
+                        yield c, max_z_deskewed_image
+                        
                     """Calculate metric."""
                     if metric_type=="brightness":
                         metric = metric_brightness(image=max_z_deskewed_image)
@@ -578,23 +605,47 @@ class OPMMirrorScan(MagicTemplate):
                         metric = metric_gauss2d(image=max_z_deskewed_image)
                     elif metric_type=="shannon_dct":
                         metric = metric_shannon_dct(image=max_z_deskewed_image,
-                                                    psf_radius_px=psf_radius_px)
+                                                    psf_radius_px=psf_radius_px,
+                                                    crop_size=crop_size)
                         
                     if metric==np.nan:
                         print("    Metric is NAN, setting to 0")
                         metric = float(np.nan_to_num(metric))
                     
-                    if metric>opt_metric:
-                        coeff_to_keep = coeff_opt
-                        opt_metric = metric
-                        if verbose:
-                            print(f"      Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
+                    # When using the brightness metric, bleaching can cause the opt metric to be unattainable. 
+                    # This flag changes the algorithm to compare it to the delta=0 measurement
+                    if compare_to_zero_delta:
+                        if metric>=metrics[len(metrics)//2]:
+                            coeff_to_keep = coeff_opt
+                            opt_metric = metric
+                            if verbose:
+                                print(f"    Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
+                        else:
+                            # if not keep the current mode coeff
+                            if verbose:
+                                print("    Metric not improved using current mode coefficient.",
+                                    f"\n      optimal metric: {opt_metric:.6f}",
+                                    f"\n      zero delta metric: {metrics[len(metrics)//2]:.6f}",
+                                    f"\n      rejected metric: {metric:.6f}")
+                            coeff_to_keep = current_mode_coeffs[mode]
                     else:
-                        # if not keep the current mode coeff
-                        if verbose:
-                            print("      Metric not improved using current mode coefficient.")
-                        coeff_to_keep = current_mode_coeffs[mode]
+                        if metric>=opt_metric:
+                            coeff_to_keep = coeff_opt
+                            opt_metric = metric
+                            if verbose:
+                                print(f"      Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
+                        else:
+                            # if not keep the current mode coeff
+                            if verbose:
+                                print("    Metric not improved using current mode coefficient.",
+                                    f"\n     optimal metric: {opt_metric:.6f}",
+                                    f"\n     rejected metric: {metric:.6f}")
+                            coeff_to_keep = current_mode_coeffs[mode]
                 
+            
+                if save_results:
+                    metrics_to_save.append(opt_metric)
+                    
                 # update mirror with the coeff to keep
                 test_coeffs[mode] = coeff_to_keep
                 _ = self.ao_mirror.set_modal_coefficients(test_coeffs)
@@ -610,9 +661,14 @@ class OPMMirrorScan(MagicTemplate):
             if verbose:
                 print(f"  Reduced sweep range to {delta_range:.4f}",
                     f"\n  Current metric: {metric:.4f}")
+            
+            if save_results: 
+                coeffs_to_save.append(self.ao_mirror.current_coeffs.copy())
+                iteration_images.append(max_z_deskewed_image)
+                
             """Loop back to top and do the next iteration"""
-    
-        optimized_coeffs = self.ao_mirror.current_coeffs.copy()
+                
+        optimized_coeffs = self.ao_mirror.current_coeffs.copy()          
         if verbose:
             print(f"Starting coefficients:\n{initial_coeffs}",
                 f"\nFinal optimized coefficients:\n{optimized_coeffs}")
@@ -620,6 +676,34 @@ class OPMMirrorScan(MagicTemplate):
         # apply new coefficeints to the mirror
         _ = self.ao_mirror.set_modal_coefficients(optimized_coeffs)
         
+        if self.save_path.exists():
+            save_wfc_path = self.save_path / Path("wfc_optimized_mirror_positions.wcs")
+            self.ao_mirror.save_mirror_state(save_wfc_path)
+            
+            iteration_images_save_path = self.save_path / Path("AO_iteration_images.tif")
+            mode_images_save_path = self.save_path / Path("AO_mode_images.tif")
+            optimal_metrics_save_path = self.save_path / Path("optimized_metric.npy")
+            optimal_coeffs_save_path = self.save_path / Path("optimized_coeffs.npy")
+            
+            imwrite(
+                iteration_images_save_path,
+                np.asarray(iteration_images),
+                imagej=True,
+                resolution=(1.0 / .115, 1.0 / .115),
+                metadata={'axes': 'TYX', 'unit':'um'}
+            )
+            
+            imwrite(
+                mode_images_save_path,
+                np.asarray(mode_images),
+                imagej=True,
+                resolution=(1.0 / .115, 1.0 / .115),
+                metadata={'axes': 'TYX', 'unit':'um'}
+            )
+            
+            np.save(optimal_metrics_save_path, metrics_to_save)
+            np.save(optimal_coeffs_save_path, coeffs_to_save)
+            
         #------------------------------------------------------------------------------------------------------------------------------------
         #---------------------------------------------------End AO optimization--------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------

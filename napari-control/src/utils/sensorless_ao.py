@@ -292,10 +292,17 @@ def metric_brightness(
         # max project over first axis assuming it is a zstack.
         image = np.max(image, axis=0)
 
+    image_perc = np.percentile(image, 90)
+    
+    # Mask the image to keep only pixels >= 90th percentile
+    max_pixels = image[image >= image_perc]
+    
     if return_image:
-        return np.max(image,axis=(0,1))+1e-12, image
+        return np.mean(max_pixels) + 1e-12, image
+        # return np.max(image,axis=(0,1))+1e-12, image
     else:
-        return np.max(image,axis=(0,1))+1e-12
+        # return np.max(image,axis=(0,1))+1e-12
+        return np.mean(max_pixels) + 1e-12
 
 def metric_gauss2d(
     image: ArrayLike,
@@ -551,7 +558,7 @@ def metric_shannon_dct(
     
         
     cutoff = otf_radius(image, psf_radius_px)
-    shannon_dct = shannon(dct_2d(image, cutoff), cutoff)
+    shannon_dct = shannon(dct_2d(image, cutoff), cutoff) * 1e3
 
     if return_image:
         return shannon_dct, image
