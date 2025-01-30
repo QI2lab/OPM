@@ -2,6 +2,7 @@ import napari
 from src.OPMMirrorReconstruction import OPMMirrorReconstruction
 
 def main():
+    """Start the OPM timelapse reconstruction GUI."""
 
     # setup OPM GUI and Napari viewer
     reconstruction_widget = OPMMirrorReconstruction()

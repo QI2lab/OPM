@@ -45,6 +45,9 @@ class OPMNIDAQ:
         self.scan_mirror_calibration = scan_mirror_calibration
         self.laser_blanking=True
         
+        self.projection_mirror_nuetral = 0
+        self.projection_mirror_range = [-0.5, 0.5]
+        
     def set_laser_blanking(self,laser_blanking):
         self.laser_blanking=laser_blanking
     
@@ -54,6 +57,15 @@ class OPMNIDAQ:
     def reset_scan_mirror(self):
         self.taskAO = daq.Task()
         self.taskAO.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
+        self.taskAO.WriteAnalogScalarF64(True, -1, self.scan_mirror_neutral, None)
+        self.taskAO.StartTask()
+        self.taskAO.StopTask()
+        self.taskAO.ClearTask()
+        
+    def reset_projection_mirror(self):
+        # TODO: update with emperical range and center
+        self.taskAO = daq.Task()
+        self.taskAO.CreateAOVoltageChan("/Dev1/ao1","",-1.0,1.0,daq.DAQmx_Val_Volts,None)
         self.taskAO.WriteAnalogScalarF64(True, -1, self.scan_mirror_neutral, None)
         self.taskAO.StartTask()
         self.taskAO.StopTask()
@@ -140,7 +152,6 @@ class OPMNIDAQ:
  
             # Generate values for DO
             dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
-        
             for ii, ind in enumerate(self.active_channel_indices):
                 if self.laser_blanking:
                     dataDO[2*ii::2*self.n_active_channels, ind] = 1

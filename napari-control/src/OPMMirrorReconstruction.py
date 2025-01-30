@@ -1,5 +1,5 @@
-'''
-Napari interface to process OPM timelapse data
+#!/usr/bin/python
+'''MagicTemplate class to process OPM timelapse data
 
 TO DO: - Change to OME-Zarr output
        - Add OME-tiff resave option
@@ -15,10 +15,10 @@ from magicgui import magicgui
 from magicgui.tqdm import trange
 from pathlib import Path
 import numpy as np
-from src.utils.image_post_processing import deskew
 from napari.qt.threading import thread_worker
 import zarr
 import dask.array as da
+from src.utils.image_post_processing import deskew
 from src.utils.data_io import read_metadata, return_opm_psf, time_stamp
 from skimage.measure import block_reduce
 from itertools import compress
@@ -29,14 +29,14 @@ from numcodecs import Blosc, blosc
 try:
     import cupy as cp
     CP_AVAILABLE = True
-except:
+except ImportError:
     CP_AVAILABLE = False
 
 if CP_AVAILABLE:
     try:
         from cucim.skimage.exposure import match_histograms
         CUCIM_AVAILABLE = True
-    except:
+    except ImportError:
         from skimage.exposure import match_histograms
         CUCIM_AVAILABLE = False
 else:
@@ -46,6 +46,7 @@ else:
 # OPM control UI element            
 @magicclass(labels=False)
 class OPMMirrorReconstruction(MagicTemplate):
+    """MagicTemplate class to process OPM timelapse data."""
 
     def __init__(self):
         self.decon = False
@@ -63,10 +64,19 @@ class OPMMirrorReconstruction(MagicTemplate):
 
     # set viewer
     def _set_viewer(self,viewer):
+        """Set napari viewer.
+        
+        Parameters
+        ----------
+        viewer: napari.viewer.Viewer
+            The napari viewer instance.
+        """
+
         self.viewer = viewer
 
     @thread_worker
     def _process_data(self):
+        """Thread worker to process one raw OPM dataset."""
         
         # create parameter array from scan parameters saved by acquisition code
         df_metadata = read_metadata(self.data_path / Path('scan_metadata.csv'))
@@ -85,9 +95,9 @@ class OPMMirrorReconstruction(MagicTemplate):
         chan_405_active = df_metadata['405_active']
         chan_488_active = df_metadata['488_active']
         chan_561_active = df_metadata['561_active']
-        chan_635_active = df_metadata['635_active']
+        chan_637_active = df_metadata['635_active']
         chan_730_active = df_metadata['730_active']
-        active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_635_active,chan_730_active]
+        active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_637_active,chan_730_active]
         channel_idxs = [0,1,2,3,4]
         channels_in_data = list(compress(channel_idxs, active_channels))
         n_active_channels = len(channels_in_data)
@@ -233,7 +243,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                 opm_data.attrs['405_state'] = chan_405_active
                 opm_data.attrs['488_state'] = chan_488_active
                 opm_data.attrs['561_state'] = chan_561_active
-                opm_data.attrs['635_state'] = chan_635_active
+                opm_data.attrs['635_state'] = chan_637_active
                 opm_data.attrs['730_state'] = chan_730_active
             
                 # free up memory
@@ -249,6 +259,7 @@ class OPMMirrorReconstruction(MagicTemplate):
 
     @thread_worker
     def _batch_process_data(self):
+        """Thread worker to batch processing many raw OPM datasets."""
 
         for path in Path(self.root_path).iterdir():
             for sub_path in Path(path).iterdir():
@@ -278,9 +289,9 @@ class OPMMirrorReconstruction(MagicTemplate):
                 chan_405_active = df_metadata['405_active']
                 chan_488_active = df_metadata['488_active']
                 chan_561_active = df_metadata['561_active']
-                chan_635_active = df_metadata['635_active']
+                chan_637_active = df_metadata['635_active']
                 chan_730_active = df_metadata['730_active']
-                active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_635_active,chan_730_active]
+                active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_637_active,chan_730_active]
                 channel_idxs = [0,1,2,3,4]
                 channels_in_data = list(compress(channel_idxs, active_channels))
                 n_active_channels = len(channels_in_data)
@@ -450,7 +461,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                 opm_data.attrs['405_state'] = chan_405_active
                 opm_data.attrs['488_state'] = chan_488_active
                 opm_data.attrs['561_state'] = chan_561_active
-                opm_data.attrs['635_state'] = chan_635_active
+                opm_data.attrs['635_state'] = chan_637_active
                 opm_data.attrs['730_state'] = chan_730_active
 
                 del opm_data   
@@ -459,7 +470,12 @@ class OPMMirrorReconstruction(MagicTemplate):
 
     @thread_worker
     def _tiff_convert_data(self):
-         for path in Path(self.tiff_path).iterdir():
+        """Thread worker to convert processed OPM data zarr to ome-tiff.
+        
+        This function creates one ome-tiff and one Z max projection ome-tiff per timepoint.
+        """
+
+        for path in Path(self.tiff_path).iterdir():
             if path.is_dir():
                 print(time_stamp(),'Processing path: '+str(path.name))
                 self.data_path = path
@@ -478,33 +494,33 @@ class OPMMirrorReconstruction(MagicTemplate):
                 max_tiff_output_path.mkdir(parents=True, exist_ok=True)
                 
                 for t_idx in trange(data_zarr.shape[0],desc='t'):
-                    # filename = 'opm_data_'+str(path.name)+'_t'+str(t_idx).zfill(4)+'.ome.tiff'
-                    # filename_path = tiff_output_path / Path(filename)
-                    # if not(filename_path.exists()):
-                    #     with TiffWriter(filename_path, bigtiff=True) as tif:
-                    #         metadata={'axes': 'ZCYX',
-                    #                 'SignificantBits': 16,
-                    #                 #'TimeIncrement': data_zarr.attrs['volume_time_ms'],
-                    #                 #'TimeIncrementUnit': 'ms',
-                    #                 'PhysicalSizeX': data_zarr.attrs['dx_um'],
-                    #                 'PhysicalSizeXUnit': 'µm',
-                    #                 'PhysicalSizeY': data_zarr.attrs['dy_um'],
-                    #                 'PhysicalSizeYUnit': 'µm',
-                    #                 'PhysicalSizeZ': data_zarr.attrs['dz_um'],
-                    #                 'PhysicalSizeZUnit': 'µm',
-                    #                 }
-                    #         options = dict(compression='zlib',
-                    #                         compressionargs={'level': 8},
-                    #                         predictor=True,
-                    #                         photometric='minisblack',
-                    #                         resolutionunit='CENTIMETER',
-                    #                         tile=(64,64),
-                    #                         )
-                    #         tif.write(np.swapaxes(np.array(data_zarr[t_idx,:]),0,1),
-                    #                     resolution=(1e4 / data_zarr.attrs['dy_um'],
-                    #                                 1e4 / data_zarr.attrs['dx_um']),
-                    #                     **options,
-                    #                     metadata=metadata)
+                    filename = 'opm_data_'+str(path.name)+'_t'+str(t_idx).zfill(4)+'.ome.tiff'
+                    filename_path = tiff_output_path / Path(filename)
+                    if not(filename_path.exists()):
+                        with TiffWriter(filename_path, bigtiff=True) as tif:
+                            metadata={'axes': 'ZCYX',
+                                    'SignificantBits': 16,
+                                    #'TimeIncrement': data_zarr.attrs['volume_time_ms'],
+                                    #'TimeIncrementUnit': 'ms',
+                                    'PhysicalSizeX': data_zarr.attrs['dx_um'],
+                                    'PhysicalSizeXUnit': 'µm',
+                                    'PhysicalSizeY': data_zarr.attrs['dy_um'],
+                                    'PhysicalSizeYUnit': 'µm',
+                                    'PhysicalSizeZ': data_zarr.attrs['dz_um'],
+                                    'PhysicalSizeZUnit': 'µm',
+                                    }
+                            options = dict(compression='zlib',
+                                            compressionargs={'level': 8},
+                                            predictor=True,
+                                            photometric='minisblack',
+                                            resolutionunit='CENTIMETER',
+                                            tile=(64,64),
+                                            )
+                            tif.write(np.swapaxes(np.array(data_zarr[t_idx,:]),0,1),
+                                        resolution=(1e4 / data_zarr.attrs['dy_um'],
+                                                    1e4 / data_zarr.attrs['dx_um']),
+                                        **options,
+                                        metadata=metadata)
                         
                     max_filename = 'max_z_opm_data_'+str(path.name)+'_t'+str(t_idx).zfill(4)+'.ome.tiff'
                     max_filename_path = max_tiff_output_path / Path(max_filename)
@@ -533,37 +549,41 @@ class OPMMirrorReconstruction(MagicTemplate):
                                         metadata=metadata)  
                             
     def _create_processing_worker(self):
+        """Create OPM dataset processing thread worker."""
         worker_processing = self._process_data()
         self._set_worker_processing(worker_processing)
 
-    # set 3D timelapse acquistion thread worker
     def _set_worker_processing(self,worker_processing):
+        """Set OPM dataset processing thread worker."""
         self.worker_processing = worker_processing
 
     def _create_batch_processing_worker(self):
+        """Create OPM dataset batch processing thread worker."""
         batch_worker_processing = self._batch_process_data()
         self._set_batch_worker_processing(batch_worker_processing)
 
-    # set 3D timelapse acquistion thread worker
     def _set_batch_worker_processing(self,batch_worker_processing):
+        """Set OPM dataset batch processing thread worker."""
         self.batch_worker_processing = batch_worker_processing
 
     def _create_tiff_conversion_worker(self):
+        """Create batch processing from processed zarr to ome-tiff thread worker."""
         tiff_worker_conversion = self._tiff_convert_data()
         self._set_tiff_worker_conversion(tiff_worker_conversion)
 
-    # set 3D timelapse acquistion thread worker
     def _set_tiff_worker_conversion(self,tiff_worker_conversion):
+        """Set batch processing from processed zarr to ome-tiff thread worker."""
         self.tiff_worker_conversion = tiff_worker_conversion
 
     # update viewer
-    def _update_viewer(self,display_data):
+    def _update_viewer(self):
+        """Update napari viewer using data on disk."""
 
         # clean up viewer
         self.viewer.layers.clear()
 
         # channel names and colormaps to match control software
-        channel_names = ['405nm','488nm','561nm','635nm','730nm']
+        channel_names = ['405nm','488nm','561nm','637nm','730nm']
         colormaps = ['bop purple','bop blue','bop orange','red','grey']
 
         active_channel_names=[]
@@ -592,6 +612,13 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout="horizontal"
     )
     def set_deconvolution_option(self,use_decon = False):
+        """Magicgui element to set deconvolution option.
+        
+        Parameters
+        ----------
+        use_decon: bool, default False
+            True = perform deconvolution, False = no deconvolution
+        """
         self.decon = use_decon
 
     # set histogram matching option
@@ -601,6 +628,12 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout="horizontal"
     )
     def set_histogram_option(self,use_match_histograms = False):
+        """Magicgui element to set histogram matching option.
+        
+        Parameters
+        ----------
+        use_match_histograms: bool, default False
+            True = match histograms, False = no histogram matching"""
         self.match_histograms = use_match_histograms
 
      # set z downsample option
@@ -610,6 +643,13 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout="horizontal"
     )
     def set_z_downsample_option(self,z_downsample = 1):
+        """Magicgui element to set z downsample option.
+        
+        Parameters
+        ----------
+        z_downsample: int, default 1
+            Downsample ratio for z dimension. Must be an integer.
+        """
         self.z_downsample = z_downsample
         
     # set path to dataset for procesing
@@ -619,7 +659,15 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout='vertical', 
         call_button="Set"
     )
-    def set_data_processing(self, data_path='d:/'):
+    def set_data_processing(self, data_path='g:/'):
+        """Magicgui element to set path to dataset for procesing.
+        
+        Parameters
+        ----------
+        data_path: str, default 'g:/'
+            Path to the folder containing the raw OPM dataset.
+        """
+
         self.data_path = data_path
         df_metadata = read_metadata(self.data_path / Path('scan_metadata.csv'))
         self.time_points = df_metadata['num_t']
@@ -631,7 +679,14 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout='horizontal'
     )
     def run_processing(self,start_processing):
-        if not(self.data_path is None):
+        """Magicgui element to control single folder data processing.
+        
+        Parameters
+        ----------
+        start_processing: bool
+            Start processing of the raw OPM dataset.
+        """
+        if self.data_path:
             self.worker_processing.start()
             self.worker_processing.returned.connect(self._create_processing_worker)
             self.worker_processing.returned.connect(self._update_viewer)
@@ -643,7 +698,15 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout='vertical', 
         call_button="Set"
     )
-    def set_batch_processing(self, root_path='d:/'):
+    def set_batch_processing(self, root_path='g:/'):
+        """Magicgui element to set path for batch processing.
+
+        Parameters
+        ----------
+        root_path: str, default 'g:/'
+            Path to the folder containing the raw OPM datasets.
+        """
+
         self.root_path = root_path
 
     # control multiple folder data processing
@@ -653,6 +716,14 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout='horizontal'
     )
     def run_batch_processing(self,start_batch_processing):
+        """Magicgui element to control multiple folder data processing.
+        
+        Parameters
+        ----------
+        start_batch_processing: bool
+            Start batch processing of the raw OPM datasets.
+        """
+
         self.batch_worker_processing.start()
         self.batch_worker_processing.returned.connect(self._create_batch_processing_worker)
         self.batch_worker_processing.returned.connect(self._update_viewer)
@@ -664,7 +735,15 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout='vertical', 
         call_button="Set"
     )
-    def set_tiff_conversion(self, tiff_path='d:/'):
+    def set_tiff_conversion(self, tiff_path='g:/'):
+        """Magicgui element to set path for tiff processing.
+        
+        Parameters
+        ----------
+        tiff_path: str, default 'g:/'
+            Path to the folder containing the processed OPM datasets.
+        """
+
         self.tiff_path = tiff_path
 
     # convert deskewed zarr to tiff
@@ -674,6 +753,14 @@ class OPMMirrorReconstruction(MagicTemplate):
         layout='horizontal'
     )
     def run_tiff_conversion(self,start_tiff_conversion):
+        """Magicgui element to convert deskewed zarr to tiff.
+        
+        Parameters
+        ----------
+        start_tiff_conversion: bool
+            Start conversion of the processed OPM datasets to tiff.
+        """
+        
         self.tiff_worker_conversion.start()
         self.tiff_worker_conversion.returned.connect(self._create_tiff_conversion_worker)
         self.tiff_worker_conversion.returned.connect(self._update_viewer)
