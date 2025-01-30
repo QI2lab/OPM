@@ -347,20 +347,16 @@ def shannon(spectrum_2d: ArrayLike, otf_radius: int = 100) -> float:
     h, w = spectrum_2d.shape
     y, x = np.ogrid[:h, :w]
 
-    # Create a circular mask based on the OTF radius
-    center_y, center_x = h // 2, w // 2
-    support = (x - center_x) ** 2 + (y - center_y) ** 2 < otf_radius ** 2
+    # Circular mask centered at (0,0) for DCT
+    support = (x**2 + y**2) < otf_radius**2
 
-    # Normalize values to a probability distribution
     spectrum_values = np.abs(spectrum_2d[support])
     total_energy = np.sum(spectrum_values)
-    
+
     if total_energy == 0:
-        return 0  # Avoid log(0)
+        return 0  # Avoid division by zero
 
     probabilities = spectrum_values / total_energy
-
-    # Compute Shannon entropy
     entropy = -np.sum(probabilities * np.log2(probabilities, where=(probabilities > 0)))
 
     return entropy
@@ -762,7 +758,7 @@ def metric_shannon_dct(
     dct_result = dct_2d(image)
 
     # Compute Shannon entropy within the cutoff radius
-    shannon_dct = shannon(dct_result, cutoff) * 1e3
+    shannon_dct = shannon(dct_result, cutoff)
 
     if return_image:
         return shannon_dct, image
