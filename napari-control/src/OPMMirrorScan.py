@@ -11,7 +11,6 @@ from magicgui import magicgui
 from magicgui.tqdm import trange
 from napari.qt.threading import thread_worker
 #from superqt.utils import ensure_main_thread
-from tifffile import imwrite
             
 from pathlib import Path
 import numpy as np
@@ -83,7 +82,7 @@ class OPMMirrorScan(MagicTemplate):
 
         # Channel and laser setup
         # TODO: Generate list of laser names for changing properties, make sure it matches the channel_labels.
-        self.channel_labels = ["405", "488", "561", "635", "730"]
+        self.channel_labels = ["405", "488", "561", "637", "730"]
         self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
         self.laser_blanking_value = True
 
@@ -230,7 +229,7 @@ class OPMMirrorScan(MagicTemplate):
 
         current_channel = values[0]
         new_image = values[1]
-        channel_names = ['405nm','488nm','561nm','635nm','730nm']
+        channel_names = ['405nm','488nm','561nm','637nm','730nm']
         colormaps = ['bop purple','bop blue','bop orange','red','grey']
 
         channel_name = channel_names[current_channel]
@@ -415,13 +414,13 @@ class OPMMirrorScan(MagicTemplate):
         modes_to_optimize=[7,14,23,3,4,5,6,8,9,10,11,12,13,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31]
         n_iter=3
         n_steps=3
-        init_range=.300
+        init_range=.500
         alpha=.5
+        compare_to_zero_delta = False
         verbose=True
         save_results = True
         display_images = True
         crop_size = None
-        compare_to_zero_delta = True
         if save_results:
             optimal_metrics = []
             optimal_coefficients = []
@@ -441,8 +440,6 @@ class OPMMirrorScan(MagicTemplate):
         if verbose:
             print(f"Starting A.O. optimization using {metric_type} metric")
         for k in range(n_iter): 
-            if verbose:
-                print(f"AO iteration: {k+1} / {n_iter}")
             # measure the starting metric for this iteration...
             """acquire 3D data and max project"""
             # execute sweep and return data
@@ -475,15 +472,19 @@ class OPMMirrorScan(MagicTemplate):
                                                      psf_radius_px=psf_radius_px,
                                                      crop_size=crop_size)
             
-            if k==0:
-                optimal_metric = starting_metric        
+            # if k==0: 
+            # SJS: We should be able to update the optimal metric at the start of every iteration. 
+            #      The mirror modes should be the same since the end of the last iteration.
+            #      Also updating at the start of every iteration prevent us from not progressing if an anomolous high metric occurs in the previous iteration.
+            optimal_metric = starting_metric 
+            if k==0:       
                 if save_results:
                     iteration_images.append(max_z_deskewed_image)
                     
             for mode in modes_to_optimize:
                 if verbose:
                     print(f"AO iteration: {k+1} / {n_iter}")
-                    print(f"  Perturbing mirror mode: {mode+1} / {modes_to_optimize[-1]}")
+                    print(f"  Perturbing mirror mode: {mode+1} / {modes_to_optimize[-1]+1}")
                 """perturb mirror for given mode and delta"""
                  # Grab the current starting modes for this iteration
                 iteration_zern_modes = self.ao_mirror.current_coeffs.copy()
@@ -494,7 +495,7 @@ class OPMMirrorScan(MagicTemplate):
                     active_zern_modes[mode] += delta
                     success = self.ao_mirror.set_modal_coefficients(active_zern_modes)
                     if not(success):
-                        print("Setting mirror coefficients failed!")
+                        print("    Setting mirror coefficients failed!")
                         metric = 0
                         max_z_deskewed_image = np.zeros_like(max_z_deskewed_image)
                         
@@ -556,18 +557,20 @@ class OPMMirrorScan(MagicTemplate):
                     # reduced the rejected amplitude of a.
                     is_increasing = all(x < y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
                     is_decreasing = all(x > y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
-                    if a >=0 or is_increasing or is_decreasing: # np.abs(a) < 0.1
-                        print(f"      Fit values rejected, a={a:.4f}, b={b:.4f}, c={c:.4f}")
+                    if is_increasing or is_decreasing:
+                        print("      Test metrics are monotonic and linear, fit rejected. ")
                         raise Exception
+                    elif a >=0:
+                        print("      Test metrics have a positive curvature, fit rejected.")
+                        raise Exception
+                    
                     optimal_delta = -b / (2 * a)
                     if verbose:
                         print(f"    Quadratic fit result for optimal delta: {optimal_delta:.4f}")
-                        
-                    # if the delta is outside of the sample range, set metric to 0
+    
                     if (optimal_delta>delta_range) or (optimal_delta<-delta_range):
-                        optimal_delta = 0
-                        if verbose:
-                            print(f"      Optimal delta is outside of delta_range: {-b / (2 * a):.3f}")
+                        print(f"      Optimal delta is outside of delta_range: {-b / (2 * a):.3f}")
+                        raise Exception
                             
                 except Exception:
                     optimal_delta = 0
@@ -631,11 +634,11 @@ class OPMMirrorScan(MagicTemplate):
                             coeff_to_keep = coeff_opt
                             optimal_metric = metric
                             if verbose:
-                                print(f"    Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
+                                print(f"    Updating mirror with new optmimal mode coeff.: {coeff_to_keep:.4f} with metric: {metric:.4f}")
                         else:
                             # if not keep the current mode coeff
                             if verbose:
-                                print("    Metric not improved using previous iteration's mode",
+                                print("    Metric did not increase, using previous iteration's mode coeff.",
                                     f"\n      optimal metric: {optimal_metric:.6f}",
                                     f"\n      rejected metric: {metric:.6f}")
                             coeff_to_keep = iteration_zern_modes[mode]
@@ -644,7 +647,7 @@ class OPMMirrorScan(MagicTemplate):
                             coeff_to_keep = coeff_opt
                             optimal_metric = metric
                             if verbose:
-                                print(f"      Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
+                                print(f"      Updating mirror with new optmimal mode coeff.: {coeff_to_keep:.4f} with metric: {metric:.4f}")
                         else:
                             # if not keep the current mode coeff
                             if verbose:
@@ -889,17 +892,6 @@ class OPMMirrorScan(MagicTemplate):
         for ch_str in self.channel_labels:
             self.mmc.setConfig(f'Modulation-{ch_str}','External-Digital')
             self.mmc.waitForConfig(f'Modulation-{ch_str}','External-Digital')
-            
-        # self.mmc.setConfig('Modulation-405','External-Digital')
-        # self.mmc.waitForConfig('Modulation-405','External-Digital')
-        # self.mmc.setConfig('Modulation-488','External-Digital')
-        # self.mmc.waitForConfig('Modulation-488','External-Digital')
-        # self.mmc.setConfig('Modulation-561','External-Digital')
-        # self.mmc.waitForConfig('Modulation-561','External-Digital')
-        # self.mmc.setConfig('Modulation-637','External-Digital')
-        # self.mmc.waitForConfig('Modulation-637','External-Digital')
-        # self.mmc.setConfig('Modulation-730','External-Digital')
-        # self.mmc.waitForConfig('Modulation-730','External-Digital')
 
         # turn all lasers on
         self.mmc.setConfig('Laser','AllOn')
@@ -917,19 +909,8 @@ class OPMMirrorScan(MagicTemplate):
         for ch_str in self.channel_labels:
             self.mmc.setConfig(f'Modulation-{ch_str}','CW (constant power)')
             self.mmc.waitForConfig(f'Modulation-{ch_str}','CW (constant power)')
-        
-        # self.mmc.setConfig('Modulation-405','CW (constant power)')
-        # self.mmc.waitForConfig('Modulation-405','CW (constant power)')
-        # self.mmc.setConfig('Modulation-488','CW (constant power)')
-        # self.mmc.waitForConfig('Modulation-488','CW (constant power)')
-        # self.mmc.setConfig('Modulation-561','CW (constant power)')
-        # self.mmc.waitForConfig('Modulation-561','CW (constant power)')
-        # self.mmc.setConfig('Modulation-637','CW (constant power)')
-        # self.mmc.waitForConfig('Modulation-637','CW (constant power)')
-        # self.mmc.setConfig('Modulation-730','CW (constant power)')
-        # self.mmc.waitForConfig('Modulation-730','CW (constant power)')
 
-    
+
     def _set_mmc_laser_power(self):
         """Change laser power."""
         
@@ -958,12 +939,16 @@ class OPMMirrorScan(MagicTemplate):
             trigger_value = self.mmc.getProperty(self.camera_name,'Trigger')
             
         # give camera time to change modes if necessary
-        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[0]','EXPOSURE')
-        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[1]','EXPOSURE')
-        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[2]','EXPOSURE')
-        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-        self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
+        for trig_idx in range(3):
+            self.mmc.setProperty(self.camera_name,f'OUTPUT TRIGGER KIND[{trig_idx}]','EXPOSURE')
+            self.mmc.setProperty(self.camera_name,f'OUTPUT TRIGGER POLARITY[{trig_idx}]','POSITIVE')
+            
+        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[0]','EXPOSURE')
+        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[1]','EXPOSURE')
+        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[2]','EXPOSURE')
+        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[0]','POSITIVE')
+        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[1]','POSITIVE')
+        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
 
     def _enforce_DCAM_internal_trigger(self):
@@ -1104,12 +1089,12 @@ class OPMMirrorScan(MagicTemplate):
         power_405={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '405nm power (%)'},
         power_488={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '488nm power (%)'},
         power_561={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '561nm power (%)'},
-        power_635={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '635nm power (%)'},
+        power_637={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '637nm power (%)'},
         power_730={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '730nm power (%)'},
         layout='vertical',
         call_button='Update powers'
     )
-    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=0.0, power_730=0.0):
+    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_637=0.0, power_730=0.0):
         """Magicgui element to set relative laser powers (0-100%).
 
         Parameters
@@ -1120,13 +1105,13 @@ class OPMMirrorScan(MagicTemplate):
             488 nm laser power
         power_561: float
             561 nm laser power
-        power_635: float
-            635 nm laser power
+        power_637: float
+            637 nm laser power
         power_730: float
             730 nm laser power
         """
 
-        channel_powers = [power_405,power_488,power_561,power_635,power_730]
+        channel_powers = [power_405,power_488,power_561,power_637,power_730]
 
         if not(np.all(channel_powers == self.channel_powers)):
             self.channel_powers=channel_powers
@@ -1137,7 +1122,7 @@ class OPMMirrorScan(MagicTemplate):
     
     @magicgui(
         auto_call=True,
-        active_channels = {"widget_type": "Select", "choices": ["Off","405","488","561","635","730"], "allow_multiple": True, "label": "Active channels"}
+        active_channels = {"widget_type": "Select", "choices": ["Off","405","488","561","637","730"], "allow_multiple": True, "label": "Active channels"}
     )
     def set_active_channel(self, active_channels):
         """Magicgui element to set active lasers.
@@ -1158,7 +1143,7 @@ class OPMMirrorScan(MagicTemplate):
                 states[1]=True
             elif channel == '561':
                 states[2]=True
-            elif channel == '635':
+            elif channel == '637':
                 states[3]=True
             elif channel == '730':
                 states[4]=True

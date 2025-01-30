@@ -7,8 +7,7 @@ TO DO:
 
 2024/12 DPS initial work
 """
-from src.hardware.AOMirror import AOMirror
-
+from src.hardware.AOMirror import AOMirror, mode_names
 import numpy as np
 import h5py
 from numpy.typing import ArrayLike
@@ -17,6 +16,7 @@ from scipy.fftpack import dct
 from scipy.ndimage import center_of_mass
 from scipy.optimize import curve_fit
 from pathlib import Path
+
 # localize_psf imports
 # from localize_psf.localize import (localize_beads_generic, 
 #                                    get_param_filter,
@@ -163,7 +163,7 @@ def save_optimization_results(iteration_images: ArrayLike,
                 f.create_dataset("optimal_coefficients", data=optimal_coefficients)
                 f.create_dataset("optimal_metrics", data=optimal_metrics)
                 f.create_dataset("modes_to_optimize", data=modes_to_optimize)
-                f.create_dataset("zernike_mode_names", data=np.array(AOMirror.mode_names, dtype="S"))
+                f.create_dataset("zernike_mode_names", data=np.array(mode_names, dtype="S"))
     
     
 def load_optimization_results(results_path: Path):
@@ -360,8 +360,8 @@ def shannon(spectrum_2d: ArrayLike, otf_radius: int = 100) -> float:
 
     # Compute Shannon entropy
     entropy = -np.sum(probabilities * np.log2(probabilities, where=(probabilities > 0)))
-
-    return entropy
+    metric = np.log10(entropy)
+    return metric
 
 
 def dct_2d(image: ArrayLike, cutoff: int = 100) -> ArrayLike:
@@ -754,7 +754,7 @@ def metric_shannon_dct(
     
         
     cutoff = otf_radius(image, psf_radius_px)
-    shannon_dct = shannon(dct_2d(image, cutoff), cutoff) * 1e3
+    shannon_dct = shannon(dct_2d(image, cutoff), cutoff)
 
     if return_image:
         return shannon_dct, image

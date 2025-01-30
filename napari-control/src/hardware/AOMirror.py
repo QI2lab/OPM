@@ -5,6 +5,42 @@ from typing import List
 import wavekit_py as wkpy
 import time
 
+mode_names = [
+            "Vert. Tilt",
+            "Horz. Tilt",
+            "Defocus",
+            "Vert. Asm.",
+            "Oblq. Asm.",
+            "Vert. Coma",
+            "Horz. Coma",
+            "3rd Spherical",
+            "Vert. Tre.",
+            "Horz. Tre.",
+            "Vert. 5th Asm.",
+            "Oblq. 5th Asm.",
+            "Vert. 5th Coma",
+            "Horz. 5th Coma",
+            "5th Spherical",
+            "Vert. Tetra.",
+            "Oblq. Tetra.",
+            "Vert. 7th Tre.",
+            "Horz. 7th Tre.",
+            "Vert. 7th Asm.",
+            "Oblq. 7th Asm.",
+            "Vert. 7th Coma",
+            "Horz. 7th Coma",
+            "7th Spherical",
+            "Vert. Penta.",
+            "Horz. Penta.",
+            "Vert. 9th Tetra.",
+            "Oblq. 9th Tetra.",
+            "Vert. 9th Tre.",
+            "Horz. 9th Tre.",
+            "Vert. 9th Asm.",
+            "Oblq. 9th Asm.",
+        ]
+
+
 class AOMirror:
     def __init__(self,
                  wfc_config_file_path: Path,
