@@ -303,7 +303,7 @@ def otf_radius(img: ArrayLike, psf_radius_px: float) -> int:
         OTF cutoff frequency in pixels.
     """
     w = min(img.shape)
-    psf_radius_px = np.ceil(psf_radius_px)  # clip all PSF radii below 1 px to 1.
+    psf_radius_px = max(1, np.ceil(psf_radius_px))  # clip all PSF radii below 1 px to 1.
     cutoff = np.ceil(w / (2 * psf_radius_px)).astype(int)
 
     return cutoff
@@ -347,12 +347,14 @@ def shannon(spectrum_2d: ArrayLike, otf_radius: int = 100) -> float:
     h, w = spectrum_2d.shape
     y, x = np.ogrid[:h, :w]
 
-    # Apply spatial mask based on OTF radius
-    support = (x + y < otf_radius)
+    # Create a circular mask based on the OTF radius
+    center_y, center_x = h // 2, w // 2
+    support = (x - center_x) ** 2 + (y - center_y) ** 2 < otf_radius ** 2
 
     # Normalize values to a probability distribution
     spectrum_values = np.abs(spectrum_2d[support])
     total_energy = np.sum(spectrum_values)
+    
     if total_energy == 0:
         return 0  # Avoid log(0)
 
@@ -380,7 +382,7 @@ def dct_2d(image: ArrayLike, cutoff: int = 100) -> ArrayLike:
     dct_2d : ArrayLike
         Transformed image using DCT.
     """
-    dct_2d = dct(dct(image.astype(np.float32).T, norm='ortho', n=cutoff).T, norm='ortho', n=cutoff)
+    dct_2d = dct(dct(image.astype(np.float32), axis=0, norm='ortho'), axis=1, norm='ortho')
 
     return dct_2d
 
@@ -743,18 +745,24 @@ def metric_shannon_dct(
     entropy_metric : float
         Shannon entropy metric.
     """
-    # Optionally crop the image
-    if crop_size:    
+    # Crop image if necessary
+    if crop_size:
         if image_center is None:
-            center = get_image_center(image, threshold)
+            center = get_image_center(image, threshold)  # Ensure this function is defined
         else:
             center = image_center
-        # crop image
+
+        # Crop image (ensure get_cropped_image is correctly implemented)
         image = get_cropped_image(image, crop_size, center)
-    
-        
+
+    # Compute the cutoff frequency based on OTF radius
     cutoff = otf_radius(image, psf_radius_px)
-    shannon_dct = shannon(dct_2d(image, cutoff), cutoff) * 1e3
+
+    # Compute DCT
+    dct_result = dct_2d(image)
+
+    # Compute Shannon entropy within the cutoff radius
+    shannon_dct = shannon(dct_result, cutoff) * 1e3
 
     if return_image:
         return shannon_dct, image
