@@ -1,45 +1,9 @@
 import numpy as np
 from pathlib import Path
 from numpy.typing import ArrayLike
+from typing import List
 import wavekit_py as wkpy
-# import matplotlib.pyplot as plt
 import time
-
-
-mode_names = [
-    "Vert. Tilt",
-    "Horz. Tilt",
-    "Defocus",
-    "Vert. Asm.",
-    "Oblq. Asm.",
-    "Vert. Coma",
-    "Horz. Coma",
-    "3rd Spherical",
-    "Vert. Tre.",
-    "Horz. Tre.",
-    "Vert. 5th Asm.",
-    "Oblq. 5th Asm.",
-    "Vert. 5th Coma",
-    "Horz. 5th Coma",
-    "5th Spherical",
-    "Vert. Tetra.",
-    "Oblq. Tetra.",
-    "Vert. 7th Tre.",
-    "Horz. 7th Tre.",
-    "Vert. 7th Asm.",
-    "Oblq. 7th Asm.",
-    "Vert. 7th Coma",
-    "Horz. 7th Coma",
-    "7th Spherical",
-    "Vert. Penta.",
-    "Horz. Penta.",
-    "Vert. 9th Tetra.",
-    "Oblq. 9th Tetra.",
-    "Vert. 9th Tre.",
-    "Horz. 9th Tre.",
-    "Vert. 9th Asm.",
-    "Oblq. 9th Asm.",
-]
 
 class AOMirror:
     def __init__(self,
@@ -49,8 +13,26 @@ class AOMirror:
                  flat_positions_file_path: Path = None,
                  coeff_file_path: Path = None,
                  n_modes: int = 32,
-                 modes_to_ignore: list[int] = []):
-        # confirm file paths
+                 modes_to_ignore: List[int] = []):
+        """_summary_
+
+        Parameters
+        ----------
+        wfc_config_file_path : Path
+            _description_
+        haso_config_file_path : Path
+            _description_
+        interaction_matrix_file_path : Path
+            _description_
+        flat_positions_file_path : Path, optional
+            _description_, by default None
+        coeff_file_path : Path, optional
+            _description_, by default None
+        n_modes : int, optional
+            _description_, by default 32
+        modes_to_ignore : list[int], optional
+            _description_, by default []
+        """
         self.haso_config_file_path = haso_config_file_path
         self.wfc_config_file_path = wfc_config_file_path
         self.interaction_matrix_file_path = interaction_matrix_file_path
@@ -60,7 +42,7 @@ class AOMirror:
         self.modes_to_ignore = modes_to_ignore
         
         # create wkpy sub class objects
-        # Wavefront corrector and set obejects
+        # Wavefront corrector and set objects
         self.wfc = wkpy.WavefrontCorrector(
             config_file_path = str(self.wfc_config_file_path)
         )
@@ -120,18 +102,72 @@ class AOMirror:
             
         self.set_mirror_flat()
         self.wfc_positions = {"flat":self.flat_positions}
-    
+
+        self.mode_names = [
+            "Vert. Tilt",
+            "Horz. Tilt",
+            "Defocus",
+            "Vert. Asm.",
+            "Oblq. Asm.",
+            "Vert. Coma",
+            "Horz. Coma",
+            "3rd Spherical",
+            "Vert. Tre.",
+            "Horz. Tre.",
+            "Vert. 5th Asm.",
+            "Oblq. 5th Asm.",
+            "Vert. 5th Coma",
+            "Horz. 5th Coma",
+            "5th Spherical",
+            "Vert. Tetra.",
+            "Oblq. Tetra.",
+            "Vert. 7th Tre.",
+            "Horz. 7th Tre.",
+            "Vert. 7th Asm.",
+            "Oblq. 7th Asm.",
+            "Vert. 7th Coma",
+            "Horz. 7th Coma",
+            "7th Spherical",
+            "Vert. Penta.",
+            "Horz. Penta.",
+            "Vert. 9th Tetra.",
+            "Oblq. 9th Tetra.",
+            "Vert. 9th Tre.",
+            "Horz. 9th Tre.",
+            "Vert. 9th Asm.",
+            "Oblq. 9th Asm.",
+        ]
+
     
     def __del__(self):
         self.wfc.disconnect()
         
         
     def set_mirror_flat(self):
+        """_summary_
+        """
         self.wfc.move_to_absolute_positions(self.flat_positions)
         
         
     def set_mirror_positions(self,
-                             positions: np.ndarray):
+                             positions: ArrayLike):
+        """_summary_
+
+        Parameters
+        ----------
+        positions : ArrayLike
+            _description_
+
+        Returns
+        -------
+        _type_
+            _description_
+
+        Raises
+        ------
+        ValueError
+            _description_
+        """
         if positions.shape[0] != self.wfc.nb_actuators:
             raise ValueError(f"Positions array needs to have shape = {self.wfc.nb.actuators}")
         
@@ -154,7 +190,17 @@ class AOMirror:
         
     def set_modal_coefficients(self,
                                amps: ArrayLike):
-        """
+        """_summary_
+
+        Parameters
+        ----------
+        amps : ArrayLike
+            _description_
+
+        Returns
+        -------
+        _type_
+            _description_
         """
         assert amps.shape[0]==self.n_modes, "amps array must have the same shape as the number of Zernike modes."
         # update modal data
@@ -164,14 +210,12 @@ class AOMirror:
             pupil = self.pupil
         ) 
         
-        # create a new haso_slope from the new modal coeffiecients
+        # create a new haso_slope from the new modal coefficients
         haso_slopes = wkpy.HasoSlopes(
             modalcoef = self.modal_coeff, 
             config_file_path=str(self.haso_config_file_path)
         )
-        
-        # SJS: When we calculate the deltas from "flat_positions" this means we need to define the position when the calibration was done.
-        #      I could see spherical adding some tilt as well. Could be from misalignment during calibration.
+        # calculate the voltage delta to achieve the desired modalcoef
         deltas = self.corr_data_manager.compute_delta_command_from_delta_slopes(delta_slopes=haso_slopes)
         new_positions = np.asarray(self.flat_positions) + np.asarray(deltas)
         
@@ -191,25 +235,35 @@ class AOMirror:
             self.current_positions = new_positions.copy()
             self.current_coeffs = amps
         time.sleep(.01)
-        # self.update_mirror_positions()
-        # print(self.flat_positions)
-        # print(self.current_positions)
-        
         return apply
         
         
     def update_mirror_positions(self):
-        """
+        """_summary_
         """
         self.current_positions = np.array(self.wfc.get_current_positions())
         self.current_coeffs = np.asarray(self.modal_coeff.get_coefs_values()[0])
         self.deltas = self.current_positions - self.flat_positions
+       
         
     def save_mirror_state(self, wfc_save_path: Path = None):
+        """_summary_
+
+        Parameters
+        ----------
+        wfc_save_path : Path, optional
+            _description_, by default None
+        """
         self.wfc.save_current_positions_to_file(pmc_file_path=str(wfc_save_path))
     
+    
     def save_mirror_positions(self, name: str = None):
-        """
+        """_summary_
+
+        Parameters
+        ----------
+        name : str, optional
+            _description_, by default None
         """
         assert name is None, "saving mirror position requires a name!"
         
@@ -221,11 +275,12 @@ class AOMirror:
         
         # save last updated
         coeff_save_path = self.interaction_matrix_file_path.parent / Path(f"{name}_modalcoeffs.json")
+        
         # copied from navigate
         coefs, coef_inds = self.current_coeffs
         mode_dict = {}
         for c in coef_inds:
-            mode_dict[mode_names[c - 1]] = f"{coefs[c-1]:.4f}"
+            mode_dict[self.mode_names[c - 1]] = f"{coefs[c-1]:.4f}"
 
         import json
 
@@ -237,9 +292,6 @@ class AOMirror:
             self.flat_positions = self.current_positions
             self.flat_coeffs = self.current_coeffs
             self.flat_positions_file_path = actuator_save_path
-
-# NOTE: There can be a disconnect between what we show on the mirror and what the current modal_coeffs are. if the mirror actuators are set without reseting the current coeffs, as in directly, then the coeffs will not match the current mirror state. 
-
 
 
 def DM_voltage_to_map(v):
@@ -254,7 +306,6 @@ def DM_voltage_to_map(v):
     -------
     Author: Nikita Vladimirov
     """
-    import numpy as np
     M = np.zeros((8,8))
     M[:,:] = None
     M[2:6,0] = v[:4]
@@ -267,24 +318,44 @@ def DM_voltage_to_map(v):
     M[2:6,7] = v[48:52]
     return M
     
-# def plotDM(cmd, title="", 
-#            cmap = "jet", 
-#            vmin=-0.25,
-#            vmax=0.25,
-#            save_dir_path: Path = None):
-#     """Plot deformable mirror (Mirao52e) commands arranged in 2D colormap, units: Volts"""
-#     import numpy as np
-#     import matplotlib.pyplot as plt
-#     fig, ax = plt.subplots(1,1)
-#     valmax = np.nanmax(cmd)
-#     valmin = np.nanmin(cmd)
-#     im = ax.imshow(DM_voltage_to_map(cmd), vmin=vmin, vmax=vmax,
-#                     interpolation='nearest', cmap = cmap)
-#     ax.text(0,-1, title + '\n min=' + "{:1.2f}".format(valmin) +
-#            ', max=' + "{:1.2f}".format(valmax) + ' V',fontsize=12)
     
-#     plt.colorbar(im)
-#     if save_dir_path:
-#         fig.savefig(save_dir_path / Path("mirror_positions.png"))
-#     plt.show()
+def plotDM(cmd, title:str = "", 
+           cmap: str = "jet", 
+           vmin: float =-0.25,
+           vmax: float =0.25,
+           save_dir_path: Path = None,
+           show_fig: bool = False):
+    """_summary_
+
+    Parameters
+    ----------
+    cmd : _type_
+        _description_
+    title : str, optional
+        _description_, by default ""
+    cmap : str, optional
+        _description_, by default "jet"
+    vmin : float, optional
+        _description_, by default -0.25
+    vmax : float, optional
+        _description_, by default 0.25
+    save_dir_path : Path, optional
+        _description_, by default None
+    show_fig : bool, optional
+        _description_, by default False
+    """
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(1,1)
+    valmax = np.nanmax(cmd)
+    valmin = np.nanmin(cmd)
+    im = ax.imshow(DM_voltage_to_map(cmd), vmin=vmin, vmax=vmax,
+                    interpolation='nearest', cmap = cmap)
+    ax.text(0,-1, title + '\n min=' + "{:1.2f}".format(valmin) +
+           ', max=' + "{:1.2f}".format(valmax) + ' V',fontsize=12)
+    
+    plt.colorbar(im)
+    if save_dir_path:
+        fig.savefig(save_dir_path / Path("mirror_positions.png"))
+    if show_fig:
+        plt.show()
     

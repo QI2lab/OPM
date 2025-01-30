@@ -4,7 +4,7 @@
 Last updated: 2025.01.24 by Douglas Shepherd
 """
 
-
+import h5py
 from pymmcore_plus import CMMCorePlus
 from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
@@ -21,10 +21,8 @@ import zarr
 from src.hardware.AOMirror import AOMirror
 from src.hardware.OPMNIDAQ import OPMNIDAQ
 from src.hardware.PicardShutter import PicardShutter
-from src.utils.sensorless_ao import (metric_brightness,
-                                     metric_gauss2d,
-                                     metric_shannon_dct,
-                                     quadratic_fit)
+from src.utils.sensorless_ao import (metric_brightness,metric_gauss2d,metric_shannon_dct,quadratic_fit,
+                                     save_optimization_results,plot_metric_progress,plot_zernike_coeffs)
 from src.utils.autofocus_remote_unit import manage_O3_focus
 from src.utils.data_io import write_metadata
 from src.utils.image_post_processing import deskew
@@ -84,6 +82,7 @@ class OPMMirrorScan(MagicTemplate):
         self.save_path = Path('D:/')
 
         # Channel and laser setup
+        # TODO: Generate list of laser names for changing properties, make sure it matches the channel_labels.
         self.channel_labels = ["405", "488", "561", "635", "730"]
         self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
         self.laser_blanking_value = True
@@ -109,6 +108,7 @@ class OPMMirrorScan(MagicTemplate):
         circ_buffer_mb = 16000
         self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
+
     def _set_worker_2d(self,worker_2d):
         """Set 2D live-mode thread worker.
         
@@ -121,6 +121,7 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_2d = worker_2d
         self.worker_2d_started = False
         self.worker_2d_running = False
+
         
     def _set_worker_3d(self,worker_3d):
         """Set 3D live-mode thread worker.
@@ -135,6 +136,7 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_3d_started = False
         self.worker_3d_running = False
 
+
     def _set_ao_worker_3d(self,ao_worker_3d):
         """Set 3D adaptive optics optimization thread worker.
         
@@ -148,6 +150,7 @@ class OPMMirrorScan(MagicTemplate):
         self.ao_worker_3d_started = False
         self.ao_worker_3d_running = False
 
+
     def _create_3d_t_worker(self):
         """Create 3D timelapse acquistion thread worker.
         
@@ -156,6 +159,7 @@ class OPMMirrorScan(MagicTemplate):
 
         worker_3d_t = self._acquire_3d_t_data()
         self._set_worker_3d_t(worker_3d_t)
+
 
     def _set_worker_3d_t(self,worker_3d_t):
         """Set 3D timelapse acquistion thread worker.
@@ -169,6 +173,7 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_3d_t = worker_3d_t
         self.worker_3d_t_running = False
 
+
     def _set_viewer(self,viewer):
         """Set napari viewer.
         
@@ -178,6 +183,7 @@ class OPMMirrorScan(MagicTemplate):
             The napari viewer instance.
         """
         self.viewer = viewer
+
 
     def _save_metadata(self):
         """Save metadata to CSV file."""
@@ -212,6 +218,7 @@ class OPMMirrorScan(MagicTemplate):
         
         write_metadata(scan_param_data[0], self.output_dir_path / Path('scan_metadata.csv'))
 
+
     def _update_layers(self,values):
         """Update napari viewer.
         
@@ -232,6 +239,7 @@ class OPMMirrorScan(MagicTemplate):
             self.viewer.layers[channel_name].data = new_image
         except Exception:
             self.viewer.add_image(new_image, name=channel_name, blending='additive', colormap=colormap,contrast_limits=[110,.9*np.max(new_image)])
+
 
     @thread_worker
     def _acquire_2d_data(self):
@@ -289,6 +297,7 @@ class OPMMirrorScan(MagicTemplate):
                 time.sleep(.05)
                 yield c, raw_image_2d
 
+    
     def _execute_3d_sweep(self):
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -367,6 +376,7 @@ class OPMMirrorScan(MagicTemplate):
         #-----------------------------------------------------End acquisition----------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
 
+
     @thread_worker
     def _acquire_3d_data(self):
         """Live-mode: 3D acquisition and deskewing."""
@@ -388,6 +398,7 @@ class OPMMirrorScan(MagicTemplate):
 
             del raw_image_stack
 
+
     @thread_worker
     def _optimize_AO_3d(self):
         """Live-mode: optimize AO."""
@@ -395,15 +406,16 @@ class OPMMirrorScan(MagicTemplate):
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of AO opt parameters------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
-        initial_coeffs = self.ao_mirror.current_coeffs.copy() # coeff before optmization
-        test_coeffs = initial_coeffs.copy() # modified coeffs to be applied to mirror
-        optimized_coeffs = initial_coeffs.copy() # final coeffs after running iterations
+        initial_zern_modes = self.ao_mirror.current_coeffs.copy() # coeff before optmization
+        iteration_zern_modes = initial_zern_modes.copy() # 
+        active_zern_modes = initial_zern_modes.copy() # modified coeffs to be or are applied to mirror
+        optimized_zern_modes = initial_zern_modes.copy() # final coeffs after running iterations
         metric_type = "shannon_dct"
         psf_radius_px = 1.5
         modes_to_optimize=[7,14,23,3,4,5,6,8,9,10,11,12,13,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31]
         n_iter=3
         n_steps=3
-        init_range=.150
+        init_range=.300
         alpha=.5
         verbose=True
         save_results = True
@@ -411,10 +423,10 @@ class OPMMirrorScan(MagicTemplate):
         crop_size = None
         compare_to_zero_delta = True
         if save_results:
+            optimal_metrics = []
+            optimal_coefficients = []
             mode_images = []
             iteration_images = []
-            metrics_to_save = []
-            coeffs_to_save = []
         
         #------------------------------------------------------------------------------------------------------------------------------------
         #-----------------------------------------------End setup of AO opt parameters-------------------------------------------------------
@@ -455,16 +467,16 @@ class OPMMirrorScan(MagicTemplate):
             
             # Calculate the starting metric, future pertubations must improve from here.
             if metric_type=="brightness":
-                zero_metric = metric_brightness(image=max_z_deskewed_image)
+                starting_metric = metric_brightness(image=max_z_deskewed_image)
             elif metric_type=="gauss2d":
-                zero_metric = metric_gauss2d(image=max_z_deskewed_image)
+                starting_metric = metric_gauss2d(image=max_z_deskewed_image)
             elif metric_type=="shannon_dct":
-                zero_metric = metric_shannon_dct(image=max_z_deskewed_image,
-                                                 psf_radius_px=psf_radius_px,
-                                                 crop_size=crop_size)
+                starting_metric = metric_shannon_dct(image=max_z_deskewed_image,
+                                                     psf_radius_px=psf_radius_px,
+                                                     crop_size=crop_size)
             
             if k==0:
-                opt_metric = zero_metric        
+                optimal_metric = starting_metric        
                 if save_results:
                     iteration_images.append(max_z_deskewed_image)
                     
@@ -474,13 +486,13 @@ class OPMMirrorScan(MagicTemplate):
                     print(f"  Perturbing mirror mode: {mode+1} / {modes_to_optimize[-1]}")
                 """perturb mirror for given mode and delta"""
                  # Grab the current starting modes for this iteration
-                current_mode_coeffs = self.ao_mirror.current_coeffs.copy()
+                iteration_zern_modes = self.ao_mirror.current_coeffs.copy()
                 deltas = np.linspace(-delta_range, delta_range, n_steps)
                 metrics = []
                 for delta in deltas:
-                    test_coeffs = current_mode_coeffs.copy()
-                    test_coeffs[mode] += delta
-                    success = self.ao_mirror.set_modal_coefficients(test_coeffs)
+                    active_zern_modes = iteration_zern_modes.copy()
+                    active_zern_modes[mode] += delta
+                    success = self.ao_mirror.set_modal_coefficients(active_zern_modes)
                     if not(success):
                         print("Setting mirror coefficients failed!")
                         metric = 0
@@ -562,17 +574,17 @@ class OPMMirrorScan(MagicTemplate):
                     if verbose:
                         print(f"        Exception in fit occurred, optimal delta = {optimal_delta:.4f}")
         
-                coeff_opt = current_mode_coeffs[mode] + optimal_delta
+                coeff_opt = iteration_zern_modes[mode] + optimal_delta
                 
                 # test the new coeff to make sure it improves the overall metric.
-                test_coeffs[mode] = coeff_opt
+                active_zern_modes[mode] = coeff_opt
 
                 # verify mirror successfully loads requested state
-                success = self.ao_mirror.set_modal_coefficients(test_coeffs)
+                success = self.ao_mirror.set_modal_coefficients(active_zern_modes)
                 if not(success):
                     if verbose:
-                        print("    Setting mirror coefficients failed, using current mode coefficient.")
-                    coeff_to_keep = current_mode_coeffs[mode]
+                        print("    Setting mirror positions failed, using current mode coefficient.")
+                    coeff_to_keep = iteration_zern_modes[mode]
                 else:
                     # Measure the metric using the coeff to keep mirror state
                     """acquire 3D data and max project"""
@@ -617,92 +629,79 @@ class OPMMirrorScan(MagicTemplate):
                     if compare_to_zero_delta:
                         if metric>=metrics[len(metrics)//2]:
                             coeff_to_keep = coeff_opt
-                            opt_metric = metric
+                            optimal_metric = metric
                             if verbose:
                                 print(f"    Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
                         else:
                             # if not keep the current mode coeff
                             if verbose:
-                                print("    Metric not improved using current mode coefficient.",
-                                    f"\n      optimal metric: {opt_metric:.6f}",
-                                    f"\n      zero delta metric: {metrics[len(metrics)//2]:.6f}",
+                                print("    Metric not improved using previous iteration's mode",
+                                    f"\n      optimal metric: {optimal_metric:.6f}",
                                     f"\n      rejected metric: {metric:.6f}")
-                            coeff_to_keep = current_mode_coeffs[mode]
+                            coeff_to_keep = iteration_zern_modes[mode]
                     else:
-                        if metric>=opt_metric:
+                        if metric>=optimal_metric:
                             coeff_to_keep = coeff_opt
-                            opt_metric = metric
+                            optimal_metric = metric
                             if verbose:
                                 print(f"      Keeping new coeff: {coeff_to_keep:.4f} with metric: {metric:.4f}")
                         else:
                             # if not keep the current mode coeff
                             if verbose:
-                                print("    Metric not improved using current mode coefficient.",
-                                    f"\n     optimal metric: {opt_metric:.6f}",
+                                print("    Metric not improved using previous iteration's mode",
+                                    f"\n     optimal metric: {optimal_metric:.6f}",
                                     f"\n     rejected metric: {metric:.6f}")
-                            coeff_to_keep = current_mode_coeffs[mode]
+                            coeff_to_keep = iteration_zern_modes[mode]
                 
             
                 if save_results:
-                    metrics_to_save.append(opt_metric)
+                    optimal_metrics.append(optimal_metric)
                     
                 # update mirror with the coeff to keep
-                test_coeffs[mode] = coeff_to_keep
-                _ = self.ao_mirror.set_modal_coefficients(test_coeffs)
+                active_zern_modes[mode] = coeff_to_keep
+                _ = self.ao_mirror.set_modal_coefficients(active_zern_modes)
                 """Loop back to top and do the next mode until all modes are done"""
           
-            # Update the current_mode_coeffs
-            current_mode_coeffs = self.ao_mirror.current_coeffs.copy()
+            # Update the iteration_zern_modes with final mirror state
+            iteration_zern_modes = self.ao_mirror.current_coeffs.copy()
             if verbose:
-                print(f"  current_mode_coeffs at end of iteration:\n{current_mode_coeffs}")
+                print(f"  Zernike modes at the end of iteration:\n{iteration_zern_modes}")
                 
             # Reduce the sweep range for finer sampling around new optimal coefficient amplitude
             delta_range *= alpha
             if verbose:
                 print(f"  Reduced sweep range to {delta_range:.4f}",
-                    f"\n  Current metric: {metric:.4f}")
+                      f"  Current metric: {metric:.4f}")
             
             if save_results: 
-                coeffs_to_save.append(self.ao_mirror.current_coeffs.copy())
+                optimal_coefficients.append(self.ao_mirror.current_coeffs.copy())
                 iteration_images.append(max_z_deskewed_image)
                 
             """Loop back to top and do the next iteration"""
                 
-        optimized_coeffs = self.ao_mirror.current_coeffs.copy()          
+        optimized_zern_modes = self.ao_mirror.current_coeffs.copy()          
         if verbose:
-            print(f"Starting coefficients:\n{initial_coeffs}",
-                f"\nFinal optimized coefficients:\n{optimized_coeffs}")
+            print(f"Starting Zernike mode amplitude:\n{initial_zern_modes}",
+                f"\nFinal optimized Zernike mode amplitude:\n{optimized_zern_modes}")
         
-        # apply new coefficeints to the mirror
-        _ = self.ao_mirror.set_modal_coefficients(optimized_coeffs)
+        # apply optimized Zernike mode coefficients to the mirror
+        _ = self.ao_mirror.set_modal_coefficients(optimized_zern_modes)
         
         if self.save_path.exists():
             save_wfc_path = self.save_path / Path("wfc_optimized_mirror_positions.wcs")
             self.ao_mirror.save_mirror_state(save_wfc_path)
             
-            iteration_images_save_path = self.save_path / Path("AO_iteration_images.tif")
-            mode_images_save_path = self.save_path / Path("AO_mode_images.tif")
-            optimal_metrics_save_path = self.save_path / Path("optimized_metric.npy")
-            optimal_coeffs_save_path = self.save_path / Path("optimized_coeffs.npy")
+            # Create save paths for results and metrics / coeffs summary figures.
+            results_save_path = self.save_path / Path("ao_optimization.h5")
+            optimal_metrics_path = self.save_path / Path("ao_optimal_metrics.png")
+            optimal_coeffs_path = self.save_path / Path("ao_coefficients.png")
             
-            imwrite(
-                iteration_images_save_path,
-                np.asarray(iteration_images),
-                imagej=True,
-                resolution=(1.0 / .115, 1.0 / .115),
-                metadata={'axes': 'TYX', 'unit':'um'}
-            )
-            
-            imwrite(
-                mode_images_save_path,
-                np.asarray(mode_images),
-                imagej=True,
-                resolution=(1.0 / .115, 1.0 / .115),
-                metadata={'axes': 'TYX', 'unit':'um'}
-            )
-            
-            np.save(optimal_metrics_save_path, metrics_to_save)
-            np.save(optimal_coeffs_save_path, coeffs_to_save)
+            # Save ao results
+            optimal_metrics = np.reshape(optimal_metrics, [n_iter, len(modes_to_optimize)])
+            save_optimization_results(np.array(iteration_images), np.array(mode_images), optimal_coefficients, 
+                                      optimal_metrics, modes_to_optimize, results_save_path)
+            plot_metric_progress(optimal_metrics, modes_to_optimize, np.array(AOMirror.mode_names), optimal_metrics_path, False)
+            plot_zernike_coeffs(optimal_coefficients, np.array(AOMirror.mode_names), optimal_coeffs_path, False)
             
         #------------------------------------------------------------------------------------------------------------------------------------
         #---------------------------------------------------End AO optimization--------------------------------------------------------------
@@ -863,6 +862,7 @@ class OPMMirrorScan(MagicTemplate):
         # self.channel_powers=[0,0,0,0,0]
         # self._set_mmc_laser_power()
 
+    
     def _crop_camera(self):
         """Crop camera to GUI values."""
 
@@ -877,6 +877,7 @@ class OPMMirrorScan(MagicTemplate):
                         int(self.ROI_width_y))
         self.mmc.waitForDevice(self.camera_name)
 
+    
     def _lasers_to_hardware(self):
         """Change lasers to hardware control. """
 
@@ -885,21 +886,26 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.waitForConfig('Laser','Off')
 
         # set all laser to external triggering
-        self.mmc.setConfig('Modulation-405','External-Digital')
-        self.mmc.waitForConfig('Modulation-405','External-Digital')
-        self.mmc.setConfig('Modulation-488','External-Digital')
-        self.mmc.waitForConfig('Modulation-488','External-Digital')
-        self.mmc.setConfig('Modulation-561','External-Digital')
-        self.mmc.waitForConfig('Modulation-561','External-Digital')
-        self.mmc.setConfig('Modulation-637','External-Digital')
-        self.mmc.waitForConfig('Modulation-637','External-Digital')
-        self.mmc.setConfig('Modulation-730','External-Digital')
-        self.mmc.waitForConfig('Modulation-730','External-Digital')
+        for ch_str in self.channel_labels:
+            self.mmc.setConfig(f'Modulation-{ch_str}','External-Digital')
+            self.mmc.waitForConfig(f'Modulation-{ch_str}','External-Digital')
+            
+        # self.mmc.setConfig('Modulation-405','External-Digital')
+        # self.mmc.waitForConfig('Modulation-405','External-Digital')
+        # self.mmc.setConfig('Modulation-488','External-Digital')
+        # self.mmc.waitForConfig('Modulation-488','External-Digital')
+        # self.mmc.setConfig('Modulation-561','External-Digital')
+        # self.mmc.waitForConfig('Modulation-561','External-Digital')
+        # self.mmc.setConfig('Modulation-637','External-Digital')
+        # self.mmc.waitForConfig('Modulation-637','External-Digital')
+        # self.mmc.setConfig('Modulation-730','External-Digital')
+        # self.mmc.waitForConfig('Modulation-730','External-Digital')
 
         # turn all lasers on
         self.mmc.setConfig('Laser','AllOn')
         self.mmc.waitForConfig('Laser','AllOn')
 
+    
     def _lasers_to_software(self):
         """Change lasers to software control."""
 
@@ -908,17 +914,22 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.waitForConfig('Laser','Off')
 
         # set all lasers back to software control
-        self.mmc.setConfig('Modulation-405','CW (constant power)')
-        self.mmc.waitForConfig('Modulation-405','CW (constant power)')
-        self.mmc.setConfig('Modulation-488','CW (constant power)')
-        self.mmc.waitForConfig('Modulation-488','CW (constant power)')
-        self.mmc.setConfig('Modulation-561','CW (constant power)')
-        self.mmc.waitForConfig('Modulation-561','CW (constant power)')
-        self.mmc.setConfig('Modulation-637','CW (constant power)')
-        self.mmc.waitForConfig('Modulation-637','CW (constant power)')
-        self.mmc.setConfig('Modulation-730','CW (constant power)')
-        self.mmc.waitForConfig('Modulation-730','CW (constant power)')
+        for ch_str in self.channel_labels:
+            self.mmc.setConfig(f'Modulation-{ch_str}','CW (constant power)')
+            self.mmc.waitForConfig(f'Modulation-{ch_str}','CW (constant power)')
+        
+        # self.mmc.setConfig('Modulation-405','CW (constant power)')
+        # self.mmc.waitForConfig('Modulation-405','CW (constant power)')
+        # self.mmc.setConfig('Modulation-488','CW (constant power)')
+        # self.mmc.waitForConfig('Modulation-488','CW (constant power)')
+        # self.mmc.setConfig('Modulation-561','CW (constant power)')
+        # self.mmc.waitForConfig('Modulation-561','CW (constant power)')
+        # self.mmc.setConfig('Modulation-637','CW (constant power)')
+        # self.mmc.waitForConfig('Modulation-637','CW (constant power)')
+        # self.mmc.setConfig('Modulation-730','CW (constant power)')
+        # self.mmc.waitForConfig('Modulation-730','CW (constant power)')
 
+    
     def _set_mmc_laser_power(self):
         """Change laser power."""
         
@@ -928,6 +939,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 637-140C - PowerSetpoint (%)',float(self.channel_powers[3]))
         self.mmc.setProperty(r'Coherent-Scientific Remote',r'Laser 730-30C - PowerSetpoint (%)',float(self.channel_powers[4]))
 
+    
     def _setup_camera(self):
         """Setup camera readout and triggering for OPM."""
 
@@ -953,6 +965,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[1]','POSITIVE')
         self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
 
+
     def _enforce_DCAM_internal_trigger(self):
         """Enforce camera being in trigger = INTERNAL mode."""
 
@@ -967,8 +980,8 @@ class OPMMirrorScan(MagicTemplate):
             self.mmc.setConfig('Camera-TriggerSource','INTERNAL')
             self.mmc.waitForConfig('Camera-TriggerSource','INTERNAL')
             trigger_value = self.mmc.getProperty(self.camera_name,'TRIGGER SOURCE')
-
-            
+   
+    
     def _startup(self):
         """Startup OPM instrument in neutral state for all hardware."""
 
@@ -994,6 +1007,7 @@ class OPMMirrorScan(MagicTemplate):
 
         self.mmc.setProperty(self.mmc.getFocusDevice(),'MotorOnOff','On')
 
+    
     def _shutdown(self):
         """Shutdown OPM instrument in neutral state for all hardware."""
         
@@ -1008,6 +1022,7 @@ class OPMMirrorScan(MagicTemplate):
 
         self.shutter_controller.shutDown()
 
+    
     @magicgui(
         auto_call=False,
         exposure_ms={"widget_type": "FloatSpinBox", "min": 0.1, "max": 500,'label': 'Camera exposure (ms)'},
@@ -1029,6 +1044,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.exposure_changed = False
 
+    
     @magicgui(
         auto_call=False,
         width_x={"widget_type": "SpinBox", "min": 0, "max": 2304,'label': 'ROI width (non-tilt)'},
@@ -1060,6 +1076,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.ROI_changed = False
 
+    
     @magicgui(
         auto_call=False,
         scan_step={"widget_type": "FloatSpinBox", "min": 0, "max": 2.0,'label': 'Scan step (um)'},
@@ -1081,6 +1098,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.scan_step_changed = False
 
+    
     @magicgui(
         auto_call=False,
         power_405={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '405nm power (%)'},
@@ -1116,6 +1134,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.powers_changed = False
         
+    
     @magicgui(
         auto_call=True,
         active_channels = {"widget_type": "Select", "choices": ["Off","405","488","561","635","730"], "allow_multiple": True, "label": "Active channels"}
@@ -1150,6 +1169,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.channels_changed = False
 
+    
     @magicgui(
         auto_call=True,
         laser_blanking={"widget_type": "CheckBox", "label": 'Laser blanking'},
@@ -1168,6 +1188,7 @@ class OPMMirrorScan(MagicTemplate):
             self.laser_blanking_value = laser_blanking
             self.opmdaq.set_laser_blanking(self.laser_blanking_value)
 
+    
     @magicgui(
         auto_call=False,
         scan_mirror_footprint_um={"widget_type": "FloatSpinBox", "min": 5, "max": 250, "label": 'Mirror sweep (um)'},
@@ -1189,6 +1210,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.footprint_changed = False
 
+    
     @magicgui(
         auto_call=True,
         live_mode_2D={"widget_type": "PushButton", "label": 'Start/Stop Live (2D)'},
@@ -1224,6 +1246,7 @@ class OPMMirrorScan(MagicTemplate):
                     raise Exception('Unknown error.')
         else:
             raise Exception('Set at least one active channel before starting.')
+    
     
     @magicgui(
         auto_call=True,
@@ -1329,6 +1352,7 @@ class OPMMirrorScan(MagicTemplate):
             time delay between timepoints in seconds. 0 is continuous imaging.
         """
 
+    
     # set filepath for saving data
     @magicgui(
         auto_call=False,
@@ -1347,6 +1371,7 @@ class OPMMirrorScan(MagicTemplate):
             path to save data
         """
 
+    
     @magicgui(
         auto_call=True,
         timelapse_mode_3D={"widget_type": "PushButton", "label": 'Start acquistion'},
@@ -1369,6 +1394,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             raise Exception('Stop active live mode first.')
 
+    
     @magicgui(
         auto_call=True,
         shutter_change={"widget_type": "PushButton", "label": 'Toggle alignment laser shutter.'},
@@ -1388,6 +1414,7 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.shutter_controller.closeShutter()
             self.shutter_state = 0
+    
     
     @magicgui(
         auto_call=True,
