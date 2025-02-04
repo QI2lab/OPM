@@ -27,7 +27,7 @@ def main():
     #------------------------------------------------------------------------------------------------------------------------------------
 
     # set up lasers
-    channel_labels = ["405", "488", "561", "635", "730"]
+    channel_labels = ["405", "488", "561", "637", "730"]
     channel_states = [False, False, True, False, False] # true -> active, false -> inactive
     channel_powers = [30, 30, 100, 100, 0] # (0 -> 100%)
     do_ind = [0, 1, 2, 3, 4] # digital output line corresponding to each channel

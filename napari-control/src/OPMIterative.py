@@ -303,7 +303,7 @@ class OPMIterative(MagicTemplate):
         power_405={"widget_type": "FloatSpinBox", 'min': 0, 'max': 100, 'label': '405 nm power'},
         power_488={"widget_type": "FloatSpinBox", 'min': 0, 'max': 100, 'label': '488 nm power'},
         power_561={"widget_type": "FloatSpinBox", 'min': 0, 'max': 100, 'label': '561 nm power'},
-        power_635={"widget_type": "FloatSpinBox", 'min': 0, 'max': 100, 'label': '635 nm power'},
+        power_637={"widget_type": "FloatSpinBox", 'min': 0, 'max': 100, 'label': '637 nm power'},
         power_730={"widget_type": "FloatSpinBox", 'min': 0, 'max': 100, 'label': '730 nm power'},
         call_button='Set lasers')
     def define_channels(
@@ -312,11 +312,11 @@ class OPMIterative(MagicTemplate):
         power_405=0.0,
         power_488=0.0,
         power_561=0.0,
-        power_635=0.0,
+        power_637=0.0,
         power_730=0.0):
 
         if (self.fluidics_loaded and self.first_round_run):
-            self.channel_powers_readout = [0.0,power_488,power_561,power_635,power_730]
+            self.channel_powers_readout = [0.0,power_488,power_561,power_637,power_730]
 
             if not(self.codebook['nuclei_round']==-1):
                 self.channel_powers_nuclei =  [power_405,power_488,0.0,0.0,0.0]

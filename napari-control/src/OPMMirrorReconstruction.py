@@ -15,10 +15,10 @@ from magicgui import magicgui
 from magicgui.tqdm import trange
 from pathlib import Path
 import numpy as np
-from src.utils.image_post_processing import deskew
 from napari.qt.threading import thread_worker
 import zarr
 import dask.array as da
+from src.utils.image_post_processing import deskew
 from src.utils.data_io import read_metadata, return_opm_psf, time_stamp
 from skimage.measure import block_reduce
 from itertools import compress
@@ -29,14 +29,14 @@ from numcodecs import Blosc, blosc
 try:
     import cupy as cp
     CP_AVAILABLE = True
-except:
+except ImportError:
     CP_AVAILABLE = False
 
 if CP_AVAILABLE:
     try:
         from cucim.skimage.exposure import match_histograms
         CUCIM_AVAILABLE = True
-    except:
+    except ImportError:
         from skimage.exposure import match_histograms
         CUCIM_AVAILABLE = False
 else:
@@ -95,9 +95,9 @@ class OPMMirrorReconstruction(MagicTemplate):
         chan_405_active = df_metadata['405_active']
         chan_488_active = df_metadata['488_active']
         chan_561_active = df_metadata['561_active']
-        chan_635_active = df_metadata['635_active']
+        chan_637_active = df_metadata['635_active']
         chan_730_active = df_metadata['730_active']
-        active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_635_active,chan_730_active]
+        active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_637_active,chan_730_active]
         channel_idxs = [0,1,2,3,4]
         channels_in_data = list(compress(channel_idxs, active_channels))
         n_active_channels = len(channels_in_data)
@@ -243,7 +243,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                 opm_data.attrs['405_state'] = chan_405_active
                 opm_data.attrs['488_state'] = chan_488_active
                 opm_data.attrs['561_state'] = chan_561_active
-                opm_data.attrs['635_state'] = chan_635_active
+                opm_data.attrs['635_state'] = chan_637_active
                 opm_data.attrs['730_state'] = chan_730_active
             
                 # free up memory
@@ -289,9 +289,9 @@ class OPMMirrorReconstruction(MagicTemplate):
                 chan_405_active = df_metadata['405_active']
                 chan_488_active = df_metadata['488_active']
                 chan_561_active = df_metadata['561_active']
-                chan_635_active = df_metadata['635_active']
+                chan_637_active = df_metadata['635_active']
                 chan_730_active = df_metadata['730_active']
-                active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_635_active,chan_730_active]
+                active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_637_active,chan_730_active]
                 channel_idxs = [0,1,2,3,4]
                 channels_in_data = list(compress(channel_idxs, active_channels))
                 n_active_channels = len(channels_in_data)
@@ -461,7 +461,7 @@ class OPMMirrorReconstruction(MagicTemplate):
                 opm_data.attrs['405_state'] = chan_405_active
                 opm_data.attrs['488_state'] = chan_488_active
                 opm_data.attrs['561_state'] = chan_561_active
-                opm_data.attrs['635_state'] = chan_635_active
+                opm_data.attrs['635_state'] = chan_637_active
                 opm_data.attrs['730_state'] = chan_730_active
 
                 del opm_data   
@@ -475,7 +475,7 @@ class OPMMirrorReconstruction(MagicTemplate):
         This function creates one ome-tiff and one Z max projection ome-tiff per timepoint.
         """
 
-         for path in Path(self.tiff_path).iterdir():
+        for path in Path(self.tiff_path).iterdir():
             if path.is_dir():
                 print(time_stamp(),'Processing path: '+str(path.name))
                 self.data_path = path
@@ -583,7 +583,7 @@ class OPMMirrorReconstruction(MagicTemplate):
         self.viewer.layers.clear()
 
         # channel names and colormaps to match control software
-        channel_names = ['405nm','488nm','561nm','635nm','730nm']
+        channel_names = ['405nm','488nm','561nm','637nm','730nm']
         colormaps = ['bop purple','bop blue','bop orange','red','grey']
 
         active_channel_names=[]
@@ -686,7 +686,7 @@ class OPMMirrorReconstruction(MagicTemplate):
         start_processing: bool
             Start processing of the raw OPM dataset.
         """
-        if not(self.data_path is None):
+        if self.data_path:
             self.worker_processing.start()
             self.worker_processing.returned.connect(self._create_processing_worker)
             self.worker_processing.returned.connect(self._update_viewer)
