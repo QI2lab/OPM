@@ -21,231 +21,433 @@ import numpy as np
 
 class OPMNIDAQ:
 
-    def __init__(self,scan_mirror_neutral=0.0,scan_mirror_calibration=0.043):
-
+    def __init__(self):
+        """_summary_
+        """
+        # Define acquisition parameters.
         self.scan_type = 'mirror'
-        self.interleave_lasers = True
         self.do_ind = [0,1,2,3,4]
         self.active_channels_indices = None
         self.n_active_channels = 0
+        self.exposure = 0.050 # seconds
 
-        self.DAQ_sample_rate_Hz = 10000
-        self.num_DI_channels = 8
-        self.dataDO = None
-        self.waveform = None
-        self.channelAO = "/Dev1/ao0"
-        self.min_AO_voltage = -7.0
-        self.max_AO_voltage = 7.0
-        self.channelDO = "/Dev1/port0/line0:7"
-        self.channelDI_trigger_from_camera = "/Dev1/PFI0"
-        self.channelDI_start_trigger = "/Dev1/PFI1"
-        self.channelDI_change_trigger = "/Dev1/PFI2"
-
-        self.scan_mirror_neutral = scan_mirror_neutral
-        self.scan_mirror_calibration = scan_mirror_calibration
+        # Define waveform generation parameters.
+        self.daq_sample_rate_hz = 10000
+        self.num_do_channels = len(self.do_ind)
+        self.do_waveform = [False] * len(self.do_ind)
+        self.ao_waveform = [np.zeros(1), np.zeros(1)]
+                
+        # Configure hardware pin addresses.
+        self.dev_name = "Dev1"
+        self.channel_addresses = {"do_channels":["/Dev1/port0/line0", # 405
+                                                 "/Dev1/port0/line1", # 473
+                                                 "/Dev1/port0/line2", # 532
+                                                 "/Dev1/port0/line3", # 561
+                                                 "/Dev1/port0/line4"],# 638
+                                  "ao_mirrors":["/Dev1/ao0",  # image scanning galvo
+                                                "/Dev1/ao1"], # projection scanning galvo
+                                  "di_camera_trigger":"/Dev1/PFI0",
+                                  "di_start_trigger":"/Dev1/PFI1",
+                                  "di_change_trigger":"/Dev1/PFI2",
+                                  "di_start_ao_trigger":"/Dev1/PFI3"}
+        
+        self.address_channel_do = ["/Dev1/port0/line0", # 405
+                                   "/Dev1/port0/line1", # 473
+                                   "/Dev1/port0/line2", # 532
+                                   "/Dev1/port0/line3", # 561
+                                   "/Dev1/port0/line4"] # 638
+        self.address_ao_mirrors = ["/Dev1/ao0", # image scanning galvo
+                                   "/Dev1/ao1"] # projection scanning galvo
+        self.channel_di_trigger_from_camera = "/Dev1/PFI0" # camera trig port 0
+        self.channel_di_start_trigger = "/Dev1/PFI1" # Empty PFI pin
+        self.channel_di_change_trigger = "/Dev1/PFI2" # Empty PFI pin
+        self.channel_ao_start_trigger = "/Dev1/PFI3" # Route channel_do_trigger
+        
+        # Define image scanning galvo mirror parameters.
+        self.ao_neutral_positions = [0.0, 0.0]
+        self.scan_mirror_neutral = 0.0
+        self.scan_mirror_calibration = 0.043
+        
+        # Define projection galvo mirror parameters.
+        # TODO: covert from pixel to voltage using calibration, grab ROI values.
+        self.proj_mirror_neutral = 0.0
+        self.proj_mirror_min_volt = -0.750
+        self.proj_mirror_max_volt = 0.750
         self.laser_blanking=True
         
-        self.projection_mirror_nuetral = 0
-        self.projection_mirror_range = [-0.5, 0.5]
+        # task handles
+        self._task_do = None
+        self._task_ao = None
+        self._task_di = None
+        self._task_ai = None
+        self._task_ct = None
         
-    def set_laser_blanking(self,laser_blanking):
-        self.laser_blanking=laser_blanking
+        
+     
+    def reset(self):
+        """
+        reset device
+
+        :return:
+        """
+        daq.DAQmxResetDevice(self.dev_name)
+        # self.set_digital_once(np.zeros(self.n_digital_lines))
+   
     
-    def set_scan_type(self,scan_type):
+    def set_laser_blanking(self,laser_blanking: bool):
+        self.laser_blanking=laser_blanking
+        
+            
+    def set_scan_type(self,scan_type: str):
         self.scan_type = scan_type
 
-    def reset_scan_mirror(self):
-        self.taskAO = daq.Task()
-        self.taskAO.CreateAOVoltageChan("/Dev1/ao0","",-6.0,6.0,daq.DAQmx_Val_Volts,None)
-        self.taskAO.WriteAnalogScalarF64(True, -1, self.scan_mirror_neutral, None)
-        self.taskAO.StartTask()
-        self.taskAO.StopTask()
-        self.taskAO.ClearTask()
-        
-    def reset_projection_mirror(self):
-        # TODO: update with emperical range and center
-        self.taskAO = daq.Task()
-        self.taskAO.CreateAOVoltageChan("/Dev1/ao1","",-1.0,1.0,daq.DAQmx_Val_Volts,None)
-        self.taskAO.WriteAnalogScalarF64(True, -1, self.scan_mirror_neutral, None)
-        self.taskAO.StartTask()
-        self.taskAO.StopTask()
-        self.taskAO.ClearTask()
-    
-    def set_scan_mirror_range(self,scan_mirrror_step_size_um,scan_mirror_sweep_um):
-        # determine sweep footprint
-        self.min_volt = -(scan_mirror_sweep_um * self.scan_mirror_calibration / 2.) + self.scan_mirror_neutral # unit: volts
-        self.scan_axis_step_volts = scan_mirrror_step_size_um * self.scan_mirror_calibration # unit: V
-        self.scan_axis_range_volts = scan_mirror_sweep_um * self.scan_mirror_calibration # unit: V
-        self.scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
 
-        return self.scan_steps
-
-    def set_interleave_mode(self,interleave_lasers):
-        self.interleave_lasers = interleave_lasers
-    
     def set_channels_to_use(self,channel_states):
         self.active_channel_indices = [ind for ind, st in zip(self.do_ind, channel_states) if st]
         self.n_active_channels = len(self.active_channel_indices)
+        
+       
+    def set_channels_ao(self):
+        pass
+    
+    
+    def reset_ao_channels(self):
+        """Set analog lines to the mirror's neutral positions
+        """
+        #-------------------------------------------------#
+        # Create AO tasks, dependent on acquisition scan mode
+        # first, set the scan and projection galvo to the initial point if it is not already
+        ao_waveform = np.column_stack((np.full(2, self.scan_mirror_neutral),
+                                       np.full(2, self.proj_mirror_neutral)))
+        samples_per_ch_ct = ct.c_int32()
+        with daq.Task() as _ao_task:
+            _ao_task.CreateAOVoltageChan(self.address_ao_mirrors[0], 
+                                            "", 
+                                            -6.0, 6.0, daq.DAQmx_Val_Volts, None)
+            _ao_task.CreateAOVoltageChan(self.address_ao_mirrors[1], 
+                                            "",
+                                            -1.0, 1.0, daq.DAQmx_Val_Volts, None)
+            _ao_task.WriteAnalogF64(1, True, 1, daq.DAQmx_Val_GroupByScanNumber, 
+                                    ao_waveform, ct.byref(samples_per_ch_ct), None)
+
+       
+    def reset_do_channels(self):
+        pass
+    
+    
+    def reset_scan_mirror(self):
+        # Center image scan mirror
+        with daq.Task() as _ao_task:
+            _ao_task.CreateAOVoltageChan(self.address_ao_mirrors[0],"",-6.0,6.0,daq.DAQmx_Val_Volts,None)
+            _ao_task.WriteAnalogScalarF64(True, -1, self.scan_mirror_neutral, None)
+            _ao_task.StartTask()
+            _ao_task.StopTask()
+        # Center projection mirror
+        with daq.Task() as _ao_task:
+            _ao_task.CreateAOVoltageChan(self.address_ao_mirrors[1],"",-1.0,1.0,daq.DAQmx_Val_Volts,None)
+            _ao_task.WriteAnalogScalarF64(True, -1, self.proj_mirror_neutral, None)
+            _ao_task.StartTask()
+            _ao_task.StopTask()
+            
+    def set_scan_mirror_range(self,scan_mirror_step_size_um: float, scan_mirror_sweep_um: float):
+        # determine sweep footprint
+        self.scan_mirror_min_volt = -(scan_mirror_sweep_um * self.scan_mirror_calibration / 2.) + self.scan_mirror_neutral # unit: volts
+        self.scan_axis_step_volts = scan_mirror_step_size_um * self.scan_mirror_calibration # unit: V
+        self.scan_axis_range_volts = scan_mirror_sweep_um * self.scan_mirror_calibration # unit: V
+        self.scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
+
+        return self.image_scan_steps
+    
     
     def generate_waveforms(self):
+        """Generate waveforms necessary to capture 1 'volume'.
+           - Waveforms run after receiving change detection from camera trigger.
+           - 'volume' for a 2d scan is a single image mirror position.
+           - 'volume' for a projection scan is a linear ramp for both the image and projection mirrors.
+           - 'volume' for a mirror scan is n_scan_step frames x n_do channelsx
+        """
         if self.scan_type == 'mirror':
-            # setup DAQ
-            nvoltage_steps = self.scan_steps
-            # 2 time steps per frame, except for first frame plus one final frame to reset voltage
-            #samples_per_ch = (nvoltage_steps * 2 - 1) + 1
-            self.samples_per_ch = (nvoltage_steps * 2 * self.n_active_channels - 1) + 1
- 
+            """Fire active lasers, advance image scanning galvo in a linear ramp,
+               hold the projection gavlo in it's neutral position
+            """
+            #-----------------------------------------------------#
+            # The DO channel changes with changes in camera's trigger output,
+            # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
+            # Collect one frame for each scan position
+            n_voltage_steps = self.image_scan_steps
+            self.samples_per_do_ch = 2*n_voltage_steps*self.n_active_channels
+            
             # Generate values for DO
-            dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
-        
+            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
             for ii, ind in enumerate(self.active_channel_indices):
+                # Turn laser on in order for each image position
                 if self.laser_blanking:
-                    dataDO[2*ii::2*self.n_active_channels, ind] = 1
+                    do_waveform[2*ii::2*self.n_active_channels, ind] = 1
                 else:
-                    dataDO[:,int(ind)] = 1
+                    do_waveform[:,int(ind)] = 1
             
             if self.laser_blanking:
-                dataDO[-1, :] = 0
+                do_waveform[-1, :] = 0
+                
+            #-----------------------------------------------------#
+            # Create ao waveform, scan the image mirror voltage, keep the projection mirror neutral            
+            # This array is written for both AO channels
+            ao_waveform = np.zeros((self.samples_per_do_ch, 2))
+            
+            # Generate image scanning mirror voltage steps
+            max_volt = self.scan_mirror_min_volt + self.scan_axis_range_volts
+            scan_mirror_volts = np.linspace(self.scan_mirror_min_volt, max_volt, n_voltage_steps)
+            
+            # Set the last time point (when exp is off) to the first mirror positions.
+            ao_waveform[0:2*self.n_active_channels - 1, 0] = scan_mirror_volts[0]
 
-            # generate voltage steps
-            max_volt = self.min_volt + self.scan_axis_range_volts  # 2
-            voltage_values = np.linspace(self.min_volt, max_volt, nvoltage_steps)
-
-            # Generate values for AO
-            waveform = np.zeros(self.samples_per_ch)
-            # one less voltage value for first frame
-            waveform[0:2*self.n_active_channels - 1] = voltage_values[0]
-
-            if len(voltage_values) > 1:
+            if len(scan_mirror_volts) > 1:
                 # (2 * # active channels) voltage values for all other frames
-                waveform[2*self.n_active_channels - 1:-1] = np.kron(voltage_values[1:], np.ones(2 * self.n_active_channels))
+                ao_waveform[2*self.n_active_channels - 1:-1, 0] = np.kron(scan_mirror_volts[1:], np.ones(2 * self.n_active_channels))
             
             # set back to initial value at end
-            waveform[-1] = voltage_values[0]
-
-            self.dataDO = dataDO
-            self.waveform = waveform
-        elif self.scan_type == 'stage':
-            # setup digital trigger buffer on DAQ
-            self.samples_per_ch = 2 * int(self.n_active_channels)
-
-            # create DAQ pattern for laser strobing controlled via rolling shutter
-            dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channel_indices):
-                if self.laser_blanking:
-                    dataDO[2*ii::2*int(self.n_active_channels), int(ind)] = 1
-                else:
-                    dataDO[:,int(ind)] = 1
-
-            if self.laser_blanking:
-                dataDO[-1, :] = 0
-            
-            self.dataDO = dataDO
-            self.waveform = None
-
-        elif self.scan_type == '2D':
-            # setup DAQ
-            nvoltage_steps = 1
-            # 2 time steps per frame, except for first frame plus one final frame to reset voltage
-            #samples_per_ch = (nvoltage_steps * 2 - 1) + 1
-            self.samples_per_ch = (nvoltage_steps * 2 * self.n_active_channels - 1) + 1
+            ao_waveform[-1] = scan_mirror_volts[0]
+        
+        elif self.scan_type == "projection":
+            """Fire active lasers, synchronize image scanning mirror and projection mirror to rolling shutter.
+               Capture one frame per active channel.
+               Approaches:
+               1. Start camera in light sheet mode, apply linear ramp to each mirror
+               2. Start camera in light sheet mode, output trigger = hsync
+            """
+            #-----------------------------------------------------#
+            # The DO channel changes with changes in camera's trigger output,
+            # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
+            self.samples_per_do_ch = (2*self.n_active_channels - 1) + 1
  
             # Generate values for DO
-            dataDO = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
+            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
             for ii, ind in enumerate(self.active_channel_indices):
                 if self.laser_blanking:
-                    dataDO[2*ii::2*self.n_active_channels, ind] = 1
+                    do_waveform[2*ii::2*self.n_active_channels, ind] = 1
                 else:
-                    dataDO[:,int(ind)] = 1
+                    do_waveform[:,int(ind)] = 1
             
             if self.laser_blanking:
-                dataDO[-1, :] = 0
-
-            self.dataDO = dataDO
-            self.waveform = None
-
-    def start_waveform_playback(self):
-        try:    
-            self.taskDI = daq.Task()
-            self.taskDI.CreateDIChan("/Dev1/PFI0", "", daq.DAQmx_Val_ChanForAllLines)
+                do_waveform[-1, :] = 0
             
-            ## Configure change detectin timing (from wave generator)
-            self.taskDI.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
-            self.taskDI.CfgChangeDetectionTiming("/Dev1/PFI0", "/Dev1/PFI0", daq.DAQmx_Val_ContSamps, 0)
-
-            ## Set where the starting trigger 
-            self.taskDI.CfgDigEdgeStartTrig("/Dev1/PFI0", daq.DAQmx_Val_Rising)
+            #-----------------------------------------------------#
+            # Create ao waveform, scan the image mirror and projection mirror voltages.
+            # This array is written for both AO channels and runs at the camera di rising edge
+            n_voltage_steps = int(self.exposure * self.daq_sample_rate_hz)
+            self.samples_per_ao_ch = n_voltage_steps + 1
             
-            ## Export DI signal to unused PFI pins, for clock and start
-            self.taskDI.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, "/Dev1/PFI2")
-            self.taskDI.ExportSignal(daq.DAQmx_Val_StartTrigger, "/Dev1/PFI1")
+            # Generate projection mirror linear ramp
+            # TODO: Set using edges of the ROI, and calibration volts per px
+            proj_mirror_volts = np.linspace(self.proj_mirror_min_volt, self.proj_mirror_max_volt, n_voltage_steps)
             
-            # ----- DIGITAL output ------   
-            self.taskDO = daq.Task()
-            # TO DO: Write each laser line separately!
-            self.taskDO.CreateDOChan("/Dev1/port0/line0:7", "", daq.DAQmx_Val_ChanForAllLines)
-
-            ## Configure timing (from DI task) 
-            self.taskDO.CfgSampClkTiming("/Dev1/PFI2", self.DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, self.samples_per_ch)
-
-            ## Configure timing (from DI task) 
-            self.taskDO.CfgSampClkTiming(self.channelDI_change_trigger, self.DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, self.samples_per_ch)
+            # Generate image scanning mirror voltage steps
+            scan_mirror_max_volts = self.scan_mirror_min_volt + self.scan_axis_range_volts
+            scan_mirror_volts = np.linspace(self.scan_mirror_min_volt, scan_mirror_max_volts, n_voltage_steps)
             
-            ## Write the output waveform
-            samples_per_ch_ct_digital = ct.c_int32()
-            self.taskDO.WriteDigitalLines(self.samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByChannel, self.dataDO, ct.byref(samples_per_ch_ct_digital), None)
+            # Set the last time point (when exp is off) to the first mirror positions.
+            ao_waveform[:-1, 0] = scan_mirror_volts
+            ao_waveform[:-1, 1] = proj_mirror_volts        
 
-            if self.scan_type == 'mirror':
-                # ------- ANALOG output -----------
-
-                # first, set the galvo to the initial point if it is not already
-                self.taskAO_first = daq.Task()
-                self.taskAO_first.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
-                self.taskAO_first.WriteAnalogScalarF64(True, -1, self.waveform[0], None)
-                self.taskAO_first.StopTask()
-                self.taskAO_first.ClearTask()
-
-                # now set up the task to ramp the galvo
-                self.taskAO = daq.Task()
-                self.taskAO.CreateAOVoltageChan("/Dev1/ao0", "", -6.0, 6.0, daq.DAQmx_Val_Volts, None)
-
-                ## Configure timing (from DI task)
-                self.taskAO.CfgSampClkTiming("/Dev1/PFI2", self.DAQ_sample_rate_Hz, daq.DAQmx_Val_Rising, daq.DAQmx_Val_ContSamps, self.samples_per_ch)
-                
-                ## Write the output waveform
-                samples_per_ch_ct = ct.c_int32()
-                self.taskAO.WriteAnalogF64(self.samples_per_ch, False, 10.0, daq.DAQmx_Val_GroupByScanNumber, self.waveform, ct.byref(samples_per_ch_ct), None)
-                
-                # start analog tasks
-                self.taskAO.StartTask()
+            # set back to initial value at end
+            ao_waveform[-1, 0] = scan_mirror_volts[0]
+            ao_waveform[-1, 1] = proj_mirror_volts[0]
             
-            # start digital tasks
-            self.taskDO.StartTask()    
-            self.taskDI.StartTask()
+        elif self.scan_type == 'stage':
+            """Only fire the active channel lasers,keep the mirrors in their neutral positions
+            """
+            #-----------------------------------------------------#
+            # setup digital trigger buffer on DAQ
+            self.samples_per_do_ch = 2 * int(self.n_active_channels)
 
-        except daq.DAQError as err:
-            print("DAQmx Error %s"%err)
+            # create DAQ pattern for laser strobing controlled via rolling shutter
+            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
+            for ii, ind in enumerate(self.active_channel_indices):
+                if self.laser_blanking:
+                    do_waveform[2*ii::2*int(self.n_active_channels), int(ind)] = 1
+                else:
+                    do_waveform[:,int(ind)] = 1
 
-    def stop_waveform_playback(self):
+            if self.laser_blanking:
+                do_waveform[-1, :] = 0
+            
+            #-----------------------------------------------------#
+            # Create ao waveform, keeping the mirrors in their neutral positions
+            # In stage scan mode, only the first time point gets set.
+            ao_waveform = np.zeros((1, 2))
+            ao_waveform[:, 0] = self.ao_neutral_positions[0]
+            ao_waveform[:, 1] = self.ao_neutral_positions[1]
+            
+        elif self.scan_type == '2D':
+            """Only fire the active channel lasers, keep the mirrors in their neutral positions
+            """
+            #-----------------------------------------------------#
+            # The DO channel changes with changes in camera's trigger output,
+            # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
+            self.samples_per_do_ch = (2*self.n_active_channels - 1) + 1
+ 
+            # Generate values for DO
+            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
+            for ii, ind in enumerate(self.active_channel_indices):
+                if self.laser_blanking:
+                    do_waveform[2*ii::2*self.n_active_channels, ind] = 1
+                else:
+                    do_waveform[:,int(ind)] = 1
+            
+            if self.laser_blanking:
+                do_waveform[-1, :] = 0
+            
+            #-----------------------------------------------------#
+            # Create ao waveform, keeping the mirrors in their neutral positions
+            # In 2D mode, the first time point gets set.
+            ao_waveform = np.zeros((1, 2))
+            ao_waveform[:, 0] = self.ao_neutral_positions[0]
+            ao_waveform[:, 1] = self.ao_neutral_positions[1]
+            
+        # Update daq waveforms
+        self.do_waveform = do_waveform
+        self.ao_waveform = ao_waveform
+            
+             
+    def prepare_waveform_playback(self):
+        """Create DAQ tasks for synchronizing camera output triggers to lasers and galvo mirrors.
+        """
         try:
-            self.taskDI.StopTask()
-            self.taskDO.StopTask()
-            if self.scan_type == 'mirror':
-                self.taskAO.StopTask()
+            #-------------------------------------------------#
+            # Create DI trigger from camera task
+            self._task_di = daq.Task()
+            self._task_di.CreateDIChan(self.channel_di_trigger_from_camera,
+                                       "DI_CameraTrigger", 
+                                       daq.DAQmx_Val_ChanForAllLines)
+            
+            # Configure change detection timing (from wave generator)
+            self._task_di.CfgInputBuffer(0)    # must be enforced for change-detection timing, i.e no buffer
+            self._task_di.CfgChangeDetectionTiming(self.channel_di_trigger_from_camera, 
+                                                   self.channel_di_trigger_from_camera, 
+                                                   daq.DAQmx_Val_ContSamps, 0)
 
-            self.taskDI.ClearTask()
-            self.taskDO.ClearTask()
-            if self.scan_type == 'mirror':
-                self.taskAO.ClearTask()
+            # Set where the starting trigger 
+            self._task_di.CfgDigEdgeStartTrig(self.channel_di_trigger_from_camera, daq.DAQmx_Val_Rising)
+            
+            # Export DI signal to unused PFI pins, for clock and start
+            self._task_di.ExportSignal(daq.DAQmx_Val_ChangeDetectionEvent, self.channel_di_change_trigger)
+            self._task_di.ExportSignal(daq.DAQmx_Val_StartTrigger, self.channel_di_start_trigger)
+            self._task_di.ExportSignal(daq.DAQmx_Val_RisingEdge, self.channel_di_start_trigger)
+            
+            
+            #-------------------------------------------------#
+            # Create DO laser control tasks
+            self._task_do = daq.Task()
+            self._task_do.CreateDOChan(", ".join(self.address_channel_do), 
+                                       "DO_LaserControl", 
+                                       daq.DAQmx_Val_ChanForAllLines)
+            
+            # Configure change timing from camera trigger task
+            self._task_do.CfgSampClkTiming(self.channel_di_change_trigger, 
+                                           self.daq_sample_rate_hz,
+                                           daq.DAQmx_Val_Rising,
+                                           daq.DAQmx_Val_ContSamps, self.samples_per_do_ch)
+            
+            # Write the output waveform
+            samples_per_ch_ct_digital = ct.c_int32()
+            self._task_do.WriteDigitalLines(self.samples_per_do_ch, False, 10.0, daq.DAQmx_Val_GroupByChannel, self.do_waveform, ct.byref(samples_per_ch_ct_digital), None)
 
-            self.TaskDO = daq.Task()
-            self.TaskDO.CreateDOChan("/Dev1/port0/line0:7", "", daq.DAQmx_Val_ChanForAllLines)
-            array = np.zeros((self.samples_per_ch, self.num_DI_channels), dtype=np.uint8)
-            self.TaskDO.WriteDigitalLines(1,1,10.0,daq.DAQmx_Val_GroupByChannel,array,None,None)
-            self.TaskDO.StopTask()
-            self.TaskDO.ClearTask()
+            #-------------------------------------------------#
+            # Create AO tasks, dependent on acquisition scan mode
+            # first, set the scan and projection galvo to the initial point if it is not already
+            samples_per_ch_ct = ct.c_int32()
+            with daq.Task() as _ao_task:
+                # Create a 2d array that sets the initial AO voltage to the start of the scan.
+                initial_ao_waveform = np.column_stack((np.full(2, self.ao_waveform[0,0]),
+                                                       np.full(2, self.ao_waveform[0,1])))
+                _ao_task.CreateAOVoltageChan(self.address_ao_mirrors[0], 
+                                             "", 
+                                             -6.0, 6.0, daq.DAQmx_Val_Volts, None)
+                _ao_task.CreateAOVoltageChan(self.address_ao_mirrors[1], 
+                                             "",
+                                             -1.0, 1.0, daq.DAQmx_Val_Volts, None)
+                _ao_task.WriteAnalogF64(1, True, 1, daq.DAQmx_Val_GroupByScanNumber, 
+                                        initial_ao_waveform, ct.byref(samples_per_ch_ct), None)
 
-            self.reset_scan_mirror()
+            # Setup the galvo mirror image scanning task
+            self._task_ao = daq.Task()
+            self._task_ao.CreateAOVoltageChan(self.address_ao_mirrors[0], 
+                                                "AO_ImageScanning", 
+                                                -6.0, 6.0, daq.DAQmx_Val_Volts, None)
+            self._task_ao.CreateAOVoltageChan(self.address_ao_mirrors[1], 
+                                                "AO_ProjectionScanning", 
+                                                -1.0, 1.0, daq.DAQmx_Val_Volts, None)
+
+            if self.scan_type=='mirror':
+                # Configure timing to change on di change trigger, matches do_waveform shape
+                self._task_ao.CfgSampClkTiming(self.channel_di_change_trigger,
+                                               self.daq_sample_rate_hz, 
+                                               daq.DAQmx_Val_Rising, 
+                                               daq.DAQmx_Val_ContSamps,
+                                               self.samples_per_do_ch)
+                
+                # Write the output waveform
+                self._task_ao.WriteAnalogF64(self.samples_per_do_ch,
+                                             False, 10.0, daq.DAQmx_Val_GroupByScanNumber, 
+                                             self.ao_waveform, ct.byref(samples_per_ch_ct), None)
+                
+            elif self.scan_type=="projection":
+                # Configure to run on internal clock, ao_waveform has shape dictated by camera exposure
+                self._task_ao.CfgSampClkTiming("",
+                                               self.daq_sample_rate_hz,  # Define how fast the samples are output
+                                               daq.DAQmx_Val_Rising,
+                                               daq.DAQmx_Val_FiniteSamps,  # Output finite number of samples
+                                               self.ao_waveform.shape[0])  # Total samples
+
+                # Configure AO to start on the rising edge of DI signal
+                self._task_ao.CfgDigEdgeStartTrig(self.channel_di_trigger_from_camera,
+                                                  daq.DAQmx_Val_Rising)
+                                
+                # Make the task retriggerable, for every exposure
+                self._task_ao.SetStartTrigRetriggerable(True)
+                
+                # Write the output waveform
+                samples_per_ch_ct = ct.c_int32()
+                self._task_ao.WriteAnalogF64(self.samples_per_do_ch,
+                                             False, 10.0, daq.DAQmx_Val_GroupByScanNumber, 
+                                             self.ao_waveform, ct.byref(samples_per_ch_ct), None)                
+        except daq.DAQError as err:
+            print("DAQmx Error %s"%err)
+     
+     
+    def start_waveform_playback(self):
+        """Starts any tasks that exist. N
+        TODO: Modify code to first set_waveform then call this function, till then call setup function internally
+        """
+        self.generate_waveforms()
+        self.prepare_waveform_playback()
+        
+        try:
+            tasks = [self._task_di, self._task_do, self._task_ao]
+            for _task in tasks:
+                if _task:
+                    _task.StartTask()
+        except daq.DAQError as err:
+            print("DAQmx Error %s"%err)
+            
+            
+    def stop_waveform_playback(self):
+        tasks = [self._task_di, self._task_do, self._task_ao]
+        try:
+            for _task in tasks:
+                if _task:
+                    _task.StopTask()
+                    _task.ClearTask()
+                    
+            self.reset_do_channels()
+            self.reset_ao_channels()
+            
+            # Remove evidence of tasks
+            for _task in tasks:
+                _task = None
 
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)
+            
+            
+    
