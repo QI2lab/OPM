@@ -4,7 +4,6 @@
 Last updated: 2025.01.24 by Douglas Shepherd
 """
 
-import h5py
 from pymmcore_plus import CMMCorePlus
 from magicclass import magicclass, MagicTemplate
 from magicgui import magicgui
@@ -414,9 +413,12 @@ class OPMMirrorScan(MagicTemplate):
         modes_to_optimize=[7,14,23,3,4,5,6,8,9,10,11,12,13,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31]
         n_iter=3
         n_steps=3
-        init_range=.500
+        init_range=.300
         alpha=.5
         compare_to_zero_delta = False
+        if metric_type=="brightness":
+            # Samples can bleach over time, making the optimal metric impossible to acheive.
+            compare_to_zero_delta=True
         verbose=True
         save_results = True
         display_images = True
@@ -490,12 +492,16 @@ class OPMMirrorScan(MagicTemplate):
                 iteration_zern_modes = self.ao_mirror.current_coeffs.copy()
                 deltas = np.linspace(-delta_range, delta_range, n_steps)
                 metrics = []
+                success = True
                 for delta in deltas:
                     active_zern_modes = iteration_zern_modes.copy()
                     active_zern_modes[mode] += delta
-                    success = self.ao_mirror.set_modal_coefficients(active_zern_modes)
+                    if success:
+                        # If setting the mirror coefficients failed testing a previous delta, 
+                        #     skip the other test deltas for this mode
+                        success = self.ao_mirror.set_modal_coefficients(active_zern_modes)
                     if not(success):
-                        print("    Setting mirror coefficients failed!")
+                        print("    Setting mirror coefficients failed, skipping this mode!")
                         metric = 0
                         max_z_deskewed_image = np.zeros_like(max_z_deskewed_image)
                         
@@ -550,32 +556,35 @@ class OPMMirrorScan(MagicTemplate):
                 
                 """After looping through all mirror pertubations for this mode, decide if mirror is updated"""
                 # Quadratic fit to determine optimal delta
-                try:
-                    popt = quadratic_fit(deltas, metrics)
-                    a, b, c = popt
-                    
-                    # reduced the rejected amplitude of a.
-                    is_increasing = all(x < y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
-                    is_decreasing = all(x > y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
-                    if is_increasing or is_decreasing:
-                        print("      Test metrics are monotonic and linear, fit rejected. ")
-                        raise Exception
-                    elif a >=0:
-                        print("      Test metrics have a positive curvature, fit rejected.")
-                        raise Exception
-                    
-                    optimal_delta = -b / (2 * a)
-                    if verbose:
-                        print(f"    Quadratic fit result for optimal delta: {optimal_delta:.4f}")
-    
-                    if (optimal_delta>delta_range) or (optimal_delta<-delta_range):
-                        print(f"      Optimal delta is outside of delta_range: {-b / (2 * a):.3f}")
-                        raise Exception
-                            
-                except Exception:
+                if 0 in metrics:
                     optimal_delta = 0
-                    if verbose:
-                        print(f"        Exception in fit occurred, optimal delta = {optimal_delta:.4f}")
+                else:
+                    try:
+                        popt = quadratic_fit(deltas, metrics)
+                        a, b, c = popt
+                        
+                        # reduced the rejected amplitude of a.
+                        is_increasing = all(x < y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
+                        is_decreasing = all(x > y for x, y in zip(np.asarray(metrics), np.asarray(metrics)[1:]))
+                        if is_increasing or is_decreasing:
+                            print("      Test metrics are monotonic and linear, fit rejected. ")
+                            raise Exception
+                        elif a >=0:
+                            print("      Test metrics have a positive curvature, fit rejected.")
+                            raise Exception
+                        
+                        optimal_delta = -b / (2 * a)
+                        if verbose:
+                            print(f"    Quadratic fit result for optimal delta: {optimal_delta:.4f}")
+        
+                        if (optimal_delta>delta_range) or (optimal_delta<-delta_range):
+                            print(f"      Optimal delta is outside of delta_range: {-b / (2 * a):.3f}")
+                            raise Exception
+                                
+                    except Exception:
+                        optimal_delta = 0
+                        if verbose:
+                            print(f"        Exception in fit occurred, optimal delta = {optimal_delta:.4f}")
         
                 coeff_opt = iteration_zern_modes[mode] + optimal_delta
                 
@@ -651,7 +660,7 @@ class OPMMirrorScan(MagicTemplate):
                         else:
                             # if not keep the current mode coeff
                             if verbose:
-                                print("    Metric not improved using previous iteration's mode",
+                                print("    Metric not improved using previous iteration's mode coeff.",
                                     f"\n     optimal metric: {optimal_metric:.6f}",
                                     f"\n     rejected metric: {metric:.6f}")
                             coeff_to_keep = iteration_zern_modes[mode]
@@ -703,8 +712,8 @@ class OPMMirrorScan(MagicTemplate):
             optimal_metrics = np.reshape(optimal_metrics, [n_iter, len(modes_to_optimize)])
             save_optimization_results(np.array(iteration_images), np.array(mode_images), optimal_coefficients, 
                                       optimal_metrics, modes_to_optimize, results_save_path)
-            plot_metric_progress(optimal_metrics, modes_to_optimize, np.array(AOMirror.mode_names), optimal_metrics_path, False)
-            plot_zernike_coeffs(optimal_coefficients, np.array(AOMirror.mode_names), optimal_coeffs_path, False)
+            plot_metric_progress(optimal_metrics, modes_to_optimize, np.array(self.ao_mirror.mode_names), optimal_metrics_path, False)
+            plot_zernike_coeffs(optimal_coefficients, np.array(self.ao_mirror.mode_names), optimal_coeffs_path, False)
             
         #------------------------------------------------------------------------------------------------------------------------------------
         #---------------------------------------------------End AO optimization--------------------------------------------------------------
@@ -942,14 +951,6 @@ class OPMMirrorScan(MagicTemplate):
         for trig_idx in range(3):
             self.mmc.setProperty(self.camera_name,f'OUTPUT TRIGGER KIND[{trig_idx}]','EXPOSURE')
             self.mmc.setProperty(self.camera_name,f'OUTPUT TRIGGER POLARITY[{trig_idx}]','POSITIVE')
-            
-        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[0]','EXPOSURE')
-        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[1]','EXPOSURE')
-        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER KIND[2]','EXPOSURE')
-        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[0]','POSITIVE')
-        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[1]','POSITIVE')
-        # self.mmc.setProperty(self.camera_name,r'OUTPUT TRIGGER POLARITY[2]','POSITIVE')
-
 
     def _enforce_DCAM_internal_trigger(self):
         """Enforce camera being in trigger = INTERNAL mode."""
