@@ -11,6 +11,22 @@ Douglas Shepherd
 douglas.shepherd@asu.edu
 ----------------------------------------------------------------------------------------
 '''
+"""
+
+nidaq.set_channels_to_use([True, False, False, False, False])
+nidaq.exposure = 0.10
+scan_mirror_sweep_um = 40
+proj_mirror_sweep_um = scan_mirror_sweep_um  #+ (30 * np.cos(30 * np.pi / 180))
+proj_mirror_calibration =  .0052
+nidaq.set_scan_mirror_range(0.4, scan_mirror_sweep_um)
+voltage = proj_mirror_sweep_um * proj_mirror_calibration 
+nidaq.proj_mirror_min_volt = -voltage/2
+nidaq.proj_mirror_max_volt = voltage/2
+nidaq.generate_waveforms()
+nidaq.prepare_waveform_playback()
+nidaq.start_waveform_playback()
+
+"""
 
 # ----------------------------------------------------------------------------------------
 # Import
@@ -21,7 +37,6 @@ import numpy as np
 from typing import List
 
 class OPMNIDAQ:
-
     def __init__(self):
         """_summary_
         """
@@ -30,7 +45,7 @@ class OPMNIDAQ:
         self.do_ind = [0,1,2,3,4]
         self.active_channels_indices = None
         self.n_active_channels = 0
-        self.exposure = 0.100 # seconds
+        self.exposure = 0.050 # seconds
 
         # Define waveform generation parameters.
         self.daq_sample_rate_hz = 10000
@@ -72,8 +87,9 @@ class OPMNIDAQ:
         # Define projection galvo mirror parameters.
         # TODO: covert from pixel to voltage using calibration, grab ROI values.
         self.proj_mirror_neutral = 0.0
-        self.proj_mirror_min_volt = -0.250
-        self.proj_mirror_max_volt = 0.250
+        self.proj_mirror_min_volt = -0.800
+        self.proj_mirror_max_volt = 0.700
+        self.proj_mirror_calibration = .00556
         self.laser_blanking=True
         
         # task handles
@@ -132,8 +148,8 @@ class OPMNIDAQ:
         
 
     def set_channels_to_use(self,channel_states):
-        self.active_channel_indices = [ind for ind, st in zip(self.do_ind, channel_states) if st]
-        self.n_active_channels = len(self.active_channel_indices)
+        self.active_channels_indices = [ind for ind, st in zip(self.do_ind, channel_states) if st]
+        self.n_active_channels = len(self.active_channels_indices)
         
         
     def set_scan_mirror_range(self,scan_mirror_step_size_um: float, scan_mirror_sweep_um: float):
@@ -198,7 +214,7 @@ class OPMNIDAQ:
             
             # Generate values for DO
             do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channel_indices):
+            for ii, ind in enumerate(self.active_channels_indices):
                 # Turn laser on in order for each image position
                 if self.laser_blanking:
                     do_waveform[2*ii::2*self.n_active_channels, ind] = 1
@@ -241,7 +257,7 @@ class OPMNIDAQ:
  
             # Generate values for DO
             do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channel_indices):
+            for ii, ind in enumerate(self.active_channels_indices):
                 if self.laser_blanking:
                     do_waveform[2*ii::2*self.n_active_channels, ind] = 1
                 else:
@@ -259,7 +275,9 @@ class OPMNIDAQ:
             
             # Generate projection mirror linear ramp
             # TODO: Set using edges of the ROI, and calibration volts per px
-            proj_mirror_volts = np.linspace(self.proj_mirror_min_volt, self.proj_mirror_max_volt, n_voltage_steps)
+            print(self.proj_mirror_min_volt)
+            print(self.proj_mirror_max_volt)
+            proj_mirror_volts = np.linspace(self.proj_mirror_max_volt, self.proj_mirror_min_volt, n_voltage_steps)
             
             # Generate image scanning mirror voltage steps
             scan_mirror_max_volts = self.scan_mirror_min_volt + self.scan_axis_range_volts
@@ -282,7 +300,7 @@ class OPMNIDAQ:
 
             # create DAQ pattern for laser strobing controlled via rolling shutter
             do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channel_indices):
+            for ii, ind in enumerate(self.active_channels_indices):
                 if self.laser_blanking:
                     do_waveform[2*ii::2*int(self.n_active_channels), int(ind)] = 1
                 else:
@@ -308,7 +326,7 @@ class OPMNIDAQ:
  
             # Generate values for DO
             do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channel_indices):
+            for ii, ind in enumerate(self.active_channels_indices):
                 if self.laser_blanking:
                     do_waveform[2*ii::2*self.n_active_channels, ind] = 1
                 else:
@@ -440,8 +458,8 @@ class OPMNIDAQ:
         """Starts any tasks that exist. N
         TODO: Modify code to first set_waveform then call this function, till then call setup function internally
         """
-        self.generate_waveforms()
-        self.prepare_waveform_playback()
+        # self.generate_waveforms()
+        # self.prepare_waveform_playback()
         
         try:
             tasks = [self._task_di, self._task_do, self._task_ao]
