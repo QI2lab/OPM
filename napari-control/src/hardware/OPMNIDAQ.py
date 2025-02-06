@@ -97,7 +97,6 @@ class OPMNIDAQ:
         self._task_di = None
         
         
-        
     def reset(self):
         """Reset the device."""
 
@@ -157,6 +156,7 @@ class OPMNIDAQ:
         self.active_channels_indices = [ind for ind, st in zip(self.do_ind, channel_states) if st]
         self.n_active_channels = len(self.active_channels_indices)
         
+        
     def set_scan_mirror_range(self,scan_mirror_step_size_um: float, scan_mirror_sweep_um: float):
         """Set the range of the scanning mirror in microns.
         
@@ -180,6 +180,7 @@ class OPMNIDAQ:
         self.image_scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
         return self.image_scan_steps
 
+    
     def set_proj_mirror_range(self,proj_mirror_sweep_um: float):
         """Set the range of the projection mirror in microns.
         
@@ -193,6 +194,7 @@ class OPMNIDAQ:
         voltage = proj_mirror_sweep_um * self.proj_mirror_calibration
         self.proj_mirror_min_volt = -voltage/2
         self.proj_mirror_max_volt = voltage/2
+
 
     def reset_ao_channels(self):
         """Stops any waveforms and deletes tasks, set analog lines to the mirror's neutral positions
@@ -391,6 +393,7 @@ class OPMNIDAQ:
         # Update daq waveforms
         self.do_waveform = do_waveform
         self.ao_waveform = ao_waveform
+        
             
     def prepare_waveform_playback(self):
         """Create DAQ tasks for synchronizing camera output triggers to lasers and galvo mirrors."""
