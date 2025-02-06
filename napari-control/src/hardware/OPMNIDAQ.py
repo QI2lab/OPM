@@ -11,6 +11,22 @@ Douglas Shepherd
 douglas.shepherd@asu.edu
 ----------------------------------------------------------------------------------------
 '''
+"""
+
+nidaq.set_channels_to_use([True, False, False, False, False])
+nidaq.exposure = 0.10
+scan_mirror_sweep_um = 40
+proj_mirror_sweep_um = scan_mirror_sweep_um  #+ (30 * np.cos(30 * np.pi / 180))
+proj_mirror_calibration =  .0052
+nidaq.set_scan_mirror_range(0.4, scan_mirror_sweep_um)
+voltage = proj_mirror_sweep_um * proj_mirror_calibration 
+nidaq.proj_mirror_min_volt = -voltage/2
+nidaq.proj_mirror_max_volt = voltage/2
+nidaq.generate_waveforms()
+nidaq.prepare_waveform_playback()
+nidaq.start_waveform_playback()
+
+"""
 
 # ----------------------------------------------------------------------------------------
 # Import
@@ -72,6 +88,7 @@ class OPMNIDAQ:
         self.proj_mirror_neutral = 0.0
         self.proj_mirror_min_volt = -0.800
         self.proj_mirror_max_volt = 0.700
+        self.proj_mirror_calibration = .00556
         self.laser_blanking=True
         
         # task handles
@@ -234,6 +251,8 @@ class OPMNIDAQ:
             
             # Generate projection mirror linear ramp
             # TODO: Set using edges of the ROI, and calibration volts per px
+            print(self.proj_mirror_min_volt)
+            print(self.proj_mirror_max_volt)
             proj_mirror_volts = np.linspace(self.proj_mirror_max_volt, self.proj_mirror_min_volt, n_voltage_steps)
             
             # Generate image scanning mirror voltage steps
