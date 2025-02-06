@@ -39,7 +39,8 @@ class OPMMirrorScan(MagicTemplate):
         self.channel_states=[False,False,False,False,False]
         self.exposure_ms = 10.0                 # unit: ms
         self.scan_axis_step_um = 0.4            # unit: um
-        self.scan_axis_calibration = 0.0433      # unit: V / um updated 2025.01.24
+        self.scan_axis_calibration = 0.0433     # unit: V / um updated 2025.01.24
+        self.proj_axis_calibration = .0052      # unit: V / um updated 2025.02.05
         self.galvo_neutral_volt = 0.            # unit: V
         self.scan_mirror_footprint_um = 50.0    # unit: um
         self.camera_pixel_size_um = .115        # unit: um
@@ -106,7 +107,6 @@ class OPMMirrorScan(MagicTemplate):
         circ_buffer_mb = 16000
         self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
 
-
     def _set_worker_2d(self,worker_2d):
         """Set 2D live-mode thread worker.
         
@@ -134,20 +134,32 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_3d_started = False
         self.worker_3d_running = False
 
+    def _set_worker_proj(self,worker_proj):
+        """Set projection live-mode thread worker.
+        
+        Parameters
+        ----------
+        worker_proj: thread_worker
+            Thread worker for projection live-mode acquisition.
+        """
 
-    def _set_ao_worker_3d(self,ao_worker_3d):
+        self.worker_proj = worker_proj
+        self.worker_proj_started = False
+        self.worker_proj_running = False
+
+
+    def _set_worker_AO(self,worker_AO):
         """Set 3D adaptive optics optimization thread worker.
         
         Parameters
         ----------
-        ao_worker_3d: thread_worker
+        worker_AO: thread_worker
             Thread worker for 3D live-mode acquisition.
         """
 
-        self.ao_worker_3d = ao_worker_3d
-        self.ao_worker_3d_started = False
-        self.ao_worker_3d_running = False
-
+        self.worker_AO = worker_AO
+        self.worker_AO_started = False
+        self.worker_AO_running = False
 
     def _create_3d_t_worker(self):
         """Create 3D timelapse acquistion thread worker.
@@ -171,7 +183,6 @@ class OPMMirrorScan(MagicTemplate):
         self.worker_3d_t = worker_3d_t
         self.worker_3d_t_running = False
 
-
     def _set_viewer(self,viewer):
         """Set napari viewer.
         
@@ -181,7 +192,6 @@ class OPMMirrorScan(MagicTemplate):
             The napari viewer instance.
         """
         self.viewer = viewer
-
 
     def _save_metadata(self):
         """Save metadata to CSV file."""
@@ -238,6 +248,62 @@ class OPMMirrorScan(MagicTemplate):
         except Exception:
             self.viewer.add_image(new_image, name=channel_name, blending='additive', colormap=colormap,contrast_limits=[110,.9*np.max(new_image)])
 
+    def _execute_projection():
+        """Execute projection sweep and return data."""
+
+        # parse which channels are active
+        active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
+        n_active_channels = len(active_channel_indices)
+        if n_active_channels == 0:
+            yield None
+            
+        if self.debug:
+            print("%d active channels: " % n_active_channels, end="")
+            for ind in active_channel_indices:
+                print("%s " % self.channel_labels[ind], end="")
+            print("")
+
+        if self.powers_changed:
+            self._set_mmc_laser_power()
+            self.powers_changed = False
+
+        if self.channels_changed or self.scan_step_changed or self.exposure_changed:
+            if self.DAQ_running:
+                self.opmdaq.stop_waveform_playback()
+                self.DAQ_running = False
+                self.opmdaq.reset_scan_mirror()
+
+            if self.exposure_changed:
+                self.mmc.setExposure(self.exposure_ms)
+                self.opmdaq.exposure = self.exposure_ms
+                self.exposure_changed = False
+
+            scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
+            proj_steps = self.opmdaq.set_proj_mirror_range(self.proj_mirror_sweep_um)
+            self.opmdaq.generate_waveforms()
+            self.opmdaq.prepare_waveform_playback()
+        
+        if not(self.DAQ_running):
+            self.opmdaq.start_waveform_playback()
+            self.DAQ_running=True
+
+        for c in active_channel_indices:
+            self.mmc.snapImage()
+            raw_image_2d = self.mmc.getImage()
+            time.sleep(.05)
+            yield c, raw_image_2d
+
+
+    @thread_worker
+    def _acquire_proj_data(self):
+        """Live-mode: 3D projection mode"""
+
+        while True:
+
+            # execute sweep and return data
+            c, projection_image = self._execute_projection()
+
+            yield c, projection_image
 
     @thread_worker
     def _acquire_2d_data(self):
@@ -373,7 +439,6 @@ class OPMMirrorScan(MagicTemplate):
         #------------------------------------------------------------------------------------------------------------------------------------
         #-----------------------------------------------------End acquisition----------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
-
 
     @thread_worker
     def _acquire_3d_data(self):
@@ -985,6 +1050,7 @@ class OPMMirrorScan(MagicTemplate):
         # reset scan mirror position to neutral
         self.opmdaq.reset_scan_mirror()
         self.opmdaq.set_laser_blanking(self.laser_blanking)
+        self.opmdaq.exposure = self.exposure
 
         # connect to Picard shutter
         self.shutter_controller = PicardShutter(shutter_id=self.shutter_id,verbose=False)
@@ -1196,7 +1262,6 @@ class OPMMirrorScan(MagicTemplate):
         else:
             self.footprint_changed = False
 
-    
     @magicgui(
         auto_call=True,
         live_mode_2D={"widget_type": "PushButton", "label": 'Start/Stop Live (2D)'},
@@ -1274,6 +1339,47 @@ class OPMMirrorScan(MagicTemplate):
         else:
             raise Exception('Set at least one active channel before starting.')
 
+    @magicgui(
+        auto_call=True,
+        live_mode_3D={"widget_type": "PushButton", "label": 'Start/Stop projection'},
+        layout='horizontal'
+    )
+    def live_mode_proj(self,live_mode_3D):
+        """Magicgui element to start/stop live-mode projection imaging.
+        
+        This function has to wait for an image to be yielded before it can stop the thread. 
+        It can be slow to respond if you are taking a large galvo sweep with multiple colors.
+        """
+
+        if (np.any(self.channel_states)):
+            if not(self.worker_2d_running) and not(self.worker_3d_t_running) and not(self.worker_3d_running):
+                self.galvo_scan = True
+                if self.worker_proj_running:
+                    self.worker_proj.pause()
+                    self.worker_proj_running = False
+                    if self.DAQ_running:
+                        self.opmdaq.stop_waveform_playback()
+                        self.DAQ_running = False
+                    self.opmdaq.reset_scan_mirror()
+                else:
+                    if not(self.worker_proj_started):
+                        self.worker_proj.start()
+                        self.worker_proj_started = True
+                        self.worker_proj_running = True
+                    else:
+                        self.worker_proj.resume()
+                        self.worker_proj_running = True
+            else:
+                if self.worker_2d_running:
+                    raise Exception('Stop live 2D acquisition first.')
+                elif self.worker_iterative_running:
+                    raise Exception('Iterative acquisition in process.')
+                elif self.worker_3d_running:
+                    raise Exception('Stop live 3D acquisition first.')
+                else:
+                    raise Exception('Unknown error.')
+        else:
+            raise Exception('Set at least one active channel before starting.')
 
     @magicgui(
         auto_call=True,
@@ -1290,26 +1396,28 @@ class OPMMirrorScan(MagicTemplate):
         if (np.any(self.channel_states)):
             if not(self.worker_2d_running) and not (self.worker_3d_running) and not(self.worker_3d_t_running):
                 self.galvo_scan = True
-                if self.ao_worker_3d_running:
-                    self.ao_worker_3d.pause()
-                    self.ao_worker_3d_running = False
+                if self.worker_AO_running:
+                    self.worker_AO.pause()
+                    self.worker_AO_running = False
                     if self.DAQ_running:
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running = False
                     self.opmdaq.reset_scan_mirror()
                 else:
-                    if not(self.ao_worker_3d_started):
-                        self.ao_worker_3d.start()
-                        self.ao_worker_3d_started = True
-                        self.ao_worker_3d_running = True
+                    if not(self.worker_AO_started):
+                        self.worker_AO.start()
+                        self.worker_AO_started = True
+                        self.worker_AO_running = True
                     else:
-                        self.ao_worker_3d.resume()
-                        self.ao_worker_3d_running = True
+                        self.worker_AO.resume()
+                        self.worker_AO_running = True
             else:
                 if self.worker_2d_running:
                     raise Exception('Stop live 2D acquisition first.')
                 elif self.worker_3d_running:
                     raise Exception('Stop live 3D acquisition first.')
+                elif self.worker_proj_running:
+                    raise Exception('Stop projection first.')
                 elif self.worker_3d_t_running:
                     raise Exception('Iterative acquisition in process.')
                 else:
@@ -1338,7 +1446,6 @@ class OPMMirrorScan(MagicTemplate):
             time delay between timepoints in seconds. 0 is continuous imaging.
         """
 
-    
     # set filepath for saving data
     @magicgui(
         auto_call=False,
@@ -1357,7 +1464,6 @@ class OPMMirrorScan(MagicTemplate):
             path to save data
         """
 
-    
     @magicgui(
         auto_call=True,
         timelapse_mode_3D={"widget_type": "PushButton", "label": 'Start acquistion'},
@@ -1380,7 +1486,6 @@ class OPMMirrorScan(MagicTemplate):
         else:
             raise Exception('Stop active live mode first.')
 
-    
     @magicgui(
         auto_call=True,
         shutter_change={"widget_type": "PushButton", "label": 'Toggle alignment laser shutter.'},
