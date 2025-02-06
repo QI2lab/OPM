@@ -286,10 +286,7 @@ class OPMMirrorScan(MagicTemplate):
             self.footprint_changed = False
         
         # SJS TODO: need to set the camera crop to cover the expected scan area on the chip.
-        if self.ROI_changed:
-                self._crop_camera()
-                self.ROI_changed = False
-                
+        
         # Stop the playback, recreate tasks if previous scan type was different.
         if self.DAQ_running:
             if self.opmdaq.scan_type == "projection":
@@ -309,6 +306,7 @@ class OPMMirrorScan(MagicTemplate):
         self.opmdaq.prepare_waveform_playback()
         self.opmdaq.start_waveform_playback()
         self.DAQ_running=True
+        self._crop_camera_for_projection(self, self.opmdaq.scan_sweep_um)
         
         for c in active_channel_indices:
             self.mmc.snapImage()
