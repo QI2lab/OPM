@@ -55,6 +55,7 @@ class OPMNIDAQ:
         self.scan_mirror_calibration = scan_mirror_calibration
         self.proj_mirror_calibration = proj_mirror_calibration
         self.scan_step_size_um = scan_step_size_um
+        self.verbose = verbose
         
         # Define waveform generation parameters for projection mode
         self._daq_sample_rate_hz = 10000
@@ -93,7 +94,7 @@ class OPMNIDAQ:
         self.channel_ao_start_trigger = "/Dev1/PFI3" # Route channel_do_trigger
         
         # Define image scanning galvo mirror parameters.
-        self.ao_neutral_positions = [0.0, 0.0]
+        self._ao_neutral_positions = [0.0, 0.0]
         self.scan_mirror_calibration = 0.043
         
         # Define projection galvo mirror parameters.
@@ -348,13 +349,13 @@ class OPMNIDAQ:
         if scan_type:
             self.scan_type=scan_type
         if channel_states:
-            self.active_channel_indices = [ind for ind, st in zip(self.do_ind, channel_states) if st]
-            self.n_active_channels = len(self.active_channel_indices)
+            self._active_channels_indices = [ind for ind, st in zip(self._do_ind, channel_states) if st]
+            self._n_active_channels = len(self._active_channels_indices)
         if proj_mirror_calibration:
             self.proj_mirror_calibration = proj_mirror_calibration
         if image_scan_step_size_um and image_scan_sweep_um:
             # determine sweep footprint
-            self.scan_mirror_min_volt = -(image_scan_step_size_um * self.scan_mirror_calibration / 2.) + self.ao_neutral_positions[0] # unit: volts
+            self.scan_mirror_min_volt = -(image_scan_step_size_um * self.scan_mirror_calibration / 2.) + self._ao_neutral_positions[0] # unit: volts
             self.scan_axis_step_volts = image_scan_step_size_um * self.scan_mirror_calibration 
             self.scan_axis_range_volts = image_scan_sweep_um * self.scan_mirror_calibration 
             self.image_scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
@@ -380,8 +381,8 @@ class OPMNIDAQ:
         """
         self.clear_tasks()
         
-        ao_waveform = np.column_stack((np.full(2, self.ao_neutral_positions[0]),
-                                       np.full(2, self.self.ao_neutral_positions[1])))
+        ao_waveform = np.column_stack((np.full(2, self._ao_neutral_positions[0]),
+                                       np.full(2, self.self._ao_neutral_positions[1])))
 
         samples_per_ch_ct = ct.c_int32()
         with daq.Task("ResetAO") as _task:
@@ -434,14 +435,14 @@ class OPMNIDAQ:
             # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
             # Collect one frame for each scan position
             n_voltage_steps = self.image_scan_steps
-            self.samples_per_do_ch = 2*n_voltage_steps*self.n_active_channels
+            self.samples_per_do_ch = 2*n_voltage_steps*self._n_active_channels
             
             # Generate values for DO
-            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channels_indices):
+            do_waveform = np.zeros((self.samples_per_do_ch, self._num_do_channels), dtype=np.uint8)
+            for ii, ind in enumerate(self._active_channels_indices):
                 # Turn laser on in order for each image position
                 if self.laser_blanking:
-                    do_waveform[2*ii::2*self.n_active_channels, ind] = 1
+                    do_waveform[2*ii::2*self._n_active_channels, ind] = 1
                 else:
                     do_waveform[:,int(ind)] = 1
             
@@ -458,11 +459,11 @@ class OPMNIDAQ:
             scan_mirror_volts = np.linspace(self.scan_mirror_min_volt, max_volt, n_voltage_steps)
             
             # Set the last time point (when exp is off) to the first mirror positions.
-            ao_waveform[0:2*self.n_active_channels - 1, 0] = scan_mirror_volts[0]
+            ao_waveform[0:2*self._n_active_channels - 1, 0] = scan_mirror_volts[0]
 
             if len(scan_mirror_volts) > 1:
                 # (2 * # active channels) voltage values for all other frames
-                ao_waveform[2*self.n_active_channels - 1:-1, 0] = np.kron(scan_mirror_volts[1:], np.ones(2 * self.n_active_channels))
+                ao_waveform[2*self._n_active_channels - 1:-1, 0] = np.kron(scan_mirror_volts[1:], np.ones(2 * self._n_active_channels))
             
             # set back to initial value at end
             ao_waveform[-1] = scan_mirror_volts[0]
@@ -478,13 +479,13 @@ class OPMNIDAQ:
             #-----------------------------------------------------#
             # The DO channel changes with changes in camera's trigger output,
             # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
-            self.samples_per_do_ch = (2*self.n_active_channels - 1) + 1
+            self.samples_per_do_ch = (2*self._n_active_channels - 1) + 1
  
             # Generate values for DO
-            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channels_indices):
+            do_waveform = np.zeros((self.samples_per_do_ch, self._num_do_channels), dtype=np.uint8)
+            for ii, ind in enumerate(self._active_channels_indices):
                 if self.laser_blanking:
-                    do_waveform[2*ii::2*self.n_active_channels, ind] = 1
+                    do_waveform[2*ii::2*self._n_active_channels, ind] = 1
                 else:
                     do_waveform[:,int(ind)] = 1
             
@@ -494,7 +495,7 @@ class OPMNIDAQ:
             #-----------------------------------------------------#
             # Create ao waveform, scan the image mirror and projection mirror voltages.
             # This array is written for both AO channels and runs at the camera di rising edge
-            n_voltage_steps = int(self.exposure_s * self.daq_sample_rate_hz)
+            n_voltage_steps = int(self.exposure_s * self._ao_neutral_positions)
             return_samples = 5
             self.samples_per_ao_ch = n_voltage_steps + return_samples
             ao_waveform = np.zeros((self.samples_per_ao_ch, 2))
@@ -526,13 +527,13 @@ class OPMNIDAQ:
 
             #-----------------------------------------------------#
             # setup digital trigger buffer on DAQ
-            self.samples_per_do_ch = 2 * int(self.n_active_channels)
+            self.samples_per_do_ch = 2 * int(self._n_active_channels)
 
             # create DAQ pattern for laser strobing controlled via rolling shutter
-            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channels_indices):
+            do_waveform = np.zeros((self.samples_per_do_ch, self._num_do_channels), dtype=np.uint8)
+            for ii, ind in enumerate(self._active_channels_indices):
                 if self.laser_blanking:
-                    do_waveform[2*ii::2*int(self.n_active_channels), int(ind)] = 1
+                    do_waveform[2*ii::2*int(self._n_active_channels), int(ind)] = 1
                 else:
                     do_waveform[:,int(ind)] = 1
 
@@ -543,8 +544,8 @@ class OPMNIDAQ:
             # Create ao waveform, keeping the mirrors in their neutral positions
             # In stage scan mode, only the first time point gets set.
             ao_waveform = np.zeros((1, 2))
-            ao_waveform[:, 0] = self.ao_neutral_positions[0]
-            ao_waveform[:, 1] = self.ao_neutral_positions[1]
+            ao_waveform[:, 0] = self._ao_neutral_positions[0]
+            ao_waveform[:, 1] = self._ao_neutral_positions[1]
             
         elif self.scan_type == '2D':
             """Only fire the active channel lasers, keep the mirrors in their neutral positions
@@ -552,13 +553,13 @@ class OPMNIDAQ:
             #-----------------------------------------------------#
             # The DO channel changes with changes in camera's trigger output,
             # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
-            self.samples_per_do_ch = (2*self.n_active_channels - 1) + 1
+            self.samples_per_do_ch = (2*self._n_active_channels - 1) + 1
  
             # Generate values for DO
-            do_waveform = np.zeros((self.samples_per_do_ch, self.num_do_channels), dtype=np.uint8)
-            for ii, ind in enumerate(self.active_channels_indices):
+            do_waveform = np.zeros((self.samples_per_do_ch, self._num_do_channels), dtype=np.uint8)
+            for ii, ind in enumerate(self._active_channels_indices):
                 if self.laser_blanking:
-                    do_waveform[2*ii::2*self.n_active_channels, ind] = 1
+                    do_waveform[2*ii::2*self._n_active_channels, ind] = 1
                 else:
                     do_waveform[:,int(ind)] = 1
             
@@ -569,12 +570,12 @@ class OPMNIDAQ:
             # Create ao waveform, keeping the mirrors in their neutral positions
             # In 2D mode, the first time point gets set.
             ao_waveform = np.zeros((1, 2))
-            ao_waveform[:, 0] = self.ao_neutral_positions[0]
-            ao_waveform[:, 1] = self.ao_neutral_positions[1]
+            ao_waveform[:, 0] = self._ao_neutral_positions[0]
+            ao_waveform[:, 1] = self._ao_neutral_positions[1]
             
         # Update daq waveforms
-        self.do_waveform = do_waveform
-        self.ao_waveform = ao_waveform
+        self._do_waveform = do_waveform
+        self._ao_waveform = ao_waveform
         
             
     def prepare_waveform_playback(self):
@@ -614,7 +615,7 @@ class OPMNIDAQ:
                 
                 # Configure change timing from camera trigger task
                 self._task_do.CfgSampClkTiming(self.channel_di_change_trigger, 
-                                            self.daq_sample_rate_hz,
+                                            self._ao_neutral_positions,
                                             daq.DAQmx_Val_Rising,
                                             daq.DAQmx_Val_ContSamps, 
                                             self.samples_per_do_ch)
@@ -625,7 +626,7 @@ class OPMNIDAQ:
                                             False, 
                                             10.0, 
                                             daq.DAQmx_Val_GroupByChannel, 
-                                            self.do_waveform, 
+                                            self._do_waveform, 
                                             ct.byref(samples_per_ch_ct_digital), 
                                             None)
 
@@ -635,8 +636,8 @@ class OPMNIDAQ:
             samples_per_ch_ct = ct.c_int32()
             with daq.Task("TaskInitAO") as _task:
                 # Create a 2d array that sets the initial AO voltage to the start of the scan.
-                initial_ao_waveform = np.column_stack((np.full(2, self.ao_waveform[0,0]),
-                                                       np.full(2, self.ao_waveform[0,1])))
+                initial_ao_waveform = np.column_stack((np.full(2, self._ao_waveform[0,0]),
+                                                       np.full(2, self._ao_waveform[0,1])))
                 _task.CreateAOVoltageChan(self.address_ao_mirrors[0], 
                                              "initialize_ao0", 
                                              -6.0, 6.0, daq.DAQmx_Val_Volts, None)
@@ -661,17 +662,17 @@ class OPMNIDAQ:
                 if self.scan_type=='mirror':
                     # Configure timing to change on di change trigger, matches do_waveform shape
                     self._task_ao.CfgSampClkTiming(self.channel_di_change_trigger,
-                                                self.daq_sample_rate_hz, 
+                                                self._ao_neutral_positions, 
                                                 daq.DAQmx_Val_Rising, 
                                                 daq.DAQmx_Val_ContSamps,
                                                 self.samples_per_do_ch)
                 elif self.scan_type=="projection":
                     # Configure to run on internal clock, ao_waveform has shape dictated by camera exposure
                     self._task_ao.CfgSampClkTiming("",
-                                                    self.daq_sample_rate_hz,  # Define how fast the samples are output
+                                                    self._ao_neutral_positions,  # Define how fast the samples are output
                                                     daq.DAQmx_Val_Rising,
                                                     daq.DAQmx_Val_FiniteSamps,  # Output finite number of samples
-                                                    self.ao_waveform.shape[0])  # Total samples
+                                                    self._ao_waveform.shape[0])  # Total samples
 
                     # Configure AO to start on the rising edge of DI signal
                     self._task_ao.CfgDigEdgeStartTrig(self.channel_di_trigger_from_camera,
@@ -685,13 +686,13 @@ class OPMNIDAQ:
                 # Write the output waveform
                 self._task_ao.WriteAnalogF64(self.samples_per_do_ch,
                                              False, 10.0, daq.DAQmx_Val_GroupByScanNumber, 
-                                             self.ao_waveform, ct.byref(samples_per_ch_ct), None)
+                                             self._ao_waveform, ct.byref(samples_per_ch_ct), None)
             elif self.scan_type=="projection":                
                 # Write the output waveform
                 samples_per_ch_ct = ct.c_int32()
                 self._task_ao.WriteAnalogF64(self.samples_per_ao_ch,
                                              False, 10.0, daq.DAQmx_Val_GroupByScanNumber, 
-                                             self.ao_waveform, ct.byref(samples_per_ch_ct), None)                
+                                             self._ao_waveform, ct.byref(samples_per_ch_ct), None)                
         except daq.DAQError as err:
             print("DAQmx Error %s"%err)
      
