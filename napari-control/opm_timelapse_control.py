@@ -52,9 +52,15 @@ def main(path_to_mm_config: Path):
 
     # setup AO optimization thread worker 
     # these methods have to be private to not show using magic-class. Maybe a better solution is available?
-    ao_worker_3d = instrument_control_widget._optimize_AO_3d()
-    ao_worker_3d.yielded.connect(instrument_control_widget._update_layers)
-    instrument_control_widget._set_ao_worker_3d(ao_worker_3d)
+    worker_AO = instrument_control_widget._optimize_AO_3d()
+    worker_AO.yielded.connect(instrument_control_widget._update_layers)
+    instrument_control_widget._set_worker_AO(worker_AO)
+
+    # setup projection thread worker
+    # these methods have to be private to not show using magic-class. Maybe a better solution is available?
+    proj_worker = instrument_control_widget._acquire_proj_data()
+    proj_worker.yielded.connect(instrument_control_widget._update_layers)
+    instrument_control_widget._set_worker_proj(proj_worker)
 
     instrument_control_widget._create_3d_t_worker()
 
