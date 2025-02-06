@@ -238,6 +238,67 @@ class OPMMirrorScan(MagicTemplate):
 
 
     @thread_worker
+    def _acquire_2d_projection(self):
+        """Live-mode: 2D projection mode."""
+
+        while True:
+            # parse which channels are active
+            active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
+            n_active_channels = len(active_channel_indices)
+            if n_active_channels == 0:
+                yield None
+                
+            if self.debug:
+                print("%d active channels: " % n_active_channels, end="")
+                for ind in active_channel_indices:
+                    print("%s " % self.channel_labels[ind], end="")
+                print("")
+
+            if self.powers_changed:
+                self._set_mmc_laser_power()
+                self.powers_changed = False
+
+            if self.ROI_changed:
+                self._crop_camera()
+                self.ROI_changed = False
+
+            
+            
+            if self.channels_changed or self.footprint_changed or not(self.DAQ_running) or self.scan_step_changed or self.exposure_changed:
+                
+                
+                
+                # set exposure time
+                if self.exposure_changed:
+                    self.mmc.setExposure(self.exposure_ms)
+                    self.exposure_changed = False
+                    
+                if self.DAQ_running:
+                    if self.opmdaq.scan_type=="projection":
+                        self.opmdaq.stop_waveform_playback()
+                    else:
+                        self.opmdaq.reset_ao_channels()
+                        self.opmdaq.reset_do_channels()
+                    self.DAQ_running = False
+        
+            self.opmdaq.set_acquisition_params(scan_type="2d",
+                                               channel_states=self.channel_states,
+                                               image_scan_sweep_um=self.scan_mirror_footprint_um,
+                                               image_scan_step_size_um=self.scan_axis_step_um)
+            self.opmdaq.generate_waveforms()
+            self.opmdaq.prepare_waveform_playback()
+            self.opmdaq.start_waveform_playback()
+            self.DAQ_running=True
+            self.channels_changed = False
+            
+            for c in active_channel_indices:
+                self.mmc.snapImage()
+                raw_image_2d = self.mmc.getImage()
+                time.sleep(.05)
+                yield c, raw_image_2d
+
+
+    @thread_worker
     def _acquire_2d_data(self):
         """Live-mode: 2D acquisition without deskewing."""
 
@@ -269,14 +330,13 @@ class OPMMirrorScan(MagicTemplate):
             
             # Check and stop if the daq is running
             if self.DAQ_running:
-                self.opmdaq.stop_waveform_playback()
-                self.opmdaq.reset_ao_channels()
-                self.opmdaq.reset_do_channels()
+                if self.opmdaq.scan_type=="2d":
+                    self.opmdaq.stop_waveform_playback()
+                else:
+                    self.opmdaq.reset_ao_channels()
+                    self.opmdaq.reset_do_channels()
                 self.DAQ_running = False
         
-            # self.opmdaq.set_scan_type('2D')
-            # self.opmdaq.set_channels_to_use(self.channel_states)
-            # Set acquisition parameters, generate waveforms, create tasks, and start playback
             self.opmdaq.set_acquisition_params(scan_type="2d",
                                                channel_states=self.channel_states,
                                                image_scan_sweep_um=self.scan_mirror_footprint_um,
@@ -325,7 +385,11 @@ class OPMMirrorScan(MagicTemplate):
         
         if self.channels_changed or self.footprint_changed or not(self.DAQ_running) or self.scan_step_changed:
             if self.DAQ_running:
-                self.opmdaq.stop_waveform_playback()
+                if self.opmdaq.scan_type=="mirror":
+                    self.opmdaq.stop_waveform_playback()
+                else:
+                    self.opmdaq.reset_ao_channels()
+                    self.opmdaq.reset_do_channels()
                 self.DAQ_running = False
                 
             self.opmdaq.set_acquisition_params(scan_type="mirror",
@@ -334,12 +398,8 @@ class OPMMirrorScan(MagicTemplate):
                                                image_scan_step_size_um=self.scan_axis_step_um)
             self.opmdaq.generate_waveforms()
             self.opmdaq.prepare_waveform_playback()
-            self.opmdaq.start_waveform_playback()
             
-            self.opmdaq.set_scan_type('mirror')
-            self.opmdaq.set_channels_to_use(self.channel_states)
-            scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
-            self.opmdaq.generate_waveforms()
+            scan_steps = self.opmdaq.image_scan_steps
             self.channels_changed = False
             self.footprint_changed = False
 
@@ -758,10 +818,11 @@ class OPMMirrorScan(MagicTemplate):
             if self.DAQ_running:
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
-            self.opmdaq.set_laser_blanking(self.laser_blanking_value)
-            self.opmdaq.set_scan_type('mirror')
-            self.opmdaq.set_channels_to_use(self.channel_states)
-            self.scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
+            self.opmdaq.set_acquisition_params("mirror",
+                                               self.channel_states,
+                                               self.scan_axis_step_um,
+                                               self.scan_mirror_footprint_um,
+                                               self.laser_blanking)
             self.opmdaq.generate_waveforms()
             self.channels_changed = False
             self.footprint_changed = False
@@ -871,13 +932,6 @@ class OPMMirrorScan(MagicTemplate):
         #--------------------------------------------------------End acquisition-------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
 
-        # set circular buffer to be small 
-        #self.mmc.clearCircularBuffer()
-        #circ_buffer_mb = 000
-        #self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
-        # self.channel_powers=[0,0,0,0,0]
-        # self._set_mmc_laser_power()
-
     
     def _crop_camera(self):
         """Crop camera to GUI values."""
@@ -945,6 +999,7 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.setConfig('Camera-TriggerType','NORMAL')
         self.mmc.waitForConfig('Camera-TriggerType','NORMAL')
         trigger_value = self.mmc.getProperty(self.camera_name,'Trigger')
+        
         while not(trigger_value == 'NORMAL'):
             self.mmc.setConfig('Camera-TriggerType','NORMAL')
             self.mmc.waitForConfig('Camera-TriggerType','NORMAL')
@@ -955,6 +1010,7 @@ class OPMMirrorScan(MagicTemplate):
         for trig_idx in range(3):
             self.mmc.setProperty(self.camera_name,f'OUTPUT TRIGGER KIND[{trig_idx}]','EXPOSURE')
             self.mmc.setProperty(self.camera_name,f'OUTPUT TRIGGER POLARITY[{trig_idx}]','POSITIVE')
+
 
     def _enforce_DCAM_internal_trigger(self):
         """Enforce camera being in trigger = INTERNAL mode."""
@@ -988,7 +1044,6 @@ class OPMMirrorScan(MagicTemplate):
         self.opmdaq = OPMNIDAQ()
         # reset scan mirror position to neutral
         self.opmdaq.reset_ao_channels()
-        self.opmdaq.set_laser_blanking(self.laser_blanking)
 
         # connect to Picard shutter
         self.shutter_controller = PicardShutter(shutter_id=self.shutter_id,verbose=False)
@@ -1007,8 +1062,8 @@ class OPMMirrorScan(MagicTemplate):
 
         # shutdown DAQ
         if self.DAQ_running:
-            self.opmdaq.stop_waveform_playback()
-        self.opmdaq.reset_ao_channels()
+            self.opmdaq.reset_ao_channels()
+            self.opmdaq.reset_do_channels()
 
         self.shutter_controller.shutDown()
 
