@@ -33,23 +33,30 @@ class OPMMirrorScan(MagicTemplate):
 
     # initialize
     def __init__(self):
-        # OPM parameters
+        self.debug=False
+        
+        # Channel parameters
         self.active_channel = "Off"
-        self.channel_powers = np.zeros(5,dtype=np.int8)
-        self.channel_states=[False,False,False,False,False]
         self.exposure_ms = 10.0                 # unit: ms
+        self.channel_powers = np.zeros(5, dtype=np.int8)
+        self.channel_states=[False,False,False,False,False]
+        self.channel_labels = ["405", "488", "561", "637", "730"]
+        self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
+        self.laser_blanking_value = True
+        
+        # Galvo mirror control parameters
         self.scan_axis_step_um = 0.4            # unit: um
         self.scan_axis_calibration = 0.0433     # unit: V / um updated 2025.01.24
         self.proj_axis_calibration = .0052      # unit: V / um updated 2025.02.05
         self.galvo_neutral_volt = 0.            # unit: V
         self.scan_mirror_footprint_um = 50.0    # unit: um
-        self.camera_pixel_size_um = .115        # unit: um
         self.opm_tilt = 30                      # unit: degrees
 
         # camera parameters
         self.camera_name = 'OrcaFusionBT'   # camera name in MM config
+        self.camera_pixel_size_um = .115    # unit: um
         self.ROI_center_x = int(1178)
-        self.ROI_center_y = int(1046)# -128   # the (-128) is to offset the area of best focus from known alignment point
+        self.ROI_center_y = int(1046)# -128 # the (-128) is to offset the area of best focus from known alignment point
         self.ROI_width_x = int(1900)        # unit: camera pixels
         self.ROI_width_y = int(512)         # unit: camera pixels
         self.ROI_corner_x = int(self.ROI_center_x -  self.ROI_width_x//2)
@@ -58,7 +65,7 @@ class OPMMirrorScan(MagicTemplate):
         # O3 piezo stage name. Needs to match the name in MM config.
         self.O3_stage_name='MCL NanoDrive Z Stage'
 
-        # shutter ID. Obtained from Picard software.
+        # alignment laser shutter ID. Obtained from Picard software.
         self.shutter_id = 712 # verified 2025.01.24
 
         # ao mirror setup
@@ -73,20 +80,11 @@ class OPMMirrorScan(MagicTemplate):
                                   haso_config_file_path = haso_config_file_path,
                                   interaction_matrix_file_path = wfc_correction_file_path,
                                   flat_positions_file_path = wfc_flat_file_path,
-                                  coeff_file_path = None,
                                   n_modes = 32,
                                   modes_to_ignore = [])
     
         # default save path
         self.save_path = Path('D:/')
-
-        # Channel and laser setup
-        # TODO: Generate list of laser names for changing properties, make sure it matches the channel_labels.
-        self.channel_labels = ["405", "488", "561", "637", "730"]
-        self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
-        self.laser_blanking_value = True
-
-        self.debug=False
 
         # flags for instrument setup
         self.powers_changed = True
@@ -287,64 +285,6 @@ class OPMMirrorScan(MagicTemplate):
             self.opmdaq.start_waveform_playback()
             self.DAQ_running=True
 
-        for c in active_channel_indices:
-            self.mmc.snapImage()
-            raw_image_2d = self.mmc.getImage()
-            time.sleep(.05)
-            yield c, raw_image_2d
-
-
-    @thread_worker
-    def _acquire_proj_data(self):
-        """Live-mode: 3D projection mode"""
-
-        while True:
-
-            # execute sweep and return data
-            c, projection_image = self._execute_projection()
-
-            yield c, projection_image
-
-    @thread_worker
-    def _acquire_2d_data(self):
-        """Live-mode: 2D acquisition without deskewing."""
-
-        while True:
-
-            # parse which channels are active
-            active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
-            n_active_channels = len(active_channel_indices)
-            if n_active_channels == 0:
-                yield None
-                
-            if self.debug:
-                print("%d active channels: " % n_active_channels, end="")
-                for ind in active_channel_indices:
-                    print("%s " % self.channel_labels[ind], end="")
-                print("")
-
-            if self.powers_changed:
-                self._set_mmc_laser_power()
-                self.powers_changed = False
-
-            if self.channels_changed or self.scan_step_changed:
-                if self.DAQ_running:
-                    self.opmdaq.stop_waveform_playback()
-                    self.DAQ_running = False
-                    self.opmdaq.reset_scan_mirror()
-                self.opmdaq.set_laser_blanking(self.laser_blanking_value)
-                self.opmdaq.set_scan_type('2D')
-                self.opmdaq.set_channels_to_use(self.channel_states)
-                self.opmdaq.set_interleave_mode(True)
-                self.opmdaq.generate_waveforms()
-                self.opmdaq.start_waveform_playback()
-                self.DAQ_running=True
-                self.channels_changed = False
-            
-            if not(self.DAQ_running):
-                self.opmdaq.start_waveform_playback()
-                self.DAQ_running=True
-
             if self.ROI_changed:
 
                 self._crop_camera()
@@ -354,7 +294,27 @@ class OPMMirrorScan(MagicTemplate):
             if self.exposure_changed:
                 self.mmc.setExposure(self.exposure_ms)
                 self.exposure_changed = False
-
+            
+            # Check and stop if the daq is running
+            if self.DAQ_running:
+                self.opmdaq.stop_waveform_playback()
+                self.opmdaq.reset_ao_channels()
+                self.opmdaq.reset_do_channels()
+                self.DAQ_running = False
+        
+            # self.opmdaq.set_scan_type('2D')
+            # self.opmdaq.set_channels_to_use(self.channel_states)
+            # Set acquisition parameters, generate waveforms, create tasks, and start playback
+            self.opmdaq.set_acquisition_params(scan_type="2d",
+                                               channel_states=self.channel_states,
+                                               image_scan_sweep_um=self.scan_mirror_footprint_um,
+                                               image_scan_step_size_um=self.scan_axis_step_um)
+            self.opmdaq.generate_waveforms()
+            self.opmdaq.prepare_waveform_playback()
+            self.opmdaq.start_waveform_playback()
+            self.DAQ_running=True
+            self.channels_changed = False
+            
             for c in active_channel_indices:
                 self.mmc.snapImage()
                 raw_image_2d = self.mmc.getImage()
@@ -395,10 +355,17 @@ class OPMMirrorScan(MagicTemplate):
             if self.DAQ_running:
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
-            self.opmdaq.set_laser_blanking(self.laser_blanking_value)
+                
+            self.opmdaq.set_acquisition_params(scan_type="mirror",
+                                               channel_states=self.channel_states,
+                                               image_scan_sweep_um=self.scan_mirror_footprint_um,
+                                               image_scan_step_size_um=self.scan_axis_step_um)
+            self.opmdaq.generate_waveforms()
+            self.opmdaq.prepare_waveform_playback()
+            self.opmdaq.start_waveform_playback()
+            
             self.opmdaq.set_scan_type('mirror')
             self.opmdaq.set_channels_to_use(self.channel_states)
-            self.opmdaq.set_interleave_mode(True)
             scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
             self.opmdaq.generate_waveforms()
             self.channels_changed = False
@@ -821,7 +788,6 @@ class OPMMirrorScan(MagicTemplate):
             self.opmdaq.set_laser_blanking(self.laser_blanking_value)
             self.opmdaq.set_scan_type('mirror')
             self.opmdaq.set_channels_to_use(self.channel_states)
-            self.opmdaq.set_interleave_mode(True)
             self.scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
             self.opmdaq.generate_waveforms()
             self.channels_changed = False
@@ -1048,7 +1014,7 @@ class OPMMirrorScan(MagicTemplate):
         # connect to DAQ
         self.opmdaq = OPMNIDAQ()
         # reset scan mirror position to neutral
-        self.opmdaq.reset_scan_mirror()
+        self.opmdaq.reset_ao_channels()
         self.opmdaq.set_laser_blanking(self.laser_blanking)
         self.opmdaq.exposure = self.exposure
 
@@ -1070,7 +1036,7 @@ class OPMMirrorScan(MagicTemplate):
         # shutdown DAQ
         if self.DAQ_running:
             self.opmdaq.stop_waveform_playback()
-        self.opmdaq.reset_scan_mirror()
+        self.opmdaq.reset_ao_channels()
 
         self.shutter_controller.shutDown()
 
@@ -1228,6 +1194,7 @@ class OPMMirrorScan(MagicTemplate):
         layout='horizontal'
     )
     def laser_blanking(self,laser_blanking = True):
+        # TODO: No longer needed, remove?
         """Magicguic element to laser blanking state.
         
         Parameters
@@ -1238,7 +1205,7 @@ class OPMMirrorScan(MagicTemplate):
 
         if not(self.laser_blanking_value == laser_blanking):
             self.laser_blanking_value = laser_blanking
-            self.opmdaq.set_laser_blanking(self.laser_blanking_value)
+            # self.opmdaq.set_laser_blanking(self.laser_blanking_value)
 
     
     @magicgui(
@@ -1320,7 +1287,7 @@ class OPMMirrorScan(MagicTemplate):
                     if self.DAQ_running:
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running = False
-                    self.opmdaq.reset_scan_mirror()
+                    self.opmdaq.reset_ao_channels()
                 else:
                     if not(self.worker_3d_started):
                         self.worker_3d.start()
@@ -1402,7 +1369,7 @@ class OPMMirrorScan(MagicTemplate):
                     if self.DAQ_running:
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running = False
-                    self.opmdaq.reset_scan_mirror()
+                    self.opmdaq.reset_ao_channels()
                 else:
                     if not(self.worker_AO_started):
                         self.worker_AO.start()

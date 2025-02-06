@@ -33,7 +33,7 @@ nidaq.start_waveform_playback()
 import PyDAQmx as daq
 import ctypes as ct
 import numpy as np
-from typing import Sequence
+from typing import Sequence, List
 
 class OPMNIDAQ:
     """Class to control NIDAQ."""
@@ -110,15 +110,9 @@ class OPMNIDAQ:
    
     
     def set_laser_blanking(self,laser_blanking: bool):
-        """Set the laser blanking option.
-        
-        Parameters
-        ----------
-        laser_blanking : bool
-            True to enable laser blanking, False to disable.
-        """
         self.laser_blanking=laser_blanking
         
+            
     def set_scan_type(self,scan_type: str):
         """Set the OPM scan type.
         
@@ -199,6 +193,7 @@ class OPMNIDAQ:
             
             _ao_task.StopTask()
             _ao_task.ClearTask()
+      
        
     def reset_do_channels(self):
         """Reset the digital out channels."""
@@ -209,7 +204,7 @@ class OPMNIDAQ:
                                   daq.DAQmx_Val_ChanForAllLines)
             _do_task.WriteDigitalLines(1, True, 1.0, daq.DAQmx_Val_GroupByChannel, 
                                       np.zeros((1, len(self.address_channel_do)), dtype=np.uint8),
-                                      None, None)
+                                      None, None)    
     
     def reset_scan_mirror(self):
         """Reset the scan mirror to the neutral position."""
