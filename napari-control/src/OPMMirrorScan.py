@@ -271,60 +271,49 @@ class OPMMirrorScan(MagicTemplate):
             self._set_mmc_laser_power()
             self.powers_changed = False
 
-        if self.channels_changed or self.scan_step_changed or self.scan_step_changed or self.exposure_changed:
-            if self.DAQ_running:
-                self.opmdaq.stop_waveform_playback()
-                self.DAQ_running = False
-                self.opmdaq.reset_scan_mirror()
-
-            if self.exposure_changed:
+        if self.exposure_changed:
                 self.mmc.setExposure(self.exposure_ms)
-                self.opmdaq.exposure = self.exposure_ms
-                self.exposure_changed = False
 
-            scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
-            proj_steps = self.opmdaq.set_proj_mirror_range(self.scan_mirror_footprint_um)
-            self.opmdaq.generate_waveforms()
-            self.opmdaq.prepare_waveform_playback()
-        
-        if not(self.DAQ_running):
-            self.opmdaq.start_waveform_playback()
-            self.DAQ_running=True
-
-            if self.ROI_changed:
-
-                self._crop_camera()
-                self.ROI_changed = False
-
-            # set exposure time
-            if self.exposure_changed:
-                self.mmc.setExposure(self.exposure_ms)
-                self.exposure_changed = False
+        # Set change flags to false, we will update all parameters at once.
+        if self.scan_step_changed:
+            self.scan_step_changed = False
             
-            # Check and stop if the daq is running
-            if self.DAQ_running:
-                if self.opmdaq.scan_type=="2d":
-                    self.opmdaq.stop_waveform_playback()
-                else:
-                    self.opmdaq.reset_ao_channels()
-                    self.opmdaq.reset_do_channels()
-                self.DAQ_running = False
-        
-            self.opmdaq.set_acquisition_params(scan_type="2d",
-                                               channel_states=self.channel_states,
-                                               image_scan_sweep_um=self.scan_mirror_footprint_um,
-                                               image_scan_step_size_um=self.scan_axis_step_um)
-            self.opmdaq.generate_waveforms()
-            self.opmdaq.prepare_waveform_playback()
-            self.opmdaq.start_waveform_playback()
-            self.DAQ_running=True
+        if self.channels_changed:
             self.channels_changed = False
             
-            for c in active_channel_indices:
-                self.mmc.snapImage()
-                raw_image_2d = self.mmc.getImage()
-                time.sleep(.05)
-                yield c, raw_image_2d
+        if self.footprint_changed:
+            self.footprint_changed = False
+        
+        # SJS TODO: need to set the camera crop to cover the expected scan area on the chip.
+        if self.ROI_changed:
+                self._crop_camera()
+                self.ROI_changed = False
+                
+        # Stop the playback, recreate tasks if previous scan type was different.
+        if self.DAQ_running:
+            if self.opmdaq.scan_type == "projection":
+                self.opmdaq.stop_waveform_playback()
+            else:
+                self.opmdaq.reset_ao_channels()
+                self.opmdaq.reset_do_channels()
+            self.DAQ_running = False
+            
+        self.opmdaq.set_acquisition_params("projection",
+                                           self.channel_states,
+                                           self.scan_axis_step_um,
+                                           self.scan_mirror_footprint_um,
+                                           self.laser_blanking,
+                                           self.exposure_ms)
+        self.opmdaq.generate_waveforms()
+        self.opmdaq.prepare_waveform_playback()
+        self.opmdaq.start_waveform_playback()
+        self.DAQ_running=True
+        
+        for c in active_channel_indices:
+            self.mmc.snapImage()
+            raw_image_2d = self.mmc.getImage()
+            time.sleep(.05)
+            yield c, raw_image_2d
 
     
     def _execute_3d_sweep(self):
