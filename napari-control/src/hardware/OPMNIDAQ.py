@@ -52,15 +52,20 @@ class OPMNIDAQ:
         self.scan_mirror_calibration = scan_mirror_calibration
         self.proj_mirror_calibration = proj_mirror_calibration
         self.scan_step_size_um = scan_step_size_um
+        self.verbose = verbose
         
         # Define waveform generation parameters for projection mode
-        self._daq_sample_rate_hz = 10000
+        self.__daq_sample_rate_hz = 10000
         self._do_ind = [0,1,2,3,4]
         self._active_channels_indices = None
         self._n_active_channels = 0
-        self._num_do_channels = len(self._do_ind)
-        self._do_waveform = [False] * len(self._do_ind)
-        self._ao_waveform = [np.zeros(1), np.zeros(1)]
+        self.__do_ind = [0,1,2,3,4]
+        self._active_channels_indices = None
+        self._n_active_channels = 0
+        self._num_do_channels = len(self.__do_ind)
+        self.__do_waveform = [False] * len(self.__do_ind)
+        self.__ao_waveform = [np.zeros(1), np.zeros(1)]
+        self._ao_neutral_positions = [0.0, 0.0]
         self._ao_neutral_positions = [0.0, 0.0]
                 
         # Configure hardware pin addresses.
@@ -94,6 +99,7 @@ class OPMNIDAQ:
         self._task_ao = None
         self._task_di = None
         
+   
     @property
     def scan_type(self) -> str:
         """Scan type.
@@ -297,7 +303,7 @@ class OPMNIDAQ:
             Boolean array of active laser lines
         """
         
-        return getattr(self,"_channel_states",None) * 1000.
+        return getattr(self,"_channel_states",None)
     
     @channel_states.setter
     def channel_states(self, value: Sequence):
@@ -317,36 +323,47 @@ class OPMNIDAQ:
         self._active_channels_indices = [ind for ind, st in zip(self._do_ind, self._channel_states) if st]
         self._n_active_channels = len(self._active_channels_indices)
         
+        
     def set_acquisition_params(self,
                                scan_type: str = None,
                                channel_states: List[bool] = None,
-                               scan_step_size_um: float = None,
-                               scan_sweep_um: float = None,
+                               image_scan_step_size_um: float = None,
+                               image_scan_sweep_um: float = None,
                                laser_blanking: bool = None,
-                               exposure_ms: float = None):
-        """Setup accquistion parameters.
+                               exposure_ms: float = None,
+                               proj_mirror_calibration: float = None):
+        """
         """
         if scan_type:
             self.scan_type=scan_type
         if channel_states:
-            self.channel_states = channel_states
-        if scan_step_size_um and scan_sweep_um and not(scan_type) == '2D':
-            self.scan_step_size_um = scan_step_size_um
-            self.scan_sweep_um = scan_sweep_um
-            self.scan_mirror_min_volt = -(self.scan_step_size_um * self.scan_mirror_calibration / 2.) + self._ao_neutral_positions[0] # unit: volts
-            self.scan_axis_step_volts = self.scan_step_size_um * self.scan_mirror_calibration # unit: V
-            self.scan_axis_range_volts = self.scan_sweep_um * self.scan_mirror_calibration # unit: V
+            self._active_channels_indices = [ind for ind, st in zip(self._do_ind, channel_states) if st]
+            self._n_active_channels = len(self._active_channels_indices)
+        if proj_mirror_calibration:
+            self.proj_mirror_calibration = proj_mirror_calibration
+        if image_scan_step_size_um and image_scan_sweep_um:
+            # determine sweep footprint
+            self.scan_mirror_min_volt = -(image_scan_step_size_um * self.scan_mirror_calibration / 2.) + self._ao_neutral_positions[0] # unit: volts
+            self.scan_axis_step_volts = image_scan_step_size_um * self.scan_mirror_calibration 
+            self.scan_axis_range_volts = image_scan_sweep_um * self.scan_mirror_calibration 
             self.image_scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
+            # determine projection scan range
+            self.proj_scan_range_volts = image_scan_sweep_um * self.proj_mirror_calibration
             return self.image_scan_steps
         if laser_blanking:
             self.laser_blanking = laser_blanking
         if exposure_ms:
-            self.exposure_ms = exposure_ms
-        if scan_type == 'projection':
-            proj_mirror_full_voltage = self.scan_sweep_um * self.proj_mirror_calibration
-            self.proj_mirror_min_volt = -proj_mirror_full_voltage/2
-            self.proj_mirror_max_volt = proj_mirror_full_voltage/2
-                
+            self.exposure_s = exposure_ms * 1e-3
+            
+
+    def reset(self):
+        """Reset the device."""
+
+        daq.DAQmxResetDevice(self.dev_name)
+        self.reset_ao_channels()
+        self.reset_do_channels()
+
+
     def reset_ao_channels(self):
         """Stops any waveforms and deletes tasks, set analog lines to the mirror's neutral positions
         """
@@ -416,6 +433,7 @@ class OPMNIDAQ:
             # Collect one frame for each scan position
             n_voltage_steps = self.image_scan_steps
             self.samples_per_do_ch = 2*n_voltage_steps*self._n_active_channels
+            self.samples_per_do_ch = 2*n_voltage_steps*self._n_active_channels
             
             # Generate values for DO
             _do_waveform = np.zeros((self.samples_per_do_ch, self._num_do_channels), dtype=np.uint8)
@@ -460,6 +478,7 @@ class OPMNIDAQ:
             # The DO channel changes with changes in camera's trigger output,
             # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
             self.samples_per_do_ch = (2*self._n_active_channels - 1) + 1
+            self.samples_per_do_ch = (2*self._n_active_channels - 1) + 1
  
             # Generate values for DO
             _do_waveform = np.zeros((self.samples_per_do_ch, self._num_do_channels), dtype=np.uint8)
@@ -481,29 +500,33 @@ class OPMNIDAQ:
             _ao_waveform = np.zeros((self.samples_per_ao_ch, 2))
             
             # Generate projection mirror linear ramp
-            # TODO: Set using edges of the ROI, and calibration volts per px
+            self.proj_mirror_max_volt = self.proj_scan_range_volts/2
+            self.proj_mirror_min_volt = - self.proj_scan_range_volts/2
+            
             if self.verbose:
                 print(self.proj_mirror_min_volt)
                 print(self.proj_mirror_max_volt)
             proj_mirror_volts = np.linspace(self.proj_mirror_min_volt, self.proj_mirror_max_volt, n_voltage_steps)
-            
+            proj_return_sweep = np.linspace(proj_mirror_volts[-1], proj_mirror_volts[0], return_samples)
             # Generate image scanning mirror voltage steps
             scan_mirror_max_volts = self.scan_mirror_min_volt + self.scan_axis_range_volts
             scan_mirror_volts = np.linspace(self.scan_mirror_min_volt, scan_mirror_max_volts, n_voltage_steps)
-            
+            scan_return_sweep = np.linspace(scan_mirror_volts[-1], scan_mirror_volts[0], return_samples)
+
             # Set the last time point (when exp is off) to the first mirror positions.
             _ao_waveform[:-1, 0] = scan_mirror_volts
             _ao_waveform[:-1, 1] = proj_mirror_volts
 
             # set back to initial value at end
-            _ao_waveform[-return_samples:, 0] = scan_mirror_volts[0]
-            _ao_waveform[-return_samples:, 1] = proj_mirror_volts[0]
+            _ao_waveform[-return_samples:, 0] = proj_return_sweep
+            _ao_waveform[-return_samples:, 1] = scan_return_sweep
             
         elif self.scan_type == 'stage':
             """Only fire the active channel lasers,keep the mirrors in their neutral positions"""
 
             #-----------------------------------------------------#
             # setup digital trigger buffer on DAQ
+            self.samples_per_do_ch = 2 * int(self._n_active_channels)
             self.samples_per_do_ch = 2 * int(self._n_active_channels)
 
             # create DAQ pattern for laser strobing controlled via rolling shutter
@@ -521,8 +544,8 @@ class OPMNIDAQ:
             # Create ao waveform, keeping the mirrors in their neutral positions
             # In stage scan mode, only the first time point gets set.
             _ao_waveform = np.zeros((1, 2))
-            _ao_waveform[:, 0] = self._ao_neutral_positions[0]
-            _ao_waveform[:, 1] = self._ao_neutral_positions[1]
+            _ao_waveform[:, 0] = self.__ao_neutral_positions[0]
+            _ao_waveform[:, 1] = self.__ao_neutral_positions[1]
             
         elif self.scan_type == '2D':
             """Only fire the active channel lasers, keep the mirrors in their neutral positions
@@ -530,6 +553,7 @@ class OPMNIDAQ:
             #-----------------------------------------------------#
             # The DO channel changes with changes in camera's trigger output,
             # There are 2 time steps per frame, except for first frame plus one final frame to reset voltage
+            self.samples_per_do_ch = (2*self._n_active_channels - 1) + 1
             self.samples_per_do_ch = (2*self._n_active_channels - 1) + 1
  
             # Generate values for DO

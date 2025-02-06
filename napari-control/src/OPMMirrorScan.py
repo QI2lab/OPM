@@ -48,7 +48,8 @@ class OPMMirrorScan(MagicTemplate):
         self.scan_axis_step_um = 0.4            # unit: um
         self.scan_axis_calibration = 0.0433     # unit: V / um updated 2025.01.24
         self.proj_axis_calibration = .0052      # unit: V / um updated 2025.02.05
-        self.galvo_neutral_volt = 0.            # unit: V
+        self.proj_scan_axis_neutral = 0.
+        self.image_scan_axis_neutral = 0.            # unit: V
         self.scan_mirror_footprint_um = 50.0    # unit: um
         self.opm_tilt = 30                      # unit: degrees
 
@@ -274,7 +275,7 @@ class OPMMirrorScan(MagicTemplate):
         if self.exposure_changed:
                 self.mmc.setExposure(self.exposure_ms)
 
-        # Set change flags to false, we will update all parameters at once.
+        # Set change flags to false, we will update all parameters at once?
         if self.scan_step_changed:
             self.scan_step_changed = False
             
@@ -314,8 +315,8 @@ class OPMMirrorScan(MagicTemplate):
             raw_image_2d = self.mmc.getImage()
             time.sleep(.05)
             yield c, raw_image_2d
-
-    
+                 
+                
     def _execute_3d_sweep(self):
         #------------------------------------------------------------------------------------------------------------------------------------
         #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
@@ -402,6 +403,75 @@ class OPMMirrorScan(MagicTemplate):
         #------------------------------------------------------------------------------------------------------------------------------------
 
 
+    @thread_worker
+    def _acquire_2d_data(self):
+        """Live-mode: 2D acquisition without deskewing."""
+
+        while True:
+            # parse which channels are active
+            active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
+            n_active_channels = len(active_channel_indices)
+            if n_active_channels == 0:
+                yield None
+                
+            if self.debug:
+                print("%d active channels: " % n_active_channels, end="")
+                for ind in active_channel_indices:
+                    print("%s " % self.channel_labels[ind], end="")
+                print("")
+
+            if self.powers_changed:
+                self._set_mmc_laser_power()
+                self.powers_changed = False
+
+            if self.ROI_changed:
+                self._crop_camera()
+                self.ROI_changed = False
+
+            # set exposure time
+            if self.exposure_changed:
+                self.mmc.setExposure(self.exposure_ms)
+                self.exposure_changed = False
+            
+            # Check and stop if the daq is running
+            if self.DAQ_running:
+                if self.opmdaq.scan_type=="2d":
+                    self.opmdaq.stop_waveform_playback()
+                else:
+                    self.opmdaq.reset_ao_channels()
+                    self.opmdaq.reset_do_channels()
+                self.DAQ_running = False
+        
+            self.opmdaq.set_acquisition_params(scan_type="2d",
+                                               channel_states=self.channel_states,
+                                               image_scan_sweep_um=self.scan_mirror_footprint_um,
+                                               image_scan_step_size_um=self.scan_axis_step_um,
+                                               exposure_ms=self.exposure_ms)
+            self.opmdaq.generate_waveforms()
+            self.opmdaq.prepare_waveform_playback()
+            self.opmdaq.start_waveform_playback()
+            self.DAQ_running=True
+            self.channels_changed = False
+            
+            for c in active_channel_indices:
+                self.mmc.snapImage()
+                raw_image_2d = self.mmc.getImage()
+                time.sleep(.05)
+                yield c, raw_image_2d
+    
+    
+    @thread_worker
+    def _acquire_proj_data(self):
+        """Live-mode: 3D projection mode"""
+
+        while True:
+
+            # execute sweep and return data
+            c, projection_image = self._execute_projection()
+
+            yield c, projection_image
+            
+            
     @thread_worker
     def _acquire_3d_data(self):
         """Live-mode: 3D acquisition and deskewing."""
@@ -911,6 +981,23 @@ class OPMMirrorScan(MagicTemplate):
         self.mmc.waitForDevice(self.camera_name)
 
     
+    def _crop_camera_for_projection(self, proj_scan_range_um):
+        """Crop camera to GUI values."""
+
+        current_ROI = self.mmc.getROI()
+        if not(current_ROI[2]==2304) or not(current_ROI[3]==2304):
+            self.mmc.clearROI()
+            self.mmc.waitForDevice(self.camera_name)
+        
+        # TODO: Verify direction +- for setting projection corner
+        proj_corner_y = self.ROI_center_y - proj_pixel_width_y/2
+        proj_pixel_width_y = proj_scan_range_um / self.camera_pixel_size_um
+        self.mmc.setROI(int(self.ROI_corner_x),
+                        int(proj_corner_y),
+                        int(self.ROI_width_x),
+                        int(proj_pixel_width_y))
+        self.mmc.waitForDevice(self.camera_name)
+        
     def _lasers_to_hardware(self):
         """Change lasers to hardware control. """
 
