@@ -261,7 +261,7 @@ class OPMStageScan:
                 if self.DAQ_running:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
-                    self.opmdaq.reset_scan_mirror()
+                    self.opmdaq.reset_ao_channels()
                 self.opmdaq.set_scan_type('stage')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
@@ -539,7 +539,7 @@ class OPMStageScan:
                 if self.DAQ_running:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
-                    self.opmdaq.reset_scan_mirror()
+                    self.opmdaq.reset_ao_channels()
                 self.opmdaq.set_scan_type('stage')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
@@ -558,7 +558,7 @@ class OPMStageScan:
                 if self.DAQ_running:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
-                    self.opmdaq.reset_scan_mirror()
+                    self.opmdaq.reset_ao_channels()
                 self.opmdaq.set_scan_type('stage')
                 self.opmdaq.set_channels_to_use(self.channel_states)
                 self.opmdaq.set_interleave_mode(True)
@@ -727,7 +727,7 @@ class OPMStageScan:
 
             if (success_fluidics):
                 # clean up DAQ
-                self.opmdaq.reset_scan_mirror()
+                self.opmdaq.reset_ao_channels()
 
             
                 # create down-sampled views with compression
@@ -942,7 +942,7 @@ class OPMStageScan:
         # connect to DAQ
         self.opmdaq = OPMNIDAQ()
         # reset scan mirror position to neutral
-        self.opmdaq.reset_scan_mirror()
+        self.opmdaq.reset_ao_channels()
 
     def _shutdown(self):
         """
@@ -958,7 +958,7 @@ class OPMStageScan:
         # shutdown DAQ
         if self.DAQ_running:
             self.opmdaq.stop_waveform_playback()
-        self.opmdaq.reset_scan_mirror()
+        self.opmdaq.reset_ao_channels()
 
         if (self.iterative_setup):
             self.valve_controller.close()
@@ -1161,7 +1161,7 @@ class OPMStageScan:
                     if self.DAQ_running:
                         self.opmdaq.stop_waveform_playback()
                         self.DAQ_running = False
-                    self.opmdaq.reset_scan_mirror()
+                    self.opmdaq.reset_ao_channels()
                 else:
                     if not(self.worker_3d_started):
                         self.worker_3d.start()

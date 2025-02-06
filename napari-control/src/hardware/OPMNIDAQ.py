@@ -18,6 +18,7 @@ douglas.shepherd@asu.edu
 import PyDAQmx as daq
 import ctypes as ct
 import numpy as np
+from typing import List
 
 class OPMNIDAQ:
 
@@ -93,14 +94,42 @@ class OPMNIDAQ:
         self.reset_ao_channels()
         self.reset_do_channels()
    
-    
-    def set_laser_blanking(self,laser_blanking: bool):
-        self.laser_blanking=laser_blanking
+   
+    def set_acquisition_params(self,
+                               scan_type: str = None,
+                               channel_states: List[bool] = None,
+                               image_scan_step_size_um: float = None,
+                               image_scan_sweep_um: float = None):
+        """_summary_
+
+        Parameters
+        ----------
+        scan_type : str, optional
+            _description_, by default None
+        channel_states : List[bool], optional
+            _description_, by default None
+        image_scan_step_size_um : float, optional
+            _description_, by default None
+        image_scan_sweep_um : float, optional
+            _description_, by default None
+        """
+        if scan_type:
+            self.scan_type=scan_type
+        if channel_states:
+            self.active_channel_indices = [ind for ind, st in zip(self.do_ind, channel_states) if st]
+            self.n_active_channels = len(self.active_channel_indices)
+        if image_scan_step_size_um and image_scan_sweep_um:
+            # determine sweep footprint
+            self.scan_mirror_min_volt = -(image_scan_step_size_um * self.scan_mirror_calibration / 2.) + self.scan_mirror_neutral # unit: volts
+            self.scan_axis_step_volts = image_scan_step_size_um * self.scan_mirror_calibration # unit: V
+            self.scan_axis_range_volts = image_scan_sweep_um * self.scan_mirror_calibration # unit: V
+            self.image_scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
+            return self.image_scan_steps
         
-            
+        
     def set_scan_type(self,scan_type: str):
         self.scan_type = scan_type
-
+        
 
     def set_channels_to_use(self,channel_states):
         self.active_channel_indices = [ind for ind, st in zip(self.do_ind, channel_states) if st]
@@ -137,6 +166,7 @@ class OPMNIDAQ:
             
             _ao_task.StopTask()
             _ao_task.ClearTask()
+      
        
     def reset_do_channels(self):
         with daq.Task("ResetDO") as _do_task:
@@ -145,13 +175,7 @@ class OPMNIDAQ:
                                   daq.DAQmx_Val_ChanForAllLines)
             _do_task.WriteDigitalLines(1, True, 1.0, daq.DAQmx_Val_GroupByChannel, 
                                       np.zeros((1, len(self.address_channel_do)), dtype=np.uint8),
-                                      None, None)
-    
-    
-    def reset_scan_mirror(self):
-        self.reset_ao_channels()
-            
-    
+                                      None, None)    
     
     
     def generate_waveforms(self):
