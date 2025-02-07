@@ -1,6 +1,6 @@
 #!/usr/bin/python
 """
-Instrument interface class to run NIDAQ with camera as master for OPM using PyDAQMx 
+qi2lab-OPM interface class to run NIDAQ with camera as master using PyDAQMx.
 
 Authors:
 Peter Brown
@@ -8,9 +8,12 @@ Franky Djutanta
 Steven Sheppard
 Douglas Shepherd
 
+contact: douglas.shepherd@asu.edu
+
 Change Log:
-2025/02/25: Projection mode
-2021/12/11: Initial version
+2025/02: Refactor
+2025/02: Projection mode
+2021/12: Initial version
 
 Example projection code
 nidaq.set_channels_to_use([True, False, False, False, False])
@@ -30,10 +33,41 @@ nidaq.start_waveform_playback()
 import PyDAQmx as daqmx
 import ctypes as ct
 import numpy as np
-from typing import Sequence, List
+from typing import Sequence
 
 class OPMNIDAQ:
-    """Class to control NIDAQ."""
+    """Class to control NIDAQ for the qi2lab-OPM.
+    
+    This class is specialized to run an OPM where the camera provides the external timing. The current config expects there to be 
+    an analog output for a image scanning galvo mirror, an analog output for a projection galvo mirror, multiple digital output to laser control,
+    and appropriate wiring for TTL triggering from the camera into a digital input.
+    
+    There are multiple modes possible. 
+    
+    The first three modes use the camera for all timing:
+    
+    scan_type = "2D"
+        This mode snaps an image for each of the requested laser in sequential order, with both mirrors at the neutral position. 
+        The images are a single oblique plane each. The "EXPOSURE OUT" timing of the camera controls when the lasers are active, if laser blanking
+        is "True".
+    scan_type = "mirror"
+        This mode snaps image for each of the requested lasers in sequential order at "N" image galvo mirror positions to form an oblique volume. 
+        The "EXPOSURE TIMING" of the camera controls when the lasers are active, if laser blanking is "True". The changing edge of the "EXPOSURE OUT"
+        timing of the camera controls when the image galvo mirror advances to the next discrete position.
+    scan_type = "stage"
+        This mode is similar to "2D", except the camera now does not begin free running until the ASI stage controller sends a pulse that the scanning
+        stage has passed the start position and is up to speed.
+        
+    The last mode uses the camera "EXPOSURE OUT" to initiate waveform playback at a set speed.
+    
+    scan_type = "projection"
+        This mode snaps an image where both the image and projection galvo mirrors sweep through a set of voltages during a SINGLE camera exposure.
+        When the timing is correct for this mode, the resulting image is a Z sum projection of the swept volume, with a 1/cos(30 degrees) shrink factor
+        applied.
+    
+    Parameters
+    ----------
+    """
 
     def __init__(
         self,
@@ -55,7 +89,7 @@ class OPMNIDAQ:
         self.verbose = verbose
         
         # Define waveform generation parameters for projection mode
-        self.__daq_sample_rate_hz = 10000
+        self._daq_sample_rate_hz = 10000
         self._do_ind = [0,1,2,3,4]
         self._active_channels_indices = None
         self._n_active_channels = 0
@@ -63,8 +97,8 @@ class OPMNIDAQ:
         self._active_channels_indices = None
         self._n_active_channels = 0
         self._num_do_channels = len(self.__do_ind)
-        self.__do_waveform = [False] * len(self.__do_ind)
-        self.__ao_waveform = [np.zeros(1), np.zeros(1)]
+        self._do_waveform = [False] * len(self.__do_ind)
+        self._ao_waveform = [np.zeros(1), np.zeros(1)]
         self._ao_neutral_positions = [0.0, 0.0]
         self._ao_neutral_positions = [0.0, 0.0]
                 
@@ -99,7 +133,6 @@ class OPMNIDAQ:
         self._task_ao = None
         self._task_di = None
         
-   
     @property
     def scan_type(self) -> str:
         """Scan type.
@@ -324,45 +357,63 @@ class OPMNIDAQ:
         self._n_active_channels = len(self._active_channels_indices)
         
         
-    def set_acquisition_params(self,
-                               scan_type: str = None,
-                               channel_states: List[bool] = None,
-                               image_scan_step_size_um: float = None,
-                               image_scan_sweep_um: float = None,
-                               laser_blanking: bool = None,
-                               exposure_ms: float = None,
-                               proj_mirror_calibration: float = None):
-        """
+    def set_acquisition_params(
+        self,
+        scan_type: str = None,
+        channel_states: Sequence[bool] = None,
+        image_scan_step_size_um: float = None,
+        image_scan_sweep_um: float = None,
+        laser_blanking: bool = None,
+        exposure_ms: float = None
+    ):
+        """Convenience function to set the DAQ up for an acquisition.
+        
+        
+        Parameters
+        ----------
+        scan_type: str
+            scan type. One of "2D", "3D", "projection", or "stage"
+        channel_states: Sequence[bool]
+        
+        image_scan_step_size_um: float
+        
+        image_scan_sweep_um: float
+        
+        laser_blanking: bool
+        
+        exposure_ms: float
+   
+        
         """
         if scan_type:
             self.scan_type=scan_type
-        if channel_states:
-            self._active_channels_indices = [ind for ind, st in zip(self._do_ind, channel_states) if st]
-            self._n_active_channels = len(self._active_channels_indices)
-        if proj_mirror_calibration:
-            self.proj_mirror_calibration = proj_mirror_calibration
-        if image_scan_step_size_um and image_scan_sweep_um:
-            # determine sweep footprint
-            self.scan_mirror_min_volt = -(image_scan_step_size_um * self.scan_mirror_calibration / 2.) + self._ao_neutral_positions[0] # unit: volts
-            self.scan_axis_step_volts = image_scan_step_size_um * self.scan_mirror_calibration 
-            self.scan_axis_range_volts = image_scan_sweep_um * self.scan_mirror_calibration 
-            self.image_scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
-            # determine projection scan range
-            self.proj_scan_range_volts = image_scan_sweep_um * self.proj_mirror_calibration
-            return self.image_scan_steps
-        if laser_blanking:
-            self.laser_blanking = laser_blanking
-        if exposure_ms:
-            self.exposure_s = exposure_ms * 1e-3
             
-
+        if self.scan_type is not None:
+            if channel_states:
+                self._active_channels_indices = [ind for ind, st in zip(self._do_ind, channel_states) if st]
+                self._n_active_channels = len(self._active_channels_indices)
+            if laser_blanking:
+                self.laser_blanking = laser_blanking
+            if exposure_ms:
+             self.exposure_ms = exposure_ms
+                
+            if self.scan_type == "mirror" or self.scan_type == "projection":
+                if image_scan_step_size_um and image_scan_sweep_um:
+                    # determine sweep footprint
+                    self.scan_mirror_min_volt = -(image_scan_step_size_um * self.scan_mirror_calibration / 2.) + self._ao_neutral_positions[0] # unit: volts
+                    self.scan_axis_step_volts = image_scan_step_size_um * self.scan_mirror_calibration 
+                    self.scan_axis_range_volts = image_scan_sweep_um * self.scan_mirror_calibration 
+                    self.image_scan_steps = np.rint(self.scan_axis_range_volts / self.scan_axis_step_volts).astype(np.int16) # galvo steps
+                    # determine projection scan range
+                    self.proj_scan_range_volts = image_scan_sweep_um * self.proj_mirror_calibration
+                    return self.image_scan_steps
+            
     def reset(self):
         """Reset the device."""
 
-        daq.DAQmxResetDevice(self.dev_name)
+        daqmx.DAQmxResetDevice(self.dev_name)
         self.reset_ao_channels()
         self.reset_do_channels()
-
 
     def reset_ao_channels(self):
         """Stops any waveforms and deletes tasks, set analog lines to the mirror's neutral positions
@@ -370,7 +421,7 @@ class OPMNIDAQ:
         self.clear_tasks()
         
         _ao_waveform = np.column_stack((np.full(2, self._ao_neutral_positions[0]),
-                                       np.full(2, self.self._ao_neutral_positions[1])))
+                                        np.full(2, self.self._ao_neutral_positions[1])))
 
         samples_per_ch_ct = ct.c_int32()
         try:
@@ -494,7 +545,7 @@ class OPMNIDAQ:
             #-----------------------------------------------------#
             # Create ao waveform, scan the image mirror and projection mirror voltages.
             # This array is written for both AO channels and runs at the camera di rising edge
-            n_voltage_steps = int(self.exposure * self._daq_sample_rate_hz)
+            n_voltage_steps = int(self._exposure_s * self._daq_sample_rate_hz)
             return_samples = 5
             self.samples_per_ao_ch = n_voltage_steps + return_samples
             _ao_waveform = np.zeros((self.samples_per_ao_ch, 2))
