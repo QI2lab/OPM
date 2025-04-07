@@ -49,7 +49,7 @@ class OpmControl:
         self.ROI_width_y = int(512)         # unit: camera pixels
         self.path_to_mm_config = Path('C:/Program Files/Micro-Manager-2.0gamma/temp_HamDCAM.cfg')
 
-        self.channel_labels = ["405", "488", "561", "635", "730"]
+        self.channel_labels = ["405", "488", "561", "637", "730"]
         self.do_ind = [0, 1, 2, 3, 4]       # digital output line corresponding to each channel
 
         self.debug=False
@@ -85,7 +85,7 @@ class OpmControl:
 
     # update viewer layers
     def _update_layers(self,new_image):
-        channel_names = ['405nm','488nm','561nm','635nm','730nm']
+        channel_names = ['405nm','488nm','561nm','637nm','730nm']
         colormaps = ['bop purple','bop blue','bop orange','red','grey']
 
         for c in self.active_channel_indices:
@@ -499,12 +499,12 @@ class OpmControl:
         power_405={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '405nm power (%)'},
         power_488={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '488nm power (%)'},
         power_561={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '561nm power (%)'},
-        power_635={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '635nm power (%)'},
+        power_637={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '637nm power (%)'},
         power_730={"widget_type": "FloatSpinBox", "min": 0, "max": 100, "label": '730nm power (%)'},
         layout='vertical'
     )
-    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_635=0.0, power_730=0.0,):
-        channel_powers = [power_405,power_488,power_561,power_635,power_730]
+    def set_laser_power(self, power_405=0.0, power_488=0.0, power_561=0.0, power_637=0.0, power_730=0.0,):
+        channel_powers = [power_405,power_488,power_561,power_637,power_730]
 
         if not(channel_powers[:] == self.channel_powers[:]):
             self.channel_powers=channel_powers
@@ -515,7 +515,7 @@ class OpmControl:
     # set active laser(s)
     @magicgui(
         auto_call=True,
-        active_channels = {"widget_type": "Select", "choices": ["Off","405","488","561","635","730"], "allow_multiple": True, "label": "Active channels"}
+        active_channels = {"widget_type": "Select", "choices": ["Off","405","488","561","637","730"], "allow_multiple": True, "label": "Active channels"}
     )
     def set_active_channel(self, active_channels):
         states = [False,False,False,False,False]
@@ -529,7 +529,7 @@ class OpmControl:
                 states[1]='True'
             elif channel == '561':
                 states[2]='True'
-            elif channel == '635':
+            elif channel == '637':
                 states[3]='True'
             elif channel == '730':
                 states[4]='True'

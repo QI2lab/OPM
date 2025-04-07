@@ -74,9 +74,9 @@ def main(argv):
         chan_405_active = df_metadata['405_active']
         chan_488_active = df_metadata['488_active']
         chan_561_active = df_metadata['561_active']
-        chan_635_active = df_metadata['635_active']
+        chan_637_active = df_metadata['635_active']
         chan_730_active = df_metadata['730_active']
-        active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_635_active,chan_730_active]
+        active_channels = [chan_405_active,chan_488_active,chan_561_active,chan_637_active,chan_730_active]
         channel_idxs = [0,1,2,3,4]
         channels_in_data = list(compress(channel_idxs, active_channels))
         n_active_channels = len(channels_in_data)
