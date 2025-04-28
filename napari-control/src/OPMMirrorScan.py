@@ -8,7 +8,8 @@ from napari.qt.threading import thread_worker
 from pathlib import Path
 import numpy as np
 import time
-import zarr
+import asyncio
+import tensorstore as ts
 
 from src.hardware.OPMNIDAQ import OPMNIDAQ
 from src.hardware.PicardShutter import PicardShutter
@@ -103,35 +104,41 @@ class OPMMirrorScan(MagicTemplate):
 
     # create and save metadata
     def _save_metadata(self):
-        scan_param_data = [{'root_name': str("OPM_data"),
-                            'scan_type': 'galvo',
-                            'theta': self.opm_tilt, 
-                            'exposure_ms': self.exposure_ms,
-                            'scan_step': self.scan_axis_step_um, 
-                            'pixel_size': self.camera_pixel_size_um,
-                            'galvo_scan_range_um': self.scan_mirror_footprint_um,
-                            'galvo_volts_per_um': self.scan_axis_calibration, 
-                            'num_t': int(self.n_timepoints),
-                            'time_delay': float(self.wait_time),
-                            'num_y': 1, 
-                            'num_z': 1,
-                            'num_ch': int(self.n_active_channels),
-                            'scan_axis_positions': int(self.scan_steps),
-                            'y_pixels': self.ROI_width_y,
-                            'x_pixels': self.ROI_width_x,
-                            '405_active': self.channel_states[0],
-                            '488_active': self.channel_states[1],
-                            '561_active': self.channel_states[2],
-                            '635_active': self.channel_states[3],
-                            '730_active': self.channel_states[4],
-                            '405_power': self.channel_powers[0],
-                            '488_power': self.channel_powers[1],
-                            '561_power': self.channel_powers[2],
-                            '635_power': self.channel_powers[3],
-                            '730_power': self.channel_powers[4],
-                            }]
-        
-        write_metadata(scan_param_data[0], self.output_dir_path / Path('scan_metadata.csv'))
+        """Save metadata to a JSON file in the output directory."""
+
+        scan_param_data = {
+            "root_name": "OPM_data",
+            "scan_type": "galvo",
+            "theta": self.opm_tilt, 
+            "exposure_ms": self.exposure_ms,
+            "scan_step": self.scan_axis_step_um, 
+            "pixel_size": self.camera_pixel_size_um,
+            "galvo_scan_range_um": self.scan_mirror_footprint_um,
+            "galvo_volts_per_um": self.scan_axis_calibration, 
+            "num_t": int(self.n_timepoints),
+            "time_delay": float(self.wait_time),
+            "num_y": 1, 
+            "num_z": 1,
+            "num_ch": int(self.n_active_channels),
+            "scan_axis_positions": int(self.scan_steps),
+            "y_pixels": self.ROI_width_y,
+            "x_pixels": self.ROI_width_x,
+            "405_active": self.channel_states[0],
+            "488_active": self.channel_states[1],
+            "561_active": self.channel_states[2],
+            "635_active": self.channel_states[3],
+            "730_active": self.channel_states[4],
+            "405_power": self.channel_powers[0],
+            "488_power": self.channel_powers[1],
+            "561_power": self.channel_powers[2],
+            "635_power": self.channel_powers[3],
+            "730_power": self.channel_powers[4],
+        }
+
+        # Write the metadata to a JSON file in your output directory.
+        metadata_path = self.output_dir_path / Path('scan_metadata.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(scan_param_data, f, indent=4)
 
     # update viewer layers
     def _update_layers(self,values):
@@ -296,10 +303,11 @@ class OPMMirrorScan(MagicTemplate):
 
     @thread_worker
     def _acquire_3d_t_data(self):
+        """Acquire 3D timelapse data."""
 
-        #------------------------------------------------------------------------------------------------------------------------------------
-        #----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
-        #------------------------------------------------------------------------------------------------------------------------------------
+        # ------------------------------------------------------------------------------------------------------------------------------------
+        # ----------------------------------------------Begin setup of scan parameters--------------------------------------------------------
+        # ------------------------------------------------------------------------------------------------------------------------------------
         # parse which channels are active
         active_channel_indices = [ind for ind, st in zip(self.do_ind, self.channel_states) if st]
         self.n_active_channels = len(active_channel_indices)
@@ -323,7 +331,7 @@ class OPMMirrorScan(MagicTemplate):
             self._set_mmc_laser_power()
             self.powers_changed = False
         
-        if self.channels_changed or self.footprint_changed or not(self.DAQ_running) or self.scan_step_changed:
+        if self.channels_changed or self.footprint_changed or (not self.DAQ_running) or self.scan_step_changed:
             if self.DAQ_running:
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
@@ -331,122 +339,170 @@ class OPMMirrorScan(MagicTemplate):
             self.opmdaq.set_scan_type('mirror')
             self.opmdaq.set_channels_to_use(self.channel_states)
             self.opmdaq.set_interleave_mode(True)
-            self.scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um,self.scan_mirror_footprint_um)
+            self.scan_steps = self.opmdaq.set_scan_mirror_range(self.scan_axis_step_um, self.scan_mirror_footprint_um)
             self.opmdaq.generate_waveforms()
             self.channels_changed = False
             self.footprint_changed = False
 
-        # create directory for timelapse
+        # Create directory for timelapse
         time_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S")
-        self.output_dir_path = self.save_path / Path('timelapse_'+time_string)
+        self.output_dir_path = self.save_path / Path('timelapse_' + time_string)
         self.output_dir_path.mkdir(parents=True, exist_ok=True)
 
-        # create name for zarr directory
-        zarr_output_path = self.output_dir_path / Path('OPM_data.zarr')
+        # ----------- TensorStore (Zarr v3) Setup -----------
+        # Create name for the zarr directory
+        zarr_output_path = self.output_dir_path / 'OPM_data.zarr'
 
-        # create and open zarr file
-        opm_data = zarr.open(str(zarr_output_path), mode="w", shape=(self.n_timepoints, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), chunks=(1, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x),compressor=None, dtype=np.uint16)
+        # Build a TensorStore spec that uses Zarr v3 with:
+        #  - overall shape: (n_timepoints, n_active_channels, scan_steps, ROI_width_y, ROI_width_x)
+        #  - shards that cover an entire timepoint, i.e. shard_shape = (1, n_active_channels, scan_steps, ROI_width_y, ROI_width_x)
+        #  - internal chunks of (1, 1, 1, ROI_width_y, ROI_width_x)
+        spec = {
+            "driver": "zarr",
+            "kvstore": {
+                "driver": "filesystem",
+                "path": str(zarr_output_path)
+            },
+            "metadata": {
+                "zarr_format": 3,
+                "shape": [
+                    self.n_timepoints,
+                    self.n_active_channels,
+                    self.scan_steps,
+                    self.ROI_width_y,
+                    self.ROI_width_x,
+                ],
+                "chunks": [1, 1, 1, self.ROI_width_y, self.ROI_width_x],
+                "dtype": "<u2",  # little-endian uint16
+                "order": "C",
+                "compressor": None,
+                "sharding": {
+                    "shard_shape": [1, self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x]
+                },
+            },
+            "create": True,
+            "delete_existing": True,
+        }
+        # Open (and create) the TensorStore array.
+        opm_data = ts.open(spec, open=True).result()
 
         # construct metadata and save
         self._save_metadata()
-        #------------------------------------------------------------------------------------------------------------------------------------
-        #----------------------------------------------End setup of scan parameters----------------------------------------------------------
-        #------------------------------------------------------------------------------------------------------------------------------------
+        # ------------------------------------------------------------------------------------------------------------------------------------
+        # ----------------------------------------------End setup of scan parameters----------------------------------------------------------
+        # ------------------------------------------------------------------------------------------------------------------------------------
 
+        # ------------------------------------------------------------------------------------------------------------------------------------
+        # ----------------------------------------------------Start acquisition---------------------------------------------------------------
+        # ------------------------------------------------------------------------------------------------------------------------------------
 
-        #------------------------------------------------------------------------------------------------------------------------------------
-        #----------------------------------------------------Start acquisition---------------------------------------------------------------
-        #------------------------------------------------------------------------------------------------------------------------------------
-
-        # turn off Z motor
+        # Turn off Z motor
         exp_zstage_name = self.mmc.getFocusDevice()
-        self.mmc.setProperty(exp_zstage_name,'MotorOnOff','Off')
-
-        # set circular buffer to be large
-        # self.mmc.clearCircularBuffer()
-        # circ_buffer_mb = 16000
-        # self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
+        self.mmc.setProperty(exp_zstage_name, 'MotorOnOff', 'Off')
 
         turned_off = False
         image_counter = 0
-        # run hardware triggered acquisition
+
+        # Create an asyncio event loop for scheduling asynchronous writes.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        pending_tasks = []
+
+        # Define an asynchronous function that writes one timepoint’s data.
+        async def write_timepoint_shard(t, shard_data):
+            """
+            Write the full data for timepoint t to the TensorStore.
+            The shard_data is expected to be a NumPy array with shape
+            (n_active_channels, scan_steps, ROI_width_y, ROI_width_x).
+            We write to the slice corresponding to timepoint t by expanding
+            the data to 5D.
+            """
+            # Expand the data to 5D: shape becomes (1, n_active_channels, scan_steps, ROI_width_y, ROI_width_x)
+            data_to_write = shard_data[None, ...]
+            # Write asynchronously to the slice [t:t+1, :, :, :, :]
+            await opm_data[t:t+1, :, :, :, :].write(data_to_write)
+
         if self.wait_time == 0:
-            temp_data = np.zeros((self.n_active_channels, self.scan_steps,self.ROI_width_y, self.ROI_width_x),dtype=np.uint16)
+            temp_data = np.zeros((self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), dtype=np.uint16)
             self.mmc.setExposure(self.exposure_ms)
             self.opmdaq.start_waveform_playback()
             self.DAQ_running = True
-            self.mmc.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
-            for t in trange(self.n_timepoints,desc="t", position=0):
-                for z in trange(self.scan_steps,desc="z", position=1, leave=False):
+            self.mmc.startSequenceAcquisition(int(self.n_timepoints * self.n_active_channels * self.scan_steps), 0, True)
+            for t in trange(self.n_timepoints, desc="t", position=0):
+                for z in trange(self.scan_steps, desc="z", position=1, leave=False):
                     for c in range(self.n_active_channels):
-                        while self.mmc.getRemainingImageCount()==0:
+                        while self.mmc.getRemainingImageCount() == 0:
                             pass
-                        temp_data[c,z,:] = self.mmc.popNextImage()
-                        image_counter +=1 
-                        #print(self.mmc.getRemainingImageCount() + image_counter,int(self.n_timepoints*self.n_active_channels*self.scan_steps))
-                        if (self.mmc.getRemainingImageCount() + image_counter) >= int(self.n_timepoints*self.n_active_channels*self.scan_steps) and not(turned_off):
+                        temp_data[c, z, :] = self.mmc.popNextImage()
+                        image_counter += 1 
+                        if (self.mmc.getRemainingImageCount() + image_counter) >= int(self.n_timepoints * self.n_active_channels * self.scan_steps) and not turned_off:
                             self.opmdaq.stop_waveform_playback()
                             self.DAQ_running = False
                             turned_off = True
-                opm_data[t, :]  = temp_data
+                # Instead of writing synchronously, schedule an async write for timepoint t.
+                # (Use a copy of temp_data to avoid later overwrites.)
+                task = loop.create_task(write_timepoint_shard(t, temp_data.copy()))
+                pending_tasks.append(task)
             self.mmc.stopSequenceAcquisition()
-            if not(turned_off):
+            if not turned_off:
                 self.opmdaq.stop_waveform_playback()
                 self.DAQ_running = False
         else:
             af_counter = 0
-            
-            self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
+            self.current_O3_stage = manage_O3_focus(self.mmc, self.shutter_controller, self.O3_stage_name, verbose=True)
             self.mmc.setExposure(self.exposure_ms)
-            temp_data = np.zeros((self.n_active_channels, self.scan_steps,self.ROI_width_y, self.ROI_width_x),dtype=np.uint16)
-            for t in trange(self.n_timepoints,desc="t", position=0):
+            temp_data = np.zeros((self.n_active_channels, self.scan_steps, self.ROI_width_y, self.ROI_width_x), dtype=np.uint16)
+            for t in trange(self.n_timepoints, desc="t", position=0):
                 self.mmc.setExposure(self.exposure_ms)
                 self.opmdaq.start_waveform_playback()
                 self.DAQ_running = True
-                self.mmc.startSequenceAcquisition(int(self.n_timepoints*self.n_active_channels*self.scan_steps),0,True)
-                for z in trange(self.scan_steps,desc="z", position=1, leave=False):
+                self.mmc.startSequenceAcquisition(int(self.n_timepoints * self.n_active_channels * self.scan_steps), 0, True)
+                for z in trange(self.scan_steps, desc="z", position=1, leave=False):
                     for c in range(self.n_active_channels):
-                        while self.mmc.getRemainingImageCount()==0:
+                        while self.mmc.getRemainingImageCount() == 0:
                             pass
-                        temp_data[c,z,:] = self.mmc.popNextImage()
-                        image_counter +=1 
-                        if (self.mmc.getRemainingImageCount() + image_counter) >= int(self.n_timepoints*self.n_active_channels*self.scan_steps) and not(turned_off):
+                        temp_data[c, z, :] = self.mmc.popNextImage()
+                        image_counter += 1 
+                        if (self.mmc.getRemainingImageCount() + image_counter) >= int(self.n_timepoints * self.n_active_channels * self.scan_steps) and not turned_off:
                             self.opmdaq.stop_waveform_playback()
                             self.DAQ_running = False
                             turned_off = True
-                opm_data[t, :]  = temp_data
+                # Schedule async write for timepoint t.
+                task = loop.create_task(write_timepoint_shard(t, temp_data.copy()))
+                pending_tasks.append(task)
                 self.mmc.stopSequenceAcquisition()
-                if not(turned_off):
+                if not turned_off:
                     self.opmdaq.stop_waveform_playback()
                     self.DAQ_running = False
                 if af_counter == 0:
                     t_start = time.perf_counter()
-                    self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
+                    self.current_O3_stage = manage_O3_focus(self.mmc, self.shutter_controller, self.O3_stage_name, verbose=True)
                     self.mmc.setExposure(self.exposure_ms)
                     t_end = time.perf_counter()
                     t_elapsed = t_end - t_start
-                    time.sleep(self.wait_time-t_elapsed*2)
-                    self.current_O3_stage = manage_O3_focus(self.mmc,self.shutter_controller,self.O3_stage_name,verbose=True)
+                    time.sleep(self.wait_time - t_elapsed * 2)
+                    self.current_O3_stage = manage_O3_focus(self.mmc, self.shutter_controller, self.O3_stage_name, verbose=True)
                     self.mmc.setExposure(self.exposure_ms)
                     af_counter = 0
                 else:
                     time.sleep(self.wait_time)
-                    af_counter = af_counter + 1
+                    af_counter += 1
 
-        # turn on Z motors
+        # After acquisition, wait for all asynchronous writes to finish.
+        loop.run_until_complete(asyncio.gather(*pending_tasks))
+        loop.close()
+
+        # Turn on Z motors
         exp_zstage_name = self.mmc.getFocusDevice()
-        self.mmc.setProperty(exp_zstage_name,'MotorOnOff','On')
+        self.mmc.setProperty(exp_zstage_name, 'MotorOnOff', 'On')
+
 
         #------------------------------------------------------------------------------------------------------------------------------------
         #--------------------------------------------------------End acquisition-------------------------------------------------------------
         #------------------------------------------------------------------------------------------------------------------------------------
 
-        # set circular buffer to be small 
-        #self.mmc.clearCircularBuffer()
-        #circ_buffer_mb = 000
-        #self.mmc.setCircularBufferMemoryFootprint(int(circ_buffer_mb))
-        # self.channel_powers=[0,0,0,0,0]
-        # self._set_mmc_laser_power()
+        self.channel_powers=[0,0,0,0,0]
+        self._set_mmc_laser_power()
 
     def _crop_camera(self):
         """
